@@ -1,4 +1,7 @@
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::rc::Rc;
 
 use ttf_parser::Face;
 
@@ -30,10 +33,19 @@ pub struct TextLayout {
     pub height: f32,
 }
 
+struct Cached {
+    text: String,
+    layout: Rc<TextLayout>,
+    used: Cell<bool>,
+}
+
 /// Font plus lazily-built glyph outlines, rendered analytically on the GPU.
 pub struct Text {
     face: Face<'static>,
     glyphs: HashMap<char, Option<Glyph>>,
+    /// Layouts by hash of (text, size, max width); `view` rebuilds the same
+    /// strings every frame and taffy measures each label several times.
+    layouts: RefCell<HashMap<u64, Cached>>,
     pub(crate) outlines: Outlines,
 }
 
@@ -42,6 +54,7 @@ impl Default for Text {
         Text {
             face: Face::parse(DEFAULT_FONT, 0).expect("bundled font"),
             glyphs: HashMap::new(),
+            layouts: RefCell::default(),
             outlines: Outlines::default(),
         }
     }
@@ -96,7 +109,41 @@ impl Text {
     }
 
     /// Greedy word wrap at spaces and explicit newlines. No shaping or bidi.
-    pub fn layout(&self, s: &str, size: f32, max_width: Option<f32>) -> TextLayout {
+    /// Cached until a frame passes without it being used.
+    pub fn layout(&self, s: &str, size: f32, max_width: Option<f32>) -> Rc<TextLayout> {
+        let mut h = DefaultHasher::new();
+        (s, size.to_bits(), max_width.map(f32::to_bits)).hash(&mut h);
+        let key = h.finish();
+        let mut cache = self.layouts.borrow_mut();
+        if let Some(c) = cache.get(&key)
+            && c.text == s
+        {
+            c.used.set(true);
+            return c.layout.clone();
+        }
+        let layout = Rc::new(self.shape(s, size, max_width));
+        let used = Cell::new(true);
+        let text = s.to_owned();
+        cache.insert(
+            key,
+            Cached {
+                text,
+                layout: layout.clone(),
+                used,
+            },
+        );
+        layout
+    }
+
+    /// Drops cached layouts not used since the last call; the runtime calls
+    /// this once per frame.
+    pub fn end_frame(&self) {
+        self.layouts
+            .borrow_mut()
+            .retain(|_, c| c.used.replace(false));
+    }
+
+    fn shape(&self, s: &str, size: f32, max_width: Option<f32>) -> TextLayout {
         let lh = self.line_height(size);
         let ascent = self.face.ascender() as f32 / self.em() * size;
         let space = self.advance(' ', size);
@@ -166,7 +213,7 @@ impl Text {
         clip: Rect,
         scene: &mut Scene,
     ) {
-        for g in self.layout(s, size, max_width).glyphs {
+        for g in &self.layout(s, size, max_width).glyphs {
             let Some(gl) = self.glyph(g.c) else { continue };
             let r = Rect::new(
                 origin.0 + g.x + gl.plane.x * size,
@@ -222,5 +269,18 @@ mod tests {
         let l = t.layout(s, 20.0, None);
         assert_eq!(stops[3], l.glyphs[2].x);
         assert_eq!(stops[5].ceil(), l.width);
+    }
+
+    #[test]
+    fn layout_cache_hits_and_evicts_unused() {
+        let t = Text::default();
+        let a = t.layout("cached", 16.0, None);
+        assert!(Rc::ptr_eq(&a, &t.layout("cached", 16.0, None)));
+        assert!(!Rc::ptr_eq(&a, &t.layout("cached", 17.0, None)));
+        t.end_frame();
+        assert!(Rc::ptr_eq(&a, &t.layout("cached", 16.0, None)));
+        t.end_frame();
+        t.end_frame();
+        assert!(!Rc::ptr_eq(&a, &t.layout("cached", 16.0, None)));
     }
 }

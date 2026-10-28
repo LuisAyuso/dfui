@@ -304,6 +304,7 @@ impl<A: App> Runtime<A> {
             });
             spans.push((n.id, start..scene.len()));
         }
+        self.text.end_frame();
         (scene, spans)
     }
 }

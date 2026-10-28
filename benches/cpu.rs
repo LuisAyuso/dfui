@@ -1,4 +1,4 @@
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use dfui::taffy::AlignItems;
 use dfui::widgets::{Styled, button, column, container, row, scroll, text};
 use dfui::{App, Bench, Color, Element, Shadow, Text};
@@ -57,6 +57,18 @@ const VIEWPORT: (f32, f32) = (400.0, 800.0);
 fn text_layout(c: &mut Criterion) {
     let t = Text::default();
     c.bench_function("text/layout_paragraph", |b| {
+        // Two frame ends evict everything, so each layout is a cache miss.
+        let evict = || {
+            t.end_frame();
+            t.end_frame();
+        };
+        b.iter_batched(
+            evict,
+            |_| t.layout(PARAGRAPH, 15.0, Some(320.0)),
+            BatchSize::PerIteration,
+        )
+    });
+    c.bench_function("text/layout_paragraph_cached", |b| {
         b.iter(|| t.layout(PARAGRAPH, 15.0, Some(320.0)))
     });
 }

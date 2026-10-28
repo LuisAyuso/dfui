@@ -70,7 +70,9 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 each widget's `style()`/`measure()`, then walks it to place nodes absolutely,
 applying `scroll()` offsets and intersecting clip rects. The root fills the
 viewport, with insets added to its padding so backgrounds bleed under system
-bars. Full relayout happens on every change (see `ponytail:` note).
+bars. Text layouts are cached in `Text` by (string, size, width) and evicted
+after a frame that doesn't use them, so repeated `measure` calls and
+per-frame rebuilds of the same strings are cheap. Full relayout happens on every change (see `ponytail:` note).
 
 ## Input
 
