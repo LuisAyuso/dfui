@@ -72,8 +72,9 @@ fn sd_round_box(p: vec2<f32>, half: vec2<f32>, r: f32) -> f32 {
 // Antialiased winding along a ray toward +x from `p`, using the band containing
 // `p`. Swapped axes give the vertical ray. Curves are monotonic, so a curve
 // crosses the ray's line iff its endpoints straddle it (half-open, so shared
-// endpoints count once).
-fn ray_coverage(p_in: vec2<f32>, header: u32, band_count: f32, lo: f32, hi: f32, px: f32, swap: bool) -> f32 {
+// endpoints count once). Returns (coverage, weight); weight is how close the
+// nearest crossing is, i.e. how well this ray resolves the edge at `p`.
+fn ray_coverage(p_in: vec2<f32>, header: u32, band_count: f32, lo: f32, hi: f32, px: f32, swap: bool) -> vec2<f32> {
     var p = p_in;
     if swap {
         p = p.yx;
@@ -82,6 +83,7 @@ fn ray_coverage(p_in: vec2<f32>, header: u32, band_count: f32, lo: f32, hi: f32,
     let start = bands[header + 2u * band];
     let count = bands[header + 2u * band + 1u];
     var sum = 0.0;
+    var weight = 0.0;
     for (var i = 0u; i < count; i++) {
         let ci = bands[start + i];
         let a = curves[2u * ci];
@@ -113,9 +115,11 @@ fn ray_coverage(p_in: vec2<f32>, header: u32, band_count: f32, lo: f32, hi: f32,
             t = select((-qb - d) / (2.0 * qa), t1, t1 >= -1e-4 && t1 <= 1.0 + 1e-4);
         }
         let x = mix(mix(p0.x, p1.x, t), mix(p1.x, p2.x, t), t);
-        sum += sign(p2.y - p0.y) * clamp((x - p.x) / px + 0.5, 0.0, 1.0);
+        let r = (x - p.x) / px;
+        sum += sign(p2.y - p0.y) * clamp(r + 0.5, 0.0, 1.0);
+        weight = max(weight, clamp(1.0 - abs(r) * 2.0, 0.0, 1.0));
     }
-    return min(abs(sum), 1.0);
+    return vec2(min(abs(sum), 1.0), weight);
 }
 
 @fragment
@@ -133,7 +137,10 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         // uv_rect is (x0, y1, x1, y0): em bbox with y up.
         let h = ray_coverage(in.uv, header, in.params.y, r.w, r.y, max(px.x, 1e-6), false);
         let v = ray_coverage(in.uv, header + 2u * u32(in.params.y), in.params.z, r.x, r.z, max(px.y, 1e-6), true);
-        color = vec4(in.color.rgb, in.color.a * 0.5 * (h + v));
+        // Trust the ray that crosses an edge near the pixel; the other one only
+        // sees a hard inside/outside step there. Same weighting as Slug.
+        let cov = max((h.x * h.y + v.x * v.y) / max(h.y + v.y, 1e-5), min(h.x, v.x));
+        color = vec4(in.color.rgb, in.color.a * cov);
     } else {
         let radius = min(in.params.x, min(in.rect.z, in.rect.w) * 0.5);
         let d = sd_round_box(in.local, in.rect.zw * 0.5, radius);
@@ -141,7 +148,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         if blur > 0.0 {
             color = vec4(in.color.rgb, in.color.a * (1.0 - smoothstep(-blur, blur, d)));
         } else {
-            let aa = max(fwidth(d), 1e-4);
+            let aa = max(length(vec2(dpdx(d), dpdy(d))), 1e-4);
             let coverage = clamp(0.5 - d / aa, 0.0, 1.0);
             let bw = in.params.y;
             var fill = in.color;

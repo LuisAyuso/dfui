@@ -49,15 +49,8 @@ impl Color {
         Color { a, ..self }
     }
 
-    fn linear(self) -> [f32; 4] {
-        let f = |c: f32| {
-            if c <= 0.04045 {
-                c / 12.92
-            } else {
-                ((c + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        [f(self.r), f(self.g), f(self.b), self.a]
+    fn rgba(self) -> [f32; 4] {
+        [self.r, self.g, self.b, self.a]
     }
 }
 
@@ -129,8 +122,8 @@ impl Scene {
         self.instances.push(Instance {
             rect: [r.x, r.y, r.w, r.h],
             uv: [0.0; 4],
-            color: fill.linear(),
-            border_color: border_color.linear(),
+            color: fill.rgba(),
+            border_color: border_color.rgba(),
             params: [radius, border, 0.0, 0.0],
             clip: [clip.x, clip.y, clip.w, clip.h],
         });
@@ -140,7 +133,7 @@ impl Scene {
         self.instances.push(Instance {
             rect: [r.x + s.offset.0, r.y + s.offset.1, r.w, r.h],
             uv: [0.0; 4],
-            color: s.color.linear(),
+            color: s.color.rgba(),
             border_color: [0.0; 4],
             params: [radius, 0.0, s.blur.max(0.01), 0.0],
             clip: [clip.x, clip.y, clip.w, clip.h],
@@ -158,7 +151,7 @@ impl Scene {
         self.instances.push(Instance {
             rect: [r.x, r.y, r.w, r.h],
             uv: em,
-            color: color.linear(),
+            color: color.rgba(),
             border_color: [0.0; 4],
             params: [bands[0], bands[1], bands[2], 1.0],
             clip: [clip.x, clip.y, clip.w, clip.h],
@@ -444,7 +437,7 @@ impl Gpu {
         let timing = self.timer.as_ref().filter(|t| !t.busy);
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
-            let [r, g, b, a] = clear.linear();
+            let [r, g, b, a] = clear.rgba();
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
@@ -514,9 +507,11 @@ impl Renderer {
             .formats
             .iter()
             .copied()
-            .find(|f| f.is_srgb())
+            .find(|f| !f.is_srgb())
             .unwrap_or(caps.formats[0]);
-        let gpu = Gpu::new(&adapter, format);
+        // Blend in sRGB space like browsers do; linear blending makes AA edges look thin and stepped.
+        let view_format = format.remove_srgb_suffix();
+        let gpu = Gpu::new(&adapter, view_format);
         let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -526,7 +521,11 @@ impl Renderer {
             present_mode: wgpu::PresentMode::AutoVsync,
             desired_maximum_frame_latency: 2,
             alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
+            view_formats: if view_format == format {
+                vec![]
+            } else {
+                vec![view_format]
+            },
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
         surface.configure(&gpu.device, &config);
@@ -573,7 +572,10 @@ impl Renderer {
             self.config.width as f32 / scale,
             self.config.height as f32 / scale,
         ];
-        let view = frame.texture.create_view(&Default::default());
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.config.format.remove_srgb_suffix()),
+            ..Default::default()
+        });
         self.gpu.draw(&view, viewport, scene, text, self.clear);
         self.window.pre_present_notify();
         self.gpu.queue.present(frame);
@@ -592,7 +594,7 @@ pub(crate) fn render_offscreen(
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
     let adapter =
         pollster::block_on(instance.request_adapter(&Default::default())).expect("no GPU adapter");
-    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let format = wgpu::TextureFormat::Rgba8Unorm;
     let mut gpu = Gpu::new(&adapter, format);
     let (w, h) = size;
     let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
