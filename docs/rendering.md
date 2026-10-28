@@ -66,6 +66,29 @@ would cost about 4× fill for no visible change.
 seconds. GPU time comes from timestamp queries around the render pass, with
 one sample in flight. Baselines are in `TODO.md`.
 
+## GPU benchmarks
+
+`cargo bench --bench gpu` draws fixed scenes offscreen at phone resolution
+(1080×2400, scale 2.625) through `dfui::GpuBench`. Criterion's `iter_custom`
+reports the render pass's GPU timestamp delta per frame rather than CPU
+wall time; adapters without timestamp queries fall back to wall time.
+Run them on a phone with `scripts/android-bench.sh gpu`, which
+cross-compiles the bench and runs it over `adb shell`.
+
+| bench | desktop GPU | Pixel 10a (Mali-G715) |
+|---|---|---|
+| `gpu/cards_10` | 155 µs | 3.18 ms |
+| `gpu/text_wall` (Bench screen) | 110 µs | 3.28 ms |
+| `gpu/text_wall_partial` (FPS meter area) | 10.7 µs | 75 µs |
+
+On the phone a partial frame is ~44× cheaper than a full one. These time the
+render pass only; the app's canvas copy and the tiler's `LoadOp::Load`
+traffic aren't included. The in-app Bench baseline (~5.1 ms) isn't directly
+comparable: different scene and a real surface.
+
+Ten cards cost more than a page of 64px glyphs, likely the blurred shadows:
+each shades its full card area plus blur radius.
+
 ## Partial redraws
 
 In `render.rs` / `runtime.rs`: a scissored retained canvas, per-node damage

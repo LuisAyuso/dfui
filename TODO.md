@@ -61,6 +61,10 @@ for 1000). Laying out a 300-char paragraph: ~67 µs uncached, ~0.1 µs cached.
       frame. Cut frame CPU ~82%.
 - [ ] Cheaper layout misses (changing text: typing, counters): cache
       per-char advances and kerning pairs instead of re-querying the font.
+- [x] Run the benches on the phone (`scripts/android-bench.sh`): partial
+      frame ~44× cheaper than full on Mali. Still unmeasured in the real
+      app: canvas copy and `LoadOp::Load` bandwidth.
+- [ ] Cheaper shadows: cards outweigh a page of glyphs on the GPU bench.
 - [ ] Upload only newly added glyph data (all outlines re-uploaded today).
 - [ ] Event hit-testing index (every event visits every node today).
 - [ ] Profile 120 Hz devices; outline text costs ~1.6 ms more than the old

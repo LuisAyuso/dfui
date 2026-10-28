@@ -30,7 +30,9 @@ fn main() { dfui::run(Counter(0)); }
 ```sh
 cargo run -p dfui-demo --release   # desktop
 cargo test                         # GPU tests: cargo test -- --include-ignored
-cargo bench                        # criterion CPU benches (benches/cpu.rs)
+cargo bench --bench cpu            # criterion CPU frame benches
+cargo bench --bench gpu            # criterion GPU benches (timestamp-measured)
+scripts/android-bench.sh gpu       # same benches on the connected phone (or cpu)
 ```
 
 `DFUI_SHOW_DAMAGE=1` tints the area redrawn each frame (desktop debugging).

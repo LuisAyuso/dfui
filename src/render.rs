@@ -450,6 +450,21 @@ impl Gpu {
         }
     }
 
+    /// Reads back the last timestamp sample if its mapping has completed.
+    fn collect_timer(&mut self) {
+        let period = self.queue.get_timestamp_period();
+        if let Some(t) = &mut self.timer
+            && t.mapped.swap(false, Ordering::Acquire)
+        {
+            if let Ok(data) = t.read.slice(..).get_mapped_range() {
+                let ts: &[u64] = bytemuck::cast_slice(&data);
+                t.last_ns = ts[1].saturating_sub(ts[0]) as f32 * period;
+            }
+            t.read.unmap();
+            t.busy = false;
+        }
+    }
+
     /// `viewport` is in logical pixels; the target's physical size sets the DPI.
     /// With a `scissor` (physical px) only that area is redrawn over the target's
     /// existing contents, so the scene must paint its own background.
@@ -502,17 +517,7 @@ impl Gpu {
         }
         self.queue.write_buffer(&self.instances, 0, bytes);
 
-        let period = self.queue.get_timestamp_period();
-        if let Some(t) = &mut self.timer
-            && t.mapped.swap(false, Ordering::Acquire)
-        {
-            if let Ok(data) = t.read.slice(..).get_mapped_range() {
-                let ts: &[u64] = bytemuck::cast_slice(&data);
-                t.last_ns = ts[1].saturating_sub(ts[0]) as f32 * period;
-            }
-            t.read.unmap();
-            t.busy = false;
-        }
+        self.collect_timer();
         let timing = self.timer.as_ref().filter(|t| !t.busy);
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -789,6 +794,121 @@ impl Renderer {
     }
 }
 
+/// Offscreen render target with its own device, for snapshots and benches.
+pub(crate) struct Offscreen {
+    gpu: Gpu,
+    target: wgpu::Texture,
+    view: wgpu::TextureView,
+}
+
+impl Offscreen {
+    pub(crate) fn new(size: (u32, u32)) -> Offscreen {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+            .expect("no GPU adapter");
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let gpu = Gpu::new(&adapter, format);
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("offscreen"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&Default::default());
+        Offscreen { gpu, target, view }
+    }
+
+    pub(crate) fn draw(
+        &mut self,
+        scene: &Scene,
+        text: &mut Text,
+        scale: f32,
+        scissor: Option<[u32; 4]>,
+    ) {
+        let s = self.target.size();
+        let viewport = [s.width as f32 / scale, s.height as f32 / scale];
+        self.gpu
+            .draw(&self.view, viewport, scene, text, Color::WHITE, scissor);
+    }
+
+    /// Draws and waits for the GPU; returns the render pass's GPU time from
+    /// timestamp queries, or wall time when the adapter lacks them.
+    pub(crate) fn timed_draw(
+        &mut self,
+        scene: &Scene,
+        text: &mut Text,
+        scale: f32,
+        scissor: Option<[u32; 4]>,
+    ) -> std::time::Duration {
+        let start = std::time::Instant::now();
+        self.draw(scene, text, scale, scissor);
+        self.gpu
+            .device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("poll");
+        let wall = start.elapsed();
+        self.gpu.collect_timer();
+        match &self.gpu.timer {
+            Some(t) => std::time::Duration::from_nanos(t.last_ns as u64),
+            None => wall,
+        }
+    }
+
+    /// Reads the target back as sRGB RGBA8.
+    pub(crate) fn read(&self) -> image::RgbaImage {
+        let gpu = &self.gpu;
+        let s = self.target.size();
+        let (w, h) = (s.width, s.height);
+        let target = &self.target;
+        let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: (row * h) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = gpu.device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            target.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        gpu.queue.submit([enc.finish()]);
+        buf.slice(..)
+            .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
+        gpu.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("poll");
+        let data = buf.slice(..).get_mapped_range().expect("mapped range");
+        let mut img = image::RgbaImage::new(w, h);
+        for y in 0..h {
+            let src = &data[(y * row) as usize..][..(w * 4) as usize];
+            img.as_mut()[(y * w * 4) as usize..][..(w * 4) as usize].copy_from_slice(src);
+        }
+        img
+    }
+}
+
 /// Renders scenes offscreen in order, each optionally scissored, and reads
 /// the result back as sRGB RGBA8.
 pub(crate) fn render_offscreen(
@@ -797,70 +917,11 @@ pub(crate) fn render_offscreen(
     size: (u32, u32),
     scale: f32,
 ) -> image::RgbaImage {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-    let adapter =
-        pollster::block_on(instance.request_adapter(&Default::default())).expect("no GPU adapter");
-    let format = wgpu::TextureFormat::Rgba8Unorm;
-    let mut gpu = Gpu::new(&adapter, format);
-    let (w, h) = size;
-    let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("offscreen"),
-        size: wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let view = target.create_view(&Default::default());
+    let mut off = Offscreen::new(size);
     for &(scene, scissor) in passes {
-        let viewport = [w as f32 / scale, h as f32 / scale];
-        gpu.draw(&view, viewport, scene, text, Color::WHITE, scissor);
+        off.draw(scene, text, scale, scissor);
     }
-
-    let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-    let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: None,
-        size: (row * h) as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut enc = gpu.device.create_command_encoder(&Default::default());
-    enc.copy_texture_to_buffer(
-        target.as_image_copy(),
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buf,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(row),
-                rows_per_image: None,
-            },
-        },
-        wgpu::Extent3d {
-            width: w,
-            height: h,
-            depth_or_array_layers: 1,
-        },
-    );
-    gpu.queue.submit([enc.finish()]);
-    buf.slice(..)
-        .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
-    gpu.device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .expect("poll");
-    let data = buf.slice(..).get_mapped_range().expect("mapped range");
-    let mut img = image::RgbaImage::new(w, h);
-    for y in 0..h {
-        let src = &data[(y * row) as usize..][..(w * 4) as usize];
-        img.as_mut()[(y * w * 4) as usize..][..(w * 4) as usize].copy_from_slice(src);
-    }
-    img
+    off.read()
 }
 
 #[cfg(test)]

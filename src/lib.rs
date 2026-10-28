@@ -11,7 +11,7 @@ mod widget;
 pub mod widgets;
 
 pub use render::{Color, Rect, Shadow};
-pub use runtime::{Bench, snapshot};
+pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;
 pub use text::Text;
 pub use widget::{Element, Event, EventCx, Handle, Key, PaintCx, State, Widget};

@@ -10,7 +10,9 @@ use winit::window::{Window, WindowId};
 
 use crate::App;
 use crate::layout::{Insets, Placed, flatten, layout};
-use crate::render::{Color, Outcome, Rect, Renderer, Scene, Spans, damage, render_offscreen};
+use crate::render::{
+    Color, Offscreen, Outcome, Rect, Renderer, Scene, Spans, damage, render_offscreen,
+};
 use crate::text::Text;
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
 
@@ -340,6 +342,44 @@ impl<A: App> Bench<A> {
 
     pub fn event(&mut self, ev: Event) {
         self.0.dispatch(ev);
+    }
+}
+
+/// GPU side of frames for benchmarks: one scene of `app`, drawn offscreen at
+/// `size` physical pixels, timed with GPU timestamps where available.
+#[doc(hidden)]
+pub struct GpuBench {
+    scene: Scene,
+    text: Text,
+    off: Offscreen,
+    scale: f32,
+}
+
+impl GpuBench {
+    pub fn new<A: App>(app: A, size: (u32, u32), scale: f32) -> Self {
+        let mut rt = Runtime::new(app);
+        rt.viewport = (size.0 as f32 / scale, size.1 as f32 / scale);
+        rt.relayout();
+        let (scene, _) = rt.scene(&mut false);
+        let mut g = GpuBench {
+            scene,
+            text: rt.text,
+            off: Offscreen::new(size),
+            scale,
+        };
+        // Builds and uploads glyph outlines before anything is timed.
+        g.draw(None);
+        g
+    }
+
+    /// Redraws everything, or only `damage` (logical px) as a partial frame.
+    pub fn draw(&mut self, damage: Option<Rect>) -> Duration {
+        let s = self.scale;
+        let scissor = damage.map(|d| {
+            let px = |v: f32| (v * s).round() as u32;
+            [px(d.x), px(d.y), px(d.w).max(1), px(d.h).max(1)]
+        });
+        self.off.timed_draw(&self.scene, &mut self.text, s, scissor)
     }
 }
 
