@@ -13,8 +13,15 @@ ttf-parser = "0.25"
 wgpu = "30"
 winit = { version = "0.30", features = ["android-native-activity"] }
 
+[[bench]]
+name = "cpu"
+harness = false
+
 [workspace]
 members = ["demo"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
+
+[dev-dependencies]
+criterion = "0.8"

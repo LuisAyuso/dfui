@@ -30,6 +30,7 @@ fn main() { dfui::run(Counter(0)); }
 ```sh
 cargo run -p dfui-demo --release   # desktop
 cargo test                         # GPU tests: cargo test -- --include-ignored
+cargo bench                        # criterion CPU benches (benches/cpu.rs)
 ```
 
 `DFUI_SHOW_DAMAGE=1` tints the area redrawn each frame (desktop debugging).

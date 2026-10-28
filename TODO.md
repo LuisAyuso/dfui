@@ -52,6 +52,14 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 
 ## Performance
 
+CPU baseline (`cargo bench`, desktop): one frame of rebuild + layout + paint
++ diff costs ~1.5 ms for 10 cards and scales linearly (~150 µs/card, 167 ms
+for 1000); laying out one 300-char paragraph costs ~66 µs.
+
+- [ ] Cache text layout/measurement: `Text::layout` re-queries advances and
+      kerning per char on every measure (taffy calls it several times per
+      leaf) and again in paint. Likely the dominant CPU cost.
+- [ ] Skip layout/paint of off-screen scroll content.
 - [ ] Upload only newly added glyph data (all outlines re-uploaded today).
 - [ ] Incremental layout: cache taffy nodes instead of full relayout per frame.
 - [ ] Event hit-testing index (every event visits every node today).

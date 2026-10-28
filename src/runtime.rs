@@ -308,6 +308,40 @@ impl<A: App> Runtime<A> {
     }
 }
 
+/// CPU side of frames for benchmarks: rebuild, layout, paint and damage diff,
+/// through the real runtime but without a window or GPU.
+#[doc(hidden)]
+pub struct Bench<A: App>(Runtime<A>);
+
+impl<A: App> Bench<A> {
+    pub fn new(app: A, viewport: (f32, f32)) -> Self {
+        let mut rt = Runtime::new(app);
+        rt.viewport = viewport;
+        rt.relayout();
+        let mut b = Bench(rt);
+        b.frame();
+        b
+    }
+
+    /// One full CPU frame as after a state change; returns the instance count.
+    pub fn frame(&mut self) -> usize {
+        let rt = &mut self.0;
+        rt.root = rt.app.view();
+        rt.relayout();
+        let (scene, spans) = rt.scene(&mut false);
+        if let Some((ps, pn)) = &rt.prev {
+            std::hint::black_box(damage(ps, pn, &scene, &spans));
+        }
+        let n = scene.len();
+        rt.prev = Some((scene, spans));
+        n
+    }
+
+    pub fn event(&mut self, ev: Event) {
+        self.0.dispatch(ev);
+    }
+}
+
 /// Renders one frame of `app` offscreen at `size` physical pixels, e.g. for golden tests.
 pub fn snapshot<A: App>(app: A, size: (u32, u32), scale: f32) -> image::RgbaImage {
     let mut rt = Runtime::new(app);
