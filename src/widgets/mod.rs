@@ -9,6 +9,7 @@ mod container;
 mod label;
 mod scroll;
 mod stateful;
+mod text_input;
 
 use taffy::{AlignItems, Dimension, FlexWrap, JustifyContent, LengthPercentage, Size, Style};
 
@@ -17,6 +18,7 @@ pub use container::{Container, column, container, row, spacer};
 pub use label::{Label, text};
 pub use scroll::{Scroll, scroll};
 pub use stateful::{Stateful, stateful};
+pub use text_input::{TextInput, text_input};
 
 /// Flex-layout modifiers shared by every widget that owns a `Style`.
 pub trait Styled: Sized {

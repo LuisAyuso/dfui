@@ -34,7 +34,7 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 | `lib.rs` | Public API: `App`, `run`, `run_android`, re-exports. |
 | `widget.rs` | `Element`, `Widget` trait, `Event`, `State`, `PaintCx`, `EventCx`. |
 | `widgets/mod.rs` | Widget infrastructure: the `Styled` flex modifiers, re-exports. |
-| `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`. |
+| `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `text_input`. |
 | `layout.rs` | Flattens the tree to pre-order nodes, runs taffy, produces absolute rects, clips and scroll offsets. |
 | `runtime.rs` | Event loop, input → `Event` translation, dispatch, pointer capture, frame stats, `snapshot`. |
 | `render.rs` | `Scene`, `Color`/`Rect`/`Shadow`, wgpu setup, the single render pass, GPU timestamp timing, offscreen rendering. |
@@ -78,6 +78,12 @@ Events are offered in reverse pre-order (deepest / topmost first). A widget can
 `stop()` propagation or `capture()` the pointer; on capture every other widget
 receives `Event::Cancel` and subsequent pointer events go only to the captor
 until pointer up. Touch is single-pointer.
+
+One widget at a time holds keyboard focus, claimed with `cx.focus()` on
+pointer down; a tap no widget claims blurs it. `Event::Text` and `Event::Key`
+go only to the focused widget, which sees `cx.focused` in event and paint. On
+Android, focus toggles the soft keyboard via `set_ime_allowed`; NativeActivity
+delivers its input as key events.
 
 ## Rendering
 

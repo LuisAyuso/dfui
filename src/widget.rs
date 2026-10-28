@@ -6,7 +6,7 @@ use taffy::{AvailableSpace, Size, Style};
 use crate::render::{Color, Rect, Scene, Shadow};
 use crate::text::Text;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Event {
     PointerDown {
         x: f32,
@@ -28,6 +28,20 @@ pub enum Event {
     },
     /// Another widget captured the pointer; drop any in-progress gesture.
     Cancel,
+    /// Text typed while this widget has focus.
+    Text(String),
+    /// Editing key pressed while this widget has focus.
+    Key(Key),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Key {
+    Backspace,
+    Delete,
+    Left,
+    Right,
+    Home,
+    End,
 }
 
 /// A retained node description. `view` rebuilds the tree; framework-owned
@@ -128,6 +142,7 @@ pub(crate) type Update = (u64, Box<dyn FnOnce(&mut State)>);
 pub struct PaintCx<'a> {
     pub rect: Rect,
     pub clip: Rect,
+    pub focused: bool,
     pub state: &'a mut State,
     pub(crate) scene: &'a mut Scene,
     pub(crate) text: &'a mut Text,
@@ -179,10 +194,13 @@ pub struct EventCx<'a, Msg> {
     pub clip: Rect,
     /// Extent of laid-out children, relative to this widget's origin.
     pub content: Size<f32>,
+    pub focused: bool,
     pub state: &'a mut State,
+    pub(crate) text: &'a Text,
     pub(crate) msgs: &'a mut Vec<Msg>,
     pub(crate) updates: &'a mut Vec<Update>,
     pub(crate) capture: bool,
+    pub(crate) focus: bool,
     pub(crate) stop: bool,
     pub(crate) redraw: bool,
 }
@@ -205,6 +223,11 @@ impl<Msg> EventCx<'_, Msg> {
     /// Route all pointer events to this widget until pointer up; others get `Cancel`.
     pub fn capture(&mut self) {
         self.capture = true;
+    }
+
+    /// Take keyboard focus; on touch devices this shows the soft keyboard.
+    pub fn focus(&mut self) {
+        self.focus = true;
     }
 
     /// Don't offer this event to ancestors.

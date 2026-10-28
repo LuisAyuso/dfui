@@ -136,6 +136,25 @@ impl Text {
         }
     }
 
+    /// x of every char boundary on one unwrapped line; `chars + 1` entries,
+    /// matching `layout`'s spacing.
+    pub(crate) fn caret_stops(&self, s: &str, size: f32) -> Vec<f32> {
+        let mut out = Vec::with_capacity(s.len() + 1);
+        let (mut x, mut prev) = (0.0, None);
+        for c in s.chars() {
+            if c != ' '
+                && let Some(p) = prev
+            {
+                x += self.kern(p, c, size);
+            }
+            out.push(x);
+            x += self.advance(c, size);
+            prev = (c != ' ').then_some(c);
+        }
+        out.push(x);
+        out
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw(
         &mut self,
@@ -191,5 +210,17 @@ mod tests {
         let two = t.layout("hello world", 20.0, Some(one.width - 1.0));
         assert!(two.height > one.height);
         assert!(two.width < one.width);
+    }
+
+    #[test]
+    fn caret_stops_match_layout() {
+        let t = Text::default();
+        let s = "Ta ké";
+        let stops = t.caret_stops(s, 20.0);
+        assert_eq!(stops.len(), s.chars().count() + 1);
+        assert!(stops.windows(2).all(|w| w[0] <= w[1]));
+        let l = t.layout(s, 20.0, None);
+        assert_eq!(stops[3], l.glyphs[2].x);
+        assert_eq!(stops[5].ceil(), l.width);
     }
 }

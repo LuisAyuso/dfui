@@ -1,7 +1,9 @@
 use std::time::Instant;
 
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
-use dfui::widgets::{Styled, button, column, container, row, scroll, spacer, stateful, text};
+use dfui::widgets::{
+    Styled, button, column, container, row, scroll, spacer, stateful, text, text_input,
+};
 use dfui::{App, Color, Element, PaintCx, Shadow, Widget};
 
 const BG: Color = Color::hex(0xf2f3f7);
@@ -98,8 +100,29 @@ impl App for Demo {
             .gap(12.0)
             .padding(4.0);
 
+        let greeting = stateful(|name: &String, h| {
+            let hi = if name.is_empty() {
+                "Hi!".into()
+            } else {
+                format!("Hi, {name}!")
+            };
+            row([
+                text_input(name.clone())
+                    .placeholder("Your name")
+                    .color(INK)
+                    .accent(ACCENT)
+                    .on_change(move |cx, v| cx.update(h, |n: &mut String| *n = v))
+                    .grow(1.0)
+                    .into(),
+                text(hi).size(18.0).color(INK).into(),
+            ])
+            .align(AlignItems::CENTER)
+            .gap(12.0)
+        });
+
         column([
             header.into(),
+            greeting.into(),
             counter.into(),
             chips.into(),
             text("Shapes are distance fields and glyphs are evaluated from their outlines, so both stay crisp at any size. Resize the window to watch the flex layout reflow.")

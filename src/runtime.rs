@@ -3,15 +3,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::App;
 use crate::layout::{Insets, Placed, flatten, layout};
 use crate::render::{Renderer, Scene, render_offscreen};
 use crate::text::Text;
-use crate::widget::{Element, Event, EventCx, PaintCx, State};
+use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
 
 pub(crate) struct Runtime<A: App> {
     app: A,
@@ -20,6 +21,8 @@ pub(crate) struct Runtime<A: App> {
     text: Text,
     placed: Vec<Placed>,
     captured: Option<u64>,
+    focused: Option<u64>,
+    mods: ModifiersState,
     instance: Option<wgpu::Instance>,
     renderer: Option<Renderer>,
     viewport: (f32, f32),
@@ -75,6 +78,8 @@ impl<A: App> Runtime<A> {
             text: Text::default(),
             placed: Vec::new(),
             captured: None,
+            focused: None,
+            mods: ModifiersState::empty(),
             instance: None,
             renderer: None,
             viewport: (0.0, 0.0),
@@ -137,45 +142,47 @@ impl<A: App> Runtime<A> {
         let mut msgs = Vec::new();
         let mut updates = Vec::new();
         let mut redraw = false;
-        let targets: Vec<usize> = match self.captured {
-            Some(id) => nodes.iter().position(|n| n.id == id).into_iter().collect(),
+        let mut focus = None;
+        let keyboard = matches!(ev, Event::Text(_) | Event::Key(_));
+        let targets: Vec<usize> = match (keyboard, self.captured) {
+            (true, _) => (self.focused)
+                .and_then(|id| nodes.iter().position(|n| n.id == id))
+                .into_iter()
+                .collect(),
+            (false, Some(id)) => nodes.iter().position(|n| n.id == id).into_iter().collect(),
             // Reverse pre-order: descendants and later (topmost) siblings first.
-            None => (0..nodes.len()).rev().collect(),
+            (false, None) => (0..nodes.len()).rev().collect(),
         };
-        for i in targets {
-            // ponytail: every event visits every node; index by rect if trees get huge.
-            let p = self.placed[i];
+        let mut send = |i: usize, ev: &Event, states: &mut HashMap<u64, State>| {
+            let (n, p) = (&nodes[i], self.placed[i]);
             let mut cx = EventCx {
                 rect: p.rect,
                 clip: p.clip,
                 content: p.content,
-                state: self.states.entry(nodes[i].id).or_default(),
+                focused: self.focused == Some(n.id),
+                state: states.entry(n.id).or_default(),
+                text: &self.text,
                 msgs: &mut msgs,
                 updates: &mut updates,
                 capture: false,
+                focus: false,
                 stop: false,
                 redraw: false,
             };
-            nodes[i].w.event(&ev, &mut cx);
-            let (capture, stop) = (cx.capture, cx.stop);
+            n.w.event(ev, &mut cx);
             redraw |= cx.redraw;
+            if cx.focus {
+                focus = Some(n.id);
+            }
+            (cx.capture, cx.stop)
+        };
+        for i in targets {
+            // ponytail: every event visits every node; index by rect if trees get huge.
+            let (capture, stop) = send(i, &ev, &mut self.states);
             if capture && self.captured.is_none() {
                 self.captured = Some(nodes[i].id);
-                for (j, n) in nodes.iter().enumerate().filter(|&(j, _)| j != i) {
-                    let p = self.placed[j];
-                    let mut cx = EventCx {
-                        rect: p.rect,
-                        clip: p.clip,
-                        content: p.content,
-                        state: self.states.entry(n.id).or_default(),
-                        msgs: &mut msgs,
-                        updates: &mut updates,
-                        capture: false,
-                        stop: false,
-                        redraw: false,
-                    };
-                    n.w.event(&Event::Cancel, &mut cx);
-                    redraw |= cx.redraw;
+                for j in (0..nodes.len()).filter(|&j| j != i) {
+                    send(j, &Event::Cancel, &mut self.states);
                 }
                 break;
             }
@@ -185,6 +192,10 @@ impl<A: App> Runtime<A> {
         }
         if matches!(ev, Event::PointerUp { .. }) {
             self.captured = None;
+        }
+        // A tap that no widget claims for focus blurs the focused one.
+        if matches!(ev, Event::PointerDown { .. }) {
+            redraw |= self.set_focus(focus);
         }
 
         if !msgs.is_empty() || !updates.is_empty() {
@@ -201,11 +212,29 @@ impl<A: App> Runtime<A> {
                 .map(|n| n.id)
                 .collect();
             self.states.retain(|id, _| live.contains(id));
+            if self.focused.is_some_and(|id| !live.contains(&id)) {
+                self.set_focus(None);
+            }
             redraw = true;
         }
         if redraw {
             self.redraw();
         }
+    }
+
+    /// Returns whether focus changed.
+    fn set_focus(&mut self, id: Option<u64>) -> bool {
+        if self.focused == id {
+            return false;
+        }
+        self.focused = id;
+        // ponytail: IME only drives the Android soft keyboard; desktop composition (CJK) needs Ime::Preedit handling.
+        if cfg!(target_os = "android")
+            && let Some(r) = &self.renderer
+        {
+            r.window().set_ime_allowed(id.is_some());
+        }
+        true
     }
 
     fn paint(&mut self) {
@@ -232,6 +261,7 @@ impl<A: App> Runtime<A> {
             n.w.paint(&mut PaintCx {
                 rect: p.rect,
                 clip: p.clip,
+                focused: self.focused == Some(n.id),
                 state: self.states.entry(n.id).or_default(),
                 scene: &mut scene,
                 text: &mut self.text,
@@ -315,6 +345,29 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                 let (x, y) = self.cursor;
                 self.dispatch(Event::Wheel { x, y, dy });
             }
+            WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                let key = match event.logical_key {
+                    WKey::Named(NamedKey::Backspace) => Some(Key::Backspace),
+                    WKey::Named(NamedKey::Delete) => Some(Key::Delete),
+                    WKey::Named(NamedKey::ArrowLeft) => Some(Key::Left),
+                    WKey::Named(NamedKey::ArrowRight) => Some(Key::Right),
+                    WKey::Named(NamedKey::Home) => Some(Key::Home),
+                    WKey::Named(NamedKey::End) => Some(Key::End),
+                    _ => None,
+                };
+                if let Some(k) = key {
+                    self.dispatch(Event::Key(k));
+                } else if !(self.mods.control_key() || self.mods.super_key())
+                    && let Some(t) = event.text
+                {
+                    let t: String = t.chars().filter(|c| !c.is_control()).collect();
+                    if !t.is_empty() {
+                        self.dispatch(Event::Text(t));
+                    }
+                }
+            }
+            WindowEvent::Ime(Ime::Commit(t)) => self.dispatch(Event::Text(t)),
             WindowEvent::Touch(t) => {
                 // ponytail: single-pointer only; multi-touch gestures need per-finger dispatch.
                 if self.touch.is_some_and(|id| id != t.id) {
@@ -346,7 +399,7 @@ impl<A: App> ApplicationHandler for Runtime<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widgets::{Styled, button, column, stateful, text};
+    use crate::widgets::{Styled, button, column, stateful, text, text_input};
 
     struct Counter(i32);
 
@@ -408,5 +461,48 @@ mod tests {
         assert_eq!(rt.app.0, 20);
         let id = flatten(&rt.root, &mut rt.states)[0].id;
         assert_eq!(*rt.states.get_mut(&id).unwrap().get::<i32>(), 2);
+    }
+
+    struct Field(String);
+
+    impl App for Field {
+        type Msg = String;
+        fn update(&mut self, v: String) {
+            self.0 = v;
+        }
+        fn view(&self) -> Element<String> {
+            column([text_input(self.0.clone())
+                .on_change(|cx, v| cx.emit(v))
+                .into()])
+            .into()
+        }
+    }
+
+    #[test]
+    fn text_input_edits_only_while_focused() {
+        let mut rt = Runtime::new(Field(String::new()));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        rt.dispatch(Event::Text("x".into()));
+        assert_eq!(rt.app.0, "");
+
+        rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+        rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+        for ev in [
+            Event::Text("aé".into()),
+            Event::Key(Key::Left),
+            Event::Text("X".into()),
+            Event::Key(Key::Home),
+            Event::Key(Key::Delete),
+            Event::Key(Key::End),
+            Event::Key(Key::Backspace),
+        ] {
+            rt.dispatch(ev);
+        }
+        assert_eq!(rt.app.0, "X");
+
+        rt.dispatch(Event::PointerDown { x: 10.0, y: 190.0 });
+        rt.dispatch(Event::Text("z".into()));
+        assert_eq!(rt.app.0, "X");
     }
 }

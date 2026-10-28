@@ -5,8 +5,10 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 
 ## Next
 
-- [ ] Text input + keyboard focus: focus model in widget state, Android soft
-      keyboard/IME via android-activity, caret and selection painting.
+- [x] Text input + keyboard focus: single-line `text_input`, tap to focus,
+      Android soft keyboard, caret.
+- [ ] Text input follow-ups: selection, clipboard, caret blink, desktop IME
+      composition, multi-line, keyboard-aware insets on Android.
 - [ ] Faster outline text: store curves inline in each band list (drop the
       index indirection, one fewer dependent load per curve). Re-measure with
       the Bench screen.
