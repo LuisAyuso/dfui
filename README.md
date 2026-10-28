@@ -69,3 +69,9 @@ The APK lands in `target/release/apk/dfui-demo.apk`; `cargo apk build`
 instead of `run` only builds it. For real distribution, point the keystore
 variables at a release keystore. Frame stats (`fps … cpu … gpu …`) are how the
 baselines in `TODO.md` are measured; use the demo's Bench screen.
+
+## License
+
+[WTFPL](LICENSE). The bundled font `assets/DejaVuSans.ttf` keeps its own
+license, the DejaVu Fonts License derived from Bitstream Vera:
+[`assets/DejaVuSans-LICENSE.txt`](assets/DejaVuSans-LICENSE.txt).
