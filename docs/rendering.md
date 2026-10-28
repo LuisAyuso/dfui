@@ -66,10 +66,11 @@ would cost about 4× fill for no visible change.
 seconds. GPU time comes from timestamp queries around the render pass, with
 one sample in flight. Baselines are in `TODO.md`.
 
-## Prototype: partial redraws by scissoring
+## Partial redraws
 
-Status: **prototype**, in `render.rs` / `runtime.rs`, with per-node damage
-from a scene diff. Not yet measured on the phone.
+In `render.rs` / `runtime.rs`: a scissored retained canvas, per-node damage
+from a scene diff, and idle frames skipped entirely. Not yet measured on the
+phone.
 
 ### Idea
 
@@ -110,7 +111,7 @@ drawn one (`render::damage`):
   (shadow blur + 1px, or 1px AA for glyphs), clipped to the instance's clip
   rect.
 - The union, plus a 2px margin rounded out to physical pixels, becomes the
-  scissor. An empty diff draws nothing; the canvas is just copied out.
+  scissor. An empty diff skips the frame entirely (see below).
 - Full redraws happen only when the canvas is fresh (first frame, resume,
   resize). Events, rebuilds and relayouts all go through the diff, so a
   hover damages one button and typing damages one field.
@@ -124,6 +125,25 @@ every frame but only damages when its text changes, twice a second.
 
 Known gap: a pure z-order swap of overlapping nodes with byte-identical
 instances isn't detected (marked `ponytail:`).
+
+### Idle frames
+
+When the diff is empty, the window already shows the canvas, so `render`
+returns `Outcome::Idle` without acquiring, copying or presenting. That
+removes the copy, the floor cost of every frame, whenever nothing visibly
+changed.
+
+Idle frames don't block on vsync, so a `request_frame` loop would spin. When
+a requested frame turns out idle, the runtime paces the next one with
+`ControlFlow::WaitUntil` at the monitor's refresh interval (60 Hz fallback).
+Presented frames still pace themselves on vsync. While the window is
+occluded, idle animation frames stop entirely and resume when it's visible.
+
+Exceptions: a fresh canvas always draws, and with the damage overlay on, the
+frame after a tinted one presents so the tint clears.
+
+On the Bench screen (desktop) the FPS meter keeps painting at 61 fps while
+the window presents about once a second, only when the readout changes.
 
 ### Seeing it
 
@@ -156,9 +176,6 @@ Not yet measured:
 
 - **Caret blink** is now cheap on the GPU (damage = the caret), but it
   keeps the CPU rebuilding the scene every frame while a field is focused.
-- **Skip idle frames.** With empty damage we still acquire, copy and
-  present. Skipping the present would save the copy, but `request_frame`
-  loops would then spin without vsync throttling.
 - **One rect vs several.** A union of distant rects (corner button + caret)
   can be large. Several scissored draws of the same buffer are cheap on the
   vertex side; decide by measurement.

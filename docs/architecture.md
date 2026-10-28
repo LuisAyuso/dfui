@@ -87,7 +87,7 @@ delivers its input as key events.
 
 ## Rendering
 
-Details, design decisions and rendering prototypes: `rendering.md`.
+Details and design decisions, including partial redraws: `rendering.md`.
 
 - Painting appends instances to a `Scene`: shapes (rect, radius, border,
   colors), shadows (shapes with blur), and glyph quads. Each carries a clip

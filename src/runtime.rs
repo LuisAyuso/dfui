@@ -4,13 +4,13 @@ use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::App;
 use crate::layout::{Insets, Placed, flatten, layout};
-use crate::render::{Color, Rect, Renderer, Scene, Spans, damage, render_offscreen};
+use crate::render::{Color, Outcome, Rect, Renderer, Scene, Spans, damage, render_offscreen};
 use crate::text::Text;
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
 
@@ -23,6 +23,11 @@ pub(crate) struct Runtime<A: App> {
     captured: Option<u64>,
     /// Last painted frame, diffed against the next one for damage.
     prev: Option<(Scene, Spans)>,
+    /// Animation frame due after an idle one; idle frames don't block on
+    /// vsync, so they're paced by this timer instead.
+    next_frame: Option<Instant>,
+    /// Hidden windows don't animate; presents would be throttled anyway.
+    occluded: bool,
     focused: Option<u64>,
     mods: ModifiersState,
     instance: Option<wgpu::Instance>,
@@ -81,6 +86,8 @@ impl<A: App> Runtime<A> {
             placed: Vec::new(),
             captured: None,
             prev: None,
+            next_frame: None,
+            occluded: false,
             focused: None,
             mods: ModifiersState::empty(),
             instance: None,
@@ -249,18 +256,28 @@ impl<A: App> Runtime<A> {
             .prev
             .as_ref()
             .map(|(ps, pn)| damage(ps, pn, &scene, &spans).unwrap_or_default());
+        self.next_frame = None;
         if let Some(r) = &mut self.renderer {
-            let Some(waited) = r.render(&scene, &mut self.text, damage) else {
+            match r.render(&scene, &mut self.text, damage) {
                 // Canvas untouched: keep diffing against what it actually holds.
-                return;
-            };
-            self.stats.frame(
-                start.elapsed().saturating_sub(waited),
-                r.gpu_ms(),
-                scene.len(),
-            );
-            if frame {
-                r.window().request_redraw();
+                Outcome::Failed => return,
+                Outcome::Idle if frame && !self.occluded => {
+                    let hz = r.window().current_monitor();
+                    let mhz = hz.and_then(|m| m.refresh_rate_millihertz());
+                    let interval = Duration::from_secs_f64(1000.0 / mhz.unwrap_or(60_000) as f64);
+                    self.next_frame = Some(Instant::now() + interval);
+                }
+                Outcome::Idle => {}
+                Outcome::Presented(waited) => {
+                    self.stats.frame(
+                        start.elapsed().saturating_sub(waited),
+                        r.gpu_ms(),
+                        scene.len(),
+                    );
+                    if frame {
+                        r.window().request_redraw();
+                    }
+                }
             }
         }
         self.prev = Some((scene, spans));
@@ -322,6 +339,20 @@ impl<A: App> ApplicationHandler for Runtime<A> {
         self.redraw();
     }
 
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        match self.next_frame {
+            Some(t) if Instant::now() >= t => {
+                self.next_frame = None;
+                if let Some(r) = &self.renderer {
+                    r.window().request_redraw();
+                }
+                el.set_control_flow(ControlFlow::Wait);
+            }
+            Some(t) => el.set_control_flow(ControlFlow::WaitUntil(t)),
+            None => el.set_control_flow(ControlFlow::Wait),
+        }
+    }
+
     // Android destroys the native window when backgrounded.
     fn suspended(&mut self, _: &ActiveEventLoop) {
         self.renderer = None;
@@ -340,6 +371,12 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                 self.redraw();
             }
             WindowEvent::RedrawRequested => self.paint(),
+            WindowEvent::Occluded(o) => {
+                self.occluded = o;
+                if !o && let Some(r) = &self.renderer {
+                    r.window().request_redraw();
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x as f32 / scale, position.y as f32 / scale);
                 let (x, y) = self.cursor;

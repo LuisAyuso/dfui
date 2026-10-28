@@ -26,9 +26,9 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
       Open questions: rebuild only dirty `stateful` subtrees; cache taffy
       nodes for incremental layout; retained scene with damage rects vs
       redrawing the whole frame; interaction with `request_frame`
-      animations and power use on mobile. GPU side prototyped (scissored
-      canvas + per-node scene diff, `docs/rendering.md`); measure on the
-      phone next. CPU side (rebuild/layout/paint) still full every change.
+      animations and power use on mobile. GPU side done (scissored canvas,
+      per-node scene diff, idle frames skipped; `docs/rendering.md`);
+      measure on the phone next. CPU side (rebuild/layout/paint) still full every change.
 
 ## Framework
 

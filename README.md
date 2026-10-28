@@ -22,7 +22,7 @@ fn main() { dfui::run(Counter(0)); }
 - `src/` — the framework crate (`dfui`)
 - `demo/` — demo app, desktop binary and Android `cdylib`
 - `docs/architecture.md` — how it fits together
-- `docs/rendering.md` — renderer details and rendering prototypes
+- `docs/rendering.md` — renderer details and design decisions
 - `TODO.md` — roadmap and current performance baseline
 
 ## Running

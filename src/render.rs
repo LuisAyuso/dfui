@@ -114,6 +114,15 @@ pub struct Scene {
     pub(crate) instances: Vec<Instance>,
 }
 
+pub(crate) enum Outcome {
+    /// Drawn and presented; how long acquiring the frame blocked (vsync).
+    Presented(std::time::Duration),
+    /// Nothing changed, so nothing was presented.
+    Idle,
+    /// No frame could be acquired; the canvas is untouched.
+    Failed,
+}
+
 /// Which instances each node painted, by node id.
 pub(crate) type Spans = Vec<(u64, Range<usize>)>;
 
@@ -573,6 +582,8 @@ pub(crate) struct Renderer {
     fresh: bool,
     /// `DFUI_SHOW_DAMAGE` debug overlay: frame counter cycling the tint color.
     show_damage: Option<usize>,
+    /// Last presented frame carries the overlay tint; next one must present.
+    tinted: bool,
     pub clear: Color,
 }
 
@@ -644,6 +655,7 @@ impl Renderer {
             canvas,
             fresh: true,
             show_damage: std::env::var_os("DFUI_SHOW_DAMAGE").map(|_| 0),
+            tinted: false,
             clear: Color::WHITE,
         }
     }
@@ -668,14 +680,13 @@ impl Renderer {
     }
 
     /// Redraws `damage` (logical px; empty redraws nothing), or everything when
-    /// `None`. Returns how long acquiring the frame blocked (vsync back-pressure),
-    /// or `None` if no frame was drawn.
-    pub fn render(
-        &mut self,
-        scene: &Scene,
-        text: &mut Text,
-        damage: Option<Rect>,
-    ) -> Option<std::time::Duration> {
+    /// `None`.
+    pub fn render(&mut self, scene: &Scene, text: &mut Text, damage: Option<Rect>) -> Outcome {
+        // The window already shows the canvas: nothing to acquire, copy or present.
+        let empty = damage.is_some_and(|d| d.w <= 0.0 || d.h <= 0.0);
+        if empty && self.canvas.is_some() && !self.fresh && !self.tinted {
+            return Outcome::Idle;
+        }
         let acquire = std::time::Instant::now();
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
@@ -683,9 +694,9 @@ impl Renderer {
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.gpu.device, &self.config);
                 self.window.request_redraw();
-                return None;
+                return Outcome::Failed;
             }
-            _ => return None,
+            _ => return Outcome::Failed,
         };
         let waited = acquire.elapsed();
         let scale = self.window.scale_factor() as f32;
@@ -736,6 +747,7 @@ impl Renderer {
         };
         // Tints the swapchain image only, so the canvas stays clean and each
         // frame shows just its own damage.
+        self.tinted = false;
         if let Some(n) = &mut self.show_damage
             && drawn.is_none_or(|[_, _, dw, dh]| dw > 0 && dh > 0)
         {
@@ -767,12 +779,13 @@ impl Renderer {
             // One clean follow-up frame (empty damage) so the tint only flashes.
             // Without a canvas every frame is full, so that would loop.
             if self.canvas.is_some() {
+                self.tinted = true;
                 self.window.request_redraw();
             }
         }
         self.window.pre_present_notify();
         self.gpu.queue.present(frame);
-        Some(waited)
+        Outcome::Presented(waited)
     }
 }
 
