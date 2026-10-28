@@ -10,7 +10,7 @@ use winit::window::{Window, WindowId};
 
 use crate::App;
 use crate::layout::{Insets, Placed, flatten, layout};
-use crate::render::{Renderer, Scene, render_offscreen};
+use crate::render::{Color, Rect, Renderer, Scene, render_offscreen};
 use crate::text::Text;
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
 
@@ -21,6 +21,10 @@ pub(crate) struct Runtime<A: App> {
     text: Text,
     placed: Vec<Placed>,
     captured: Option<u64>,
+    /// Next paint must redraw everything (tree, layout or window changed).
+    full: bool,
+    /// Rects of widgets that requested an animation frame last paint.
+    anim: Option<Rect>,
     focused: Option<u64>,
     mods: ModifiersState,
     instance: Option<wgpu::Instance>,
@@ -78,6 +82,8 @@ impl<A: App> Runtime<A> {
             text: Text::default(),
             placed: Vec::new(),
             captured: None,
+            full: true,
+            anim: None,
             focused: None,
             mods: ModifiersState::empty(),
             instance: None,
@@ -128,6 +134,7 @@ impl<A: App> Runtime<A> {
     fn update_insets(&mut self) {}
 
     fn redraw(&mut self) {
+        self.full = true;
         self.relayout();
         if let Some(r) = &self.renderer {
             r.window().request_redraw();
@@ -239,24 +246,37 @@ impl<A: App> Runtime<A> {
 
     fn paint(&mut self) {
         let start = Instant::now();
-        let mut frame = false;
+        let mut frame = None;
         let scene = self.scene(&mut frame);
+        // Nothing but animations changed since last paint: redraw only those.
+        // With neither (e.g. an OS-requested redraw) the retained frame is reused.
+        let damage = if self.full {
+            None
+        } else {
+            Some(self.anim.unwrap_or_default())
+        };
+        self.anim = frame;
         if let Some(r) = &mut self.renderer {
-            let waited = r.render(&scene, &mut self.text);
+            self.full = false;
+            let waited = r.render(&scene, &mut self.text, damage);
             self.stats.frame(
                 start.elapsed().saturating_sub(waited),
                 r.gpu_ms(),
                 scene.len(),
             );
-            if frame {
+            if frame.is_some() {
                 r.window().request_redraw();
             }
         }
     }
 
-    fn scene(&mut self, frame: &mut bool) -> Scene {
+    fn scene(&mut self, frame: &mut Option<Rect>) -> Scene {
         let nodes = flatten(&self.root, &mut self.states);
         let mut scene = Scene::default();
+        // Partial redraws load the previous frame, so damage needs its own background.
+        let (w, h) = self.viewport;
+        let all = Rect::new(0.0, 0.0, w, h);
+        scene.shape(all, 0.0, Color::WHITE, 0.0, Color::TRANSPARENT, all);
         for (n, p) in nodes.iter().zip(&self.placed) {
             n.w.paint(&mut PaintCx {
                 rect: p.rect,
@@ -277,8 +297,8 @@ pub fn snapshot<A: App>(app: A, size: (u32, u32), scale: f32) -> image::RgbaImag
     let mut rt = Runtime::new(app);
     rt.viewport = (size.0 as f32 / scale, size.1 as f32 / scale);
     rt.relayout();
-    let scene = rt.scene(&mut false);
-    render_offscreen(&scene, &mut rt.text, size, scale)
+    let scene = rt.scene(&mut None);
+    render_offscreen(&[(&scene, None)], &mut rt.text, size, scale)
 }
 
 impl<A: App> ApplicationHandler for Runtime<A> {

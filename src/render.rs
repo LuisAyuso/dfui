@@ -78,6 +78,14 @@ impl Rect {
         let b = (self.y + self.h).min(o.y + o.h);
         Rect::new(x, y, (r - x).max(0.0), (b - y).max(0.0))
     }
+
+    pub fn union(&self, o: &Rect) -> Rect {
+        let x = self.x.min(o.x);
+        let y = self.y.min(o.y);
+        let r = (self.x + self.w).max(o.x + o.w);
+        let b = (self.y + self.h).max(o.y + o.h);
+        Rect::new(x, y, r - x, b - y)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -375,6 +383,8 @@ impl Gpu {
     }
 
     /// `viewport` is in logical pixels; the target's physical size sets the DPI.
+    /// With a `scissor` (physical px) only that area is redrawn over the target's
+    /// existing contents, so the scene must paint its own background.
     fn draw(
         &mut self,
         target: &wgpu::TextureView,
@@ -382,6 +392,7 @@ impl Gpu {
         scene: &Scene,
         text: &mut Text,
         clear: Color,
+        scissor: Option<[u32; 4]>,
     ) {
         let o = &mut text.outlines;
         if o.dirty {
@@ -444,12 +455,15 @@ impl Gpu {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: r as f64,
-                            g: g as f64,
-                            b: b as f64,
-                            a: a as f64,
-                        }),
+                        load: match scissor {
+                            Some(_) => wgpu::LoadOp::Load,
+                            None => wgpu::LoadOp::Clear(wgpu::Color {
+                                r: r as f64,
+                                g: g as f64,
+                                b: b as f64,
+                                a: a as f64,
+                            }),
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -460,6 +474,9 @@ impl Gpu {
                 }),
                 ..Default::default()
             });
+            if let Some([x, y, w, h]) = scissor {
+                pass.set_scissor_rect(x, y, w, h);
+            }
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.outline_group, &[]);
@@ -489,7 +506,32 @@ pub(crate) struct Renderer {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     gpu: Gpu,
+    /// Retained frame for partial redraws; swapchain images don't keep their
+    /// contents, so we redraw damage here and copy the whole canvas out.
+    /// `None` when the surface can't be a copy destination: always full redraws.
+    canvas: Option<wgpu::Texture>,
+    /// Canvas contents are invalid (new or resized); next frame must be full.
+    fresh: bool,
+    /// `DFUI_SHOW_DAMAGE` debug overlay: frame counter cycling the tint color.
+    show_damage: Option<usize>,
     pub clear: Color,
+}
+
+fn canvas(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("canvas"),
+        size: wgpu::Extent3d {
+            width: config.width,
+            height: config.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: config.format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &config.view_formats,
+    })
 }
 
 impl Renderer {
@@ -513,8 +555,13 @@ impl Renderer {
         let view_format = format.remove_srgb_suffix();
         let gpu = Gpu::new(&adapter, view_format);
         let size = window.inner_size();
+        let copyable = caps.usages.contains(wgpu::TextureUsages::COPY_DST);
         let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: if copyable {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST
+            } else {
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+            },
             format,
             width: size.width.max(1),
             height: size.height.max(1),
@@ -529,11 +576,15 @@ impl Renderer {
             color_space: wgpu::SurfaceColorSpace::Auto,
         };
         surface.configure(&gpu.device, &config);
+        let canvas = copyable.then(|| canvas(&gpu.device, &config));
         Renderer {
             window,
             surface,
             config,
             gpu,
+            canvas,
+            fresh: true,
+            show_damage: std::env::var_os("DFUI_SHOW_DAMAGE").map(|_| 0),
             clear: Color::WHITE,
         }
     }
@@ -546,6 +597,10 @@ impl Renderer {
         self.config.width = w.max(1);
         self.config.height = h.max(1);
         self.surface.configure(&self.gpu.device, &self.config);
+        if self.canvas.is_some() {
+            self.canvas = Some(canvas(&self.gpu.device, &self.config));
+            self.fresh = true;
+        }
     }
 
     /// GPU time of the most recently measured frame, if timestamp queries are supported.
@@ -553,8 +608,14 @@ impl Renderer {
         self.gpu.timer.as_ref().map(|t| t.last_ns / 1e6)
     }
 
-    /// Returns how long acquiring the frame blocked (vsync back-pressure).
-    pub fn render(&mut self, scene: &Scene, text: &mut Text) -> std::time::Duration {
+    /// Redraws `damage` (logical px; empty redraws nothing), or everything when
+    /// `None`. Returns how long acquiring the frame blocked (vsync back-pressure).
+    pub fn render(
+        &mut self,
+        scene: &Scene,
+        text: &mut Text,
+        damage: Option<Rect>,
+    ) -> std::time::Duration {
         let acquire = std::time::Instant::now();
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
@@ -572,20 +633,93 @@ impl Renderer {
             self.config.width as f32 / scale,
             self.config.height as f32 / scale,
         ];
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+        let view_desc = wgpu::TextureViewDescriptor {
             format: Some(self.config.format.remove_srgb_suffix()),
             ..Default::default()
-        });
-        self.gpu.draw(&view, viewport, scene, text, self.clear);
+        };
+        let (w, h) = (self.config.width, self.config.height);
+        // Area actually redrawn, physical px; `None` is the whole frame.
+        let drawn = match &self.canvas {
+            None => {
+                let view = frame.texture.create_view(&view_desc);
+                self.gpu
+                    .draw(&view, viewport, scene, text, self.clear, None);
+                None
+            }
+            Some(canvas) => {
+                let scissor = damage.filter(|_| !self.fresh).map(|d| {
+                    if d.w <= 0.0 || d.h <= 0.0 {
+                        return [0; 4];
+                    }
+                    // Round out to whole pixels; 2px margin covers AA fringes.
+                    let x0 = ((d.x - 2.0) * scale).floor().clamp(0.0, w as f32) as u32;
+                    let y0 = ((d.y - 2.0) * scale).floor().clamp(0.0, h as f32) as u32;
+                    let x1 = ((d.x + d.w + 2.0) * scale).ceil().clamp(0.0, w as f32) as u32;
+                    let y1 = ((d.y + d.h + 2.0) * scale).ceil().clamp(0.0, h as f32) as u32;
+                    [x0, y0, (x1 - x0).max(1), (y1 - y0).max(1)]
+                });
+                if scissor.is_none_or(|[_, _, sw, sh]| sw > 0 && sh > 0) {
+                    let view = canvas.create_view(&view_desc);
+                    self.gpu
+                        .draw(&view, viewport, scene, text, self.clear, scissor);
+                }
+                let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+                enc.copy_texture_to_texture(
+                    canvas.as_image_copy(),
+                    frame.texture.as_image_copy(),
+                    canvas.size(),
+                );
+                self.gpu.queue.submit([enc.finish()]);
+                self.fresh = false;
+                scissor
+            }
+        };
+        // Tints the swapchain image only, so the canvas stays clean and each
+        // frame shows just its own damage.
+        if let Some(n) = &mut self.show_damage
+            && drawn.is_none_or(|[_, _, dw, dh]| dw > 0 && dh > 0)
+        {
+            const TINTS: [u32; 4] = [0xff3b30, 0x34c759, 0x007aff, 0xffcc00];
+            *n += 1;
+            let r = drawn.map_or(
+                Rect::new(0.0, 0.0, viewport[0], viewport[1]),
+                |[x, y, dw, dh]| {
+                    Rect::new(
+                        x as f32 / scale,
+                        y as f32 / scale,
+                        dw as f32 / scale,
+                        dh as f32 / scale,
+                    )
+                },
+            );
+            let mut overlay = Scene::default();
+            let tint = Color::hex(TINTS[*n % TINTS.len()]).alpha(0.3);
+            overlay.shape(r, 0.0, tint, 0.0, Color::TRANSPARENT, r);
+            let view = frame.texture.create_view(&view_desc);
+            self.gpu.draw(
+                &view,
+                viewport,
+                &overlay,
+                text,
+                self.clear,
+                Some([0, 0, w, h]),
+            );
+            // One clean follow-up frame (empty damage) so the tint only flashes.
+            // Without a canvas every frame is full, so that would loop.
+            if self.canvas.is_some() {
+                self.window.request_redraw();
+            }
+        }
         self.window.pre_present_notify();
         self.gpu.queue.present(frame);
         waited
     }
 }
 
-/// Renders a scene offscreen and reads it back as sRGB RGBA8.
+/// Renders scenes offscreen in order, each optionally scissored, and reads
+/// the result back as sRGB RGBA8.
 pub(crate) fn render_offscreen(
-    scene: &Scene,
+    passes: &[(&Scene, Option<[u32; 4]>)],
     text: &mut Text,
     size: (u32, u32),
     scale: f32,
@@ -611,13 +745,11 @@ pub(crate) fn render_offscreen(
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
-    gpu.draw(
-        &target.create_view(&Default::default()),
-        [w as f32 / scale, h as f32 / scale],
-        scene,
-        text,
-        Color::WHITE,
-    );
+    let view = target.create_view(&Default::default());
+    for &(scene, scissor) in passes {
+        let viewport = [w as f32 / scale, h as f32 / scale];
+        gpu.draw(&view, viewport, scene, text, Color::WHITE, scissor);
+    }
 
     let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
     let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -656,4 +788,27 @@ pub(crate) fn render_offscreen(
         img.as_mut()[(y * w * 4) as usize..][..(w * 4) as usize].copy_from_slice(src);
     }
     img
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn solid(c: Color) -> Scene {
+        let mut s = Scene::default();
+        let all = Rect::new(0.0, 0.0, 40.0, 40.0);
+        s.shape(all, 0.0, c, 0.0, Color::TRANSPARENT, all);
+        s
+    }
+
+    #[test]
+    #[ignore = "needs a GPU"]
+    fn scissored_pass_only_touches_damage() {
+        let (red, blue) = (solid(Color::hex(0xff0000)), solid(Color::hex(0x0000ff)));
+        let passes = [(&red, None), (&blue, Some([10, 10, 20, 20]))];
+        let img = render_offscreen(&passes, &mut Text::default(), (40, 40), 1.0);
+        assert_eq!(img.get_pixel(5, 5).0, [255, 0, 0, 255]);
+        assert_eq!(img.get_pixel(15, 15).0, [0, 0, 255, 255]);
+        assert_eq!(img.get_pixel(35, 35).0, [255, 0, 0, 255]);
+    }
 }

@@ -26,7 +26,8 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
       Open questions: rebuild only dirty `stateful` subtrees; cache taffy
       nodes for incremental layout; retained scene with damage rects vs
       redrawing the whole frame; interaction with `request_frame`
-      animations and power use on mobile.
+      animations and power use on mobile. GPU-side scissor prototype and
+      results in `docs/rendering.md`; measure it on the phone next.
 
 ## Framework
 
