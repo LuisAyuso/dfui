@@ -68,8 +68,8 @@ one sample in flight. Baselines are in `TODO.md`.
 
 ## Prototype: partial redraws by scissoring
 
-Status: **prototype**, in `render.rs` / `runtime.rs`. The damage source is
-deliberately narrow (animation frames only).
+Status: **prototype**, in `render.rs` / `runtime.rs`, with per-node damage
+from a scene diff. Not yet measured on the phone.
 
 ### Idea
 
@@ -97,16 +97,33 @@ copy canvas → swapchain image (whole frame)
 - If the surface doesn't support `COPY_DST`, there is no canvas and every
   frame is a full redraw straight to the swapchain.
 
-### Damage source (prototype)
+### Damage: per-node scene diff
 
-`PaintCx::request_frame()` records the requesting widget's rect. A frame
-triggered only by those requests (no event, rebuild, relayout or resize in
-between) redraws just their union, plus a 2px margin, rounded out to physical
-pixels. Every other redraw sets `full`. This is correct by construction as
-long as an animating widget stays inside its own rect; that contract is
-documented on `request_frame`. A redraw with neither animations nor
-changes (e.g. requested by the OS) uses empty damage: nothing is drawn and the
-retained canvas is just copied out.
+While painting, the runtime records which instance range each node produced
+(`Spans`, keyed by node id). Each paint diffs the new scene against the last
+drawn one (`render::damage`):
+
+- Nodes are matched by id, not instance index, so inserting a card doesn't
+  damage the siblings after it.
+- A node whose instance bytes differ, or that was added or removed,
+  contributes its old and/or new bounds. Bounds are the quad plus padding
+  (shadow blur + 1px, or 1px AA for glyphs), clipped to the instance's clip
+  rect.
+- The union, plus a 2px margin rounded out to physical pixels, becomes the
+  scissor. An empty diff draws nothing; the canvas is just copied out.
+- Full redraws happen only when the canvas is fresh (first frame, resume,
+  resize). Events, rebuilds and relayouts all go through the diff, so a
+  hover damages one button and typing damages one field.
+- `prev` only advances when a frame is actually drawn, so a skipped frame
+  (surface outdated or lost) can't leave the canvas missing changes.
+
+Because the diff is on painted output, widgets need no invalidation API, and
+`request_frame` only schedules another paint. An animation that paints the
+same pixels again costs nothing on the GPU: the Bench FPS meter repaints
+every frame but only damages when its text changes, twice a second.
+
+Known gap: a pure z-order swap of overlapping nodes with byte-identical
+instances isn't detected (marked `ponytail:`).
 
 ### Seeing it
 
@@ -114,9 +131,8 @@ Run with `DFUI_SHOW_DAMAGE=1` to tint each frame's redrawn area with a
 cycling color. The tint is drawn onto the swapchain image after the canvas
 copy, so it never accumulates in the canvas; a tinted frame is followed by
 one clean empty-damage frame, so tints flash rather than linger. On the Bench
-screen only the FPS readout flashes. On the main screen, hover, taps and
-typing flash the whole window, because event-driven redraws are still full
-(see next steps). Stale pixels show up as content that changes without being
+screen only the FPS readout flashes, when its text changes. On the main screen, hover, taps
+and typing flash only the widget involved. Stale pixels show up as content that changes without being
 tinted.
 
 ### Results
@@ -138,14 +154,11 @@ Not yet measured:
 
 ### Open questions / next steps
 
-- **General damage tracking.** Diff per node id, not by instance index:
-  inserting a card shifts every later instance. Record each node's instance
-  range and bounds; for added, removed or changed nodes, union old and new
-  bounds, expanded by shadow blur and the AA pad.
-- **Event-driven damage.** Button hover, caret moves and typing currently
-  force a full redraw, because any event redraw sets `full`. They are the
-  next big win once per-node diffing exists. Caret blink becomes cheap after
-  that.
+- **Caret blink** is now cheap on the GPU (damage = the caret), but it
+  keeps the CPU rebuilding the scene every frame while a field is focused.
+- **Skip idle frames.** With empty damage we still acquire, copy and
+  present. Skipping the present would save the copy, but `request_frame`
+  loops would then spin without vsync throttling.
 - **One rect vs several.** A union of distant rects (corner button + caret)
   can be large. Several scissored draws of the same buffer are cheap on the
   vertex side; decide by measurement.

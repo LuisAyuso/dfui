@@ -10,7 +10,7 @@ use winit::window::{Window, WindowId};
 
 use crate::App;
 use crate::layout::{Insets, Placed, flatten, layout};
-use crate::render::{Color, Rect, Renderer, Scene, render_offscreen};
+use crate::render::{Color, Rect, Renderer, Scene, Spans, damage, render_offscreen};
 use crate::text::Text;
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
 
@@ -21,10 +21,8 @@ pub(crate) struct Runtime<A: App> {
     text: Text,
     placed: Vec<Placed>,
     captured: Option<u64>,
-    /// Next paint must redraw everything (tree, layout or window changed).
-    full: bool,
-    /// Rects of widgets that requested an animation frame last paint.
-    anim: Option<Rect>,
+    /// Last painted frame, diffed against the next one for damage.
+    prev: Option<(Scene, Spans)>,
     focused: Option<u64>,
     mods: ModifiersState,
     instance: Option<wgpu::Instance>,
@@ -82,8 +80,7 @@ impl<A: App> Runtime<A> {
             text: Text::default(),
             placed: Vec::new(),
             captured: None,
-            full: true,
-            anim: None,
+            prev: None,
             focused: None,
             mods: ModifiersState::empty(),
             instance: None,
@@ -134,7 +131,6 @@ impl<A: App> Runtime<A> {
     fn update_insets(&mut self) {}
 
     fn redraw(&mut self) {
-        self.full = true;
         self.relayout();
         if let Some(r) = &self.renderer {
             r.window().request_redraw();
@@ -246,38 +242,40 @@ impl<A: App> Runtime<A> {
 
     fn paint(&mut self) {
         let start = Instant::now();
-        let mut frame = None;
-        let scene = self.scene(&mut frame);
-        // Nothing but animations changed since last paint: redraw only those.
-        // With neither (e.g. an OS-requested redraw) the retained frame is reused.
-        let damage = if self.full {
-            None
-        } else {
-            Some(self.anim.unwrap_or_default())
-        };
-        self.anim = frame;
+        let mut frame = false;
+        let (scene, spans) = self.scene(&mut frame);
+        // Empty when nothing changed: the retained frame is reused as is.
+        let damage = self
+            .prev
+            .as_ref()
+            .map(|(ps, pn)| damage(ps, pn, &scene, &spans).unwrap_or_default());
         if let Some(r) = &mut self.renderer {
-            self.full = false;
-            let waited = r.render(&scene, &mut self.text, damage);
+            let Some(waited) = r.render(&scene, &mut self.text, damage) else {
+                // Canvas untouched: keep diffing against what it actually holds.
+                return;
+            };
             self.stats.frame(
                 start.elapsed().saturating_sub(waited),
                 r.gpu_ms(),
                 scene.len(),
             );
-            if frame.is_some() {
+            if frame {
                 r.window().request_redraw();
             }
         }
+        self.prev = Some((scene, spans));
     }
 
-    fn scene(&mut self, frame: &mut Option<Rect>) -> Scene {
+    fn scene(&mut self, frame: &mut bool) -> (Scene, Spans) {
         let nodes = flatten(&self.root, &mut self.states);
         let mut scene = Scene::default();
         // Partial redraws load the previous frame, so damage needs its own background.
         let (w, h) = self.viewport;
         let all = Rect::new(0.0, 0.0, w, h);
         scene.shape(all, 0.0, Color::WHITE, 0.0, Color::TRANSPARENT, all);
+        let mut spans = Vec::with_capacity(nodes.len());
         for (n, p) in nodes.iter().zip(&self.placed) {
+            let start = scene.len();
             n.w.paint(&mut PaintCx {
                 rect: p.rect,
                 clip: p.clip,
@@ -287,8 +285,9 @@ impl<A: App> Runtime<A> {
                 text: &mut self.text,
                 frame: &mut *frame,
             });
+            spans.push((n.id, start..scene.len()));
         }
-        scene
+        (scene, spans)
     }
 }
 
@@ -297,7 +296,7 @@ pub fn snapshot<A: App>(app: A, size: (u32, u32), scale: f32) -> image::RgbaImag
     let mut rt = Runtime::new(app);
     rt.viewport = (size.0 as f32 / scale, size.1 as f32 / scale);
     rt.relayout();
-    let scene = rt.scene(&mut None);
+    let (scene, _) = rt.scene(&mut false);
     render_offscreen(&[(&scene, None)], &mut rt.text, size, scale)
 }
 
@@ -524,5 +523,42 @@ mod tests {
         rt.dispatch(Event::PointerDown { x: 10.0, y: 190.0 });
         rt.dispatch(Event::Text("z".into()));
         assert_eq!(rt.app.0, "X");
+    }
+
+    fn damage_after<A: App>(
+        rt: &mut Runtime<A>,
+        events: impl IntoIterator<Item = Event>,
+    ) -> Option<Rect> {
+        let (a, na) = rt.scene(&mut false);
+        for ev in events {
+            rt.dispatch(ev);
+        }
+        let (b, nb) = rt.scene(&mut false);
+        damage(&a, &na, &b, &nb)
+    }
+
+    #[test]
+    fn interactions_damage_only_the_widget() {
+        let mut rt = Runtime::new(Counter(0));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        let hover = damage_after(&mut rt, [Event::PointerMove { x: 10.0, y: 10.0 }]).unwrap();
+        // Button is 40px tall; its shadow reaches a few px further.
+        assert!(hover.y + hover.h < 50.0, "{hover:?}");
+        assert_eq!(
+            damage_after(&mut rt, [Event::PointerMove { x: 12.0, y: 10.0 }]),
+            None
+        );
+
+        let mut rt = Runtime::new(Field(String::new()));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+        let field = rt.placed[1].rect;
+        let typed = damage_after(&mut rt, [Event::Text("hi".into())]).unwrap();
+        assert!(
+            typed.h <= field.h + 4.0 && typed.y >= field.y - 2.0,
+            "{typed:?} {field:?}"
+        );
     }
 }

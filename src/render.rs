@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -112,9 +114,27 @@ pub struct Scene {
     pub(crate) instances: Vec<Instance>,
 }
 
+/// Which instances each node painted, by node id.
+pub(crate) type Spans = Vec<(u64, Range<usize>)>;
+
 impl Scene {
     pub fn len(&self) -> usize {
         self.instances.len()
+    }
+
+    /// Pixels the instances can touch: quad plus AA/blur padding, clipped.
+    fn bounds(&self, r: Range<usize>) -> Option<Rect> {
+        self.instances[r]
+            .iter()
+            .map(|i| {
+                let [x, y, w, h] = i.rect;
+                let glyph = i.params[3] > 0.5;
+                let pad = if glyph { 1.0 } else { i.params[2] + 1.0 };
+                let [cx, cy, cw, ch] = i.clip;
+                Rect::new(x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad)
+                    .intersect(&Rect::new(cx, cy, cw, ch))
+            })
+            .reduce(|a, b| a.union(&b))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -165,6 +185,45 @@ impl Scene {
             clip: [clip.x, clip.y, clip.w, clip.h],
         });
     }
+}
+
+/// Area that differs between two painted frames, or `None` if nothing does.
+/// Nodes are matched by id, so inserting one doesn't damage its later siblings.
+// ponytail: a pure z-order swap with identical instances isn't detected; hash sibling order if that ever matters.
+pub(crate) fn damage(
+    old: &Scene,
+    old_spans: &Spans,
+    new: &Scene,
+    new_spans: &Spans,
+) -> Option<Rect> {
+    fn bytes<'a>(s: &'a Scene, r: &Range<usize>) -> &'a [u8] {
+        bytemuck::cast_slice(&s.instances[r.clone()])
+    }
+    let prev: HashMap<u64, &Range<usize>> = old_spans.iter().map(|(id, r)| (*id, r)).collect();
+    let mut seen = HashSet::new();
+    let mut out: Option<Rect> = None;
+    let mut add = |r: Option<Rect>| {
+        if let Some(r) = r {
+            out = Some(out.map_or(r, |o| o.union(&r)));
+        }
+    };
+    for (id, r) in new_spans {
+        seen.insert(*id);
+        match prev.get(id) {
+            Some(o) if bytes(old, o) == bytes(new, r) => {}
+            Some(o) => {
+                add(old.bounds((*o).clone()));
+                add(new.bounds(r.clone()));
+            }
+            None => add(new.bounds(r.clone())),
+        }
+    }
+    for (id, r) in old_spans {
+        if !seen.contains(id) {
+            add(old.bounds(r.clone()));
+        }
+    }
+    out
 }
 
 #[repr(C)]
@@ -609,13 +668,14 @@ impl Renderer {
     }
 
     /// Redraws `damage` (logical px; empty redraws nothing), or everything when
-    /// `None`. Returns how long acquiring the frame blocked (vsync back-pressure).
+    /// `None`. Returns how long acquiring the frame blocked (vsync back-pressure),
+    /// or `None` if no frame was drawn.
     pub fn render(
         &mut self,
         scene: &Scene,
         text: &mut Text,
         damage: Option<Rect>,
-    ) -> std::time::Duration {
+    ) -> Option<std::time::Duration> {
         let acquire = std::time::Instant::now();
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
@@ -623,9 +683,9 @@ impl Renderer {
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.gpu.device, &self.config);
                 self.window.request_redraw();
-                return acquire.elapsed();
+                return None;
             }
-            _ => return acquire.elapsed(),
+            _ => return None,
         };
         let waited = acquire.elapsed();
         let scale = self.window.scale_factor() as f32;
@@ -712,7 +772,7 @@ impl Renderer {
         }
         self.window.pre_present_notify();
         self.gpu.queue.present(frame);
-        waited
+        Some(waited)
     }
 }
 
@@ -810,5 +870,74 @@ mod tests {
         assert_eq!(img.get_pixel(5, 5).0, [255, 0, 0, 255]);
         assert_eq!(img.get_pixel(15, 15).0, [0, 0, 255, 255]);
         assert_eq!(img.get_pixel(35, 35).0, [255, 0, 0, 255]);
+    }
+
+    const ALL: Rect = Rect::new(-1e4, -1e4, 2e4, 2e4);
+
+    /// One square node per `(id, x, color)`, 10px wide, at y = 0.
+    fn frame(nodes: &[(u64, f32, u32)]) -> (Scene, Spans) {
+        let mut s = Scene::default();
+        let mut spans = Vec::new();
+        for &(id, x, c) in nodes {
+            let start = s.len();
+            let r = Rect::new(x, 0.0, 10.0, 10.0);
+            s.shape(r, 0.0, Color::hex(c), 0.0, Color::TRANSPARENT, ALL);
+            spans.push((id, start..s.len()));
+        }
+        (s, spans)
+    }
+
+    fn diff(a: &[(u64, f32, u32)], b: &[(u64, f32, u32)]) -> Option<Rect> {
+        let ((sa, na), (sb, nb)) = (frame(a), frame(b));
+        damage(&sa, &na, &sb, &nb)
+    }
+
+    #[test]
+    fn damage_tracks_changed_nodes_by_id() {
+        let base = [(1, 0.0, 0xff0000), (2, 20.0, 0x00ff00)];
+        assert_eq!(diff(&base, &base), None);
+        // Recolor: just that node, padded 1px for AA.
+        let recolored = [(1, 0.0, 0xff0000), (2, 20.0, 0x0000ff)];
+        assert_eq!(
+            diff(&base, &recolored),
+            Some(Rect::new(19.0, -1.0, 12.0, 12.0))
+        );
+        // Move: old and new position.
+        let moved = [(1, 0.0, 0xff0000), (2, 40.0, 0x00ff00)];
+        assert_eq!(diff(&base, &moved), Some(Rect::new(19.0, -1.0, 32.0, 12.0)));
+        // Insert before node 2 shifts instance indices but not node 2.
+        let inserted = [(1, 0.0, 0xff0000), (3, 60.0, 0x0), (2, 20.0, 0x00ff00)];
+        assert_eq!(
+            diff(&base, &inserted),
+            Some(Rect::new(59.0, -1.0, 12.0, 12.0))
+        );
+        // Removal damages where the node was.
+        assert_eq!(
+            diff(&base, &base[..1]),
+            Some(Rect::new(19.0, -1.0, 12.0, 12.0))
+        );
+    }
+
+    #[test]
+    fn damage_bounds_include_blur_and_respect_clip() {
+        let mut a = Scene::default();
+        let r = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let sh = Shadow {
+            color: Color::BLACK,
+            offset: (0.0, 0.0),
+            blur: 4.0,
+        };
+        a.shadow(r, 0.0, sh, ALL);
+        assert_eq!(a.bounds(0..1), Some(Rect::new(-5.0, -5.0, 20.0, 20.0)));
+        let mut b = Scene::default();
+        b.shape(
+            r,
+            0.0,
+            Color::BLACK,
+            0.0,
+            Color::TRANSPARENT,
+            Rect::new(0.0, 0.0, 4.0, 4.0),
+        );
+        assert_eq!(b.bounds(0..1), Some(Rect::new(0.0, 0.0, 4.0, 4.0)));
     }
 }

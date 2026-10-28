@@ -146,15 +146,13 @@ pub struct PaintCx<'a> {
     pub state: &'a mut State,
     pub(crate) scene: &'a mut Scene,
     pub(crate) text: &'a mut Text,
-    pub(crate) frame: &'a mut Option<Rect>,
+    pub(crate) frame: &'a mut bool,
 }
 
 impl PaintCx<'_> {
-    /// Paint again next frame, for animations or live readouts. Frames that
-    /// only these requests trigger repaint just the requesting widgets' rects,
-    /// so an animation must stay inside its widget's rect.
+    /// Paint again next frame, for animations or live readouts.
     pub fn request_frame(&mut self) {
-        *self.frame = Some(self.frame.map_or(self.rect, |f| f.union(&self.rect)));
+        *self.frame = true;
     }
 
     pub fn fill(&mut self, r: Rect, radius: f32, color: Color) {
