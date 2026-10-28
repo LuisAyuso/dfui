@@ -22,13 +22,14 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
       questions: Elm `App` vs context/provider-style injection vs shared
       stores; how it coexists with `stateful` local state; change
       notification and which subtrees rebuild.
-- [ ] Partial redraws: avoid full rebuild/relayout/repaint on every change.
-      Open questions: rebuild only dirty `stateful` subtrees; cache taffy
-      nodes for incremental layout; retained scene with damage rects vs
-      redrawing the whole frame; interaction with `request_frame`
-      animations and power use on mobile. GPU side done (scissored canvas,
-      per-node scene diff, idle frames skipped; `docs/rendering.md`);
-      measure on the phone next. CPU side (rebuild/layout/paint) still full every change.
+- [x] Partial repaint (GPU): scissored retained canvas, per-node damage
+      from a scene diff, idle frames skipped (`docs/rendering.md`). Still to
+      measure on the phone against the Bench baseline.
+- [ ] Partial rebuild and relayout (CPU): every change still runs the whole
+      `App::view`, a full taffy layout and a full paint. Open questions:
+      rebuild only dirty `stateful` subtrees; cache taffy nodes for
+      incremental layout; skip off-screen scroll content; how this interacts
+      with global state change notification.
 
 ## Framework
 
@@ -60,9 +61,7 @@ for 1000). Laying out a 300-char paragraph: ~67 µs uncached, ~0.1 µs cached.
       frame. Cut frame CPU ~82%.
 - [ ] Cheaper layout misses (changing text: typing, counters): cache
       per-char advances and kerning pairs instead of re-querying the font.
-- [ ] Skip layout/paint of off-screen scroll content.
 - [ ] Upload only newly added glyph data (all outlines re-uploaded today).
-- [ ] Incremental layout: cache taffy nodes instead of full relayout per frame.
 - [ ] Event hit-testing index (every event visits every node today).
 - [ ] Profile 120 Hz devices; outline text costs ~1.6 ms more than the old
       MSDF path on a typical screen.
