@@ -15,6 +15,19 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 - [ ] Status bar icon color: light/dark appearance so icons stay visible on
       light backgrounds.
 
+## Design studies (need discussion before code)
+
+- [ ] Global state management: how app-wide state reaches deep widgets
+      without threading it through every `view` call or `Msg`. Open
+      questions: Elm `App` vs context/provider-style injection vs shared
+      stores; how it coexists with `stateful` local state; change
+      notification and which subtrees rebuild.
+- [ ] Partial redraws: avoid full rebuild/relayout/repaint on every change.
+      Open questions: rebuild only dirty `stateful` subtrees; cache taffy
+      nodes for incremental layout; retained scene with damage rects vs
+      redrawing the whole frame; interaction with `request_frame`
+      animations and power use on mobile.
+
 ## Framework
 
 - [ ] Animations: build on `PaintCx::request_frame`; time source + easing.
