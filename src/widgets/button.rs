@@ -4,6 +4,8 @@ use super::Styled;
 use crate::render::{Color, Shadow};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
+type Handler<Msg> = Box<dyn Fn(&mut EventCx<Msg>)>;
+
 #[derive(Default)]
 struct ButtonState {
     pressed: bool,
@@ -12,7 +14,7 @@ struct ButtonState {
 
 pub struct Button<Msg> {
     child: [Element<Msg>; 1],
-    on_press: Option<Msg>,
+    on_click: Option<Handler<Msg>>,
     style: Style,
     color: Color,
     radius: f32,
@@ -21,7 +23,7 @@ pub struct Button<Msg> {
 pub fn button<Msg>(child: impl Into<Element<Msg>>) -> Button<Msg> {
     Button {
         child: [child.into()],
-        on_press: None,
+        on_click: None,
         style: Style {
             padding: taffy::Rect {
                 left: LengthPercentage::length(16.0),
@@ -39,9 +41,16 @@ pub fn button<Msg>(child: impl Into<Element<Msg>>) -> Button<Msg> {
 }
 
 impl<Msg> Button<Msg> {
-    pub fn on_press(mut self, msg: Msg) -> Self {
-        self.on_press = Some(msg);
+    /// Runs on release inside the button; can `emit` messages or `update` local state.
+    pub fn on_click(mut self, f: impl Fn(&mut EventCx<Msg>) + 'static) -> Self {
+        self.on_click = Some(Box::new(f));
         self
+    }
+    pub fn on_press(self, msg: Msg) -> Self
+    where
+        Msg: Clone + 'static,
+    {
+        self.on_click(move |cx| cx.emit(msg.clone()))
     }
     pub fn color(mut self, c: Color) -> Self {
         self.color = c;
@@ -53,7 +62,7 @@ impl<Msg> Button<Msg> {
     }
 }
 
-impl<Msg: Clone + 'static> From<Button<Msg>> for Element<Msg> {
+impl<Msg: 'static> From<Button<Msg>> for Element<Msg> {
     fn from(w: Button<Msg>) -> Self {
         Element::new(w)
     }
@@ -65,7 +74,7 @@ impl<Msg> Styled for Button<Msg> {
     }
 }
 
-impl<Msg: Clone> Widget<Msg> for Button<Msg> {
+impl<Msg> Widget<Msg> for Button<Msg> {
     fn style(&self) -> Style {
         self.style.clone()
     }
@@ -116,8 +125,8 @@ impl<Msg: Clone> Widget<Msg> for Button<Msg> {
             Event::PointerUp { .. } => {
                 let fire = s.pressed && hit;
                 s.pressed = false;
-                if fire && let Some(m) = self.on_press.clone() {
-                    cx.emit(m);
+                if fire && let Some(f) = &self.on_click {
+                    f(cx);
                 }
             }
             Event::Cancel => s.pressed = false,

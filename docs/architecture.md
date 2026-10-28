@@ -53,6 +53,16 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
   keyed by a hash of the parent id plus child slot index, or `Element::key`
   when set. State for ids missing from the new tree is dropped after each
   update. Use `key` for reorderable lists.
+- Two kinds of state: app/domain state lives in `App` and changes through
+  `Msg`; ephemeral UI state (expanded, tab index, field contents) lives in a
+  `stateful(|s: &S, h: Handle<S>| ...)` widget. Handlers capture the `Copy`
+  handle, never the state, and call `cx.update(h, |s: &mut S| ...)`; the
+  runtime lends the state during the call, so there are no borrow problems.
+- `stateful` builds its subtree lazily in `flatten` via `Widget::expand`, with
+  `S` read from its state slot. Queued updates are applied after dispatch,
+  before messages, then the tree is rebuilt.
+- `Button::on_click(|cx| ..)` is the general handler; `on_press(msg)` is sugar
+  for emitting a message.
 
 ## Layout
 

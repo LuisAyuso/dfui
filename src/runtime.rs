@@ -98,7 +98,7 @@ impl<A: App> Runtime<A> {
     }
 
     fn relayout(&mut self) {
-        let nodes = flatten(&self.root);
+        let nodes = flatten(&self.root, &mut self.states);
         self.placed = layout(
             &nodes,
             &mut self.states,
@@ -130,11 +130,12 @@ impl<A: App> Runtime<A> {
     }
 
     fn dispatch(&mut self, ev: Event) {
-        let nodes = flatten(&self.root);
+        let nodes = flatten(&self.root, &mut self.states);
         if nodes.len() != self.placed.len() {
             return;
         }
         let mut msgs = Vec::new();
+        let mut updates = Vec::new();
         let mut redraw = false;
         let targets: Vec<usize> = match self.captured {
             Some(id) => nodes.iter().position(|n| n.id == id).into_iter().collect(),
@@ -150,6 +151,7 @@ impl<A: App> Runtime<A> {
                 content: p.content,
                 state: self.states.entry(nodes[i].id).or_default(),
                 msgs: &mut msgs,
+                updates: &mut updates,
                 capture: false,
                 stop: false,
                 redraw: false,
@@ -167,6 +169,7 @@ impl<A: App> Runtime<A> {
                         content: p.content,
                         state: self.states.entry(n.id).or_default(),
                         msgs: &mut msgs,
+                        updates: &mut updates,
                         capture: false,
                         stop: false,
                         redraw: false,
@@ -184,13 +187,19 @@ impl<A: App> Runtime<A> {
             self.captured = None;
         }
 
-        if !msgs.is_empty() {
+        if !msgs.is_empty() || !updates.is_empty() {
+            for (id, f) in updates {
+                f(self.states.entry(id).or_default());
+            }
             for m in msgs {
                 self.app.update(m);
             }
+            // ponytail: any update rebuilds the whole tree; rebuild only dirty stateful subtrees if views get expensive.
             self.root = self.app.view();
-            let live: std::collections::HashSet<u64> =
-                flatten(&self.root).iter().map(|n| n.id).collect();
+            let live: std::collections::HashSet<u64> = flatten(&self.root, &mut self.states)
+                .iter()
+                .map(|n| n.id)
+                .collect();
             self.states.retain(|id, _| live.contains(id));
             redraw = true;
         }
@@ -217,7 +226,7 @@ impl<A: App> Runtime<A> {
     }
 
     fn scene(&mut self, frame: &mut bool) -> Scene {
-        let nodes = flatten(&self.root);
+        let nodes = flatten(&self.root, &mut self.states);
         let mut scene = Scene::default();
         for (n, p) in nodes.iter().zip(&self.placed) {
             n.w.paint(&mut PaintCx {
@@ -337,7 +346,7 @@ impl<A: App> ApplicationHandler for Runtime<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widgets::{Styled, button, column, text};
+    use crate::widgets::{Styled, button, column, stateful, text};
 
     struct Counter(i32);
 
@@ -365,5 +374,39 @@ mod tests {
         rt.dispatch(Event::PointerDown { x: 10.0, y: 100.0 });
         rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
         assert_eq!(rt.app.0, 1);
+    }
+
+    struct Local(i32);
+
+    impl App for Local {
+        type Msg = i32;
+        fn update(&mut self, d: i32) {
+            self.0 += d;
+        }
+        fn view(&self) -> Element<i32> {
+            stateful(|n: &i32, h| {
+                button(text(format!("{n}")))
+                    .on_click(move |cx| {
+                        cx.update(h, |n: &mut i32| *n += 1);
+                        cx.emit(10);
+                    })
+                    .height(40.0)
+            })
+            .into()
+        }
+    }
+
+    #[test]
+    fn stateful_update_survives_rebuild_alongside_msgs() {
+        let mut rt = Runtime::new(Local(0));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        for _ in 0..2 {
+            rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+            rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+        }
+        assert_eq!(rt.app.0, 20);
+        let id = flatten(&rt.root, &mut rt.states)[0].id;
+        assert_eq!(*rt.states.get_mut(&id).unwrap().get::<i32>(), 2);
     }
 }

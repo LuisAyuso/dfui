@@ -8,6 +8,7 @@ mod button;
 mod container;
 mod label;
 mod scroll;
+mod stateful;
 
 use taffy::{AlignItems, Dimension, FlexWrap, JustifyContent, LengthPercentage, Size, Style};
 
@@ -15,6 +16,7 @@ pub use button::{Button, button};
 pub use container::{Container, column, container, row, spacer};
 pub use label::{Label, text};
 pub use scroll::{Scroll, scroll};
+pub use stateful::{Stateful, stateful};
 
 /// Flex-layout modifiers shared by every widget that owns a `Style`.
 pub trait Styled: Sized {

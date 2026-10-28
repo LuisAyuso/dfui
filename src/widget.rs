@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::marker::PhantomData;
 
 use taffy::{AvailableSpace, Size, Style};
 
@@ -62,6 +63,10 @@ pub trait Widget<Msg> {
         &[]
     }
 
+    /// Runs before `children` with this node's id and state slot; lets a widget
+    /// build its subtree from framework-owned state.
+    fn expand(&self, _id: u64, _state: &mut State) {}
+
     /// Intrinsic size of a leaf (children-less) widget.
     fn measure(
         &self,
@@ -94,6 +99,31 @@ impl State {
         self.0.as_mut().unwrap().downcast_mut().unwrap()
     }
 }
+
+/// Typed reference to a stateful widget's state, cheap to capture in handlers.
+pub struct Handle<S> {
+    pub(crate) id: u64,
+    _s: PhantomData<fn() -> S>,
+}
+
+impl<S> Handle<S> {
+    pub(crate) fn new(id: u64) -> Self {
+        Handle {
+            id,
+            _s: PhantomData,
+        }
+    }
+}
+
+impl<S> Clone for Handle<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for Handle<S> {}
+
+pub(crate) type Update = (u64, Box<dyn FnOnce(&mut State)>);
 
 pub struct PaintCx<'a> {
     pub rect: Rect,
@@ -151,6 +181,7 @@ pub struct EventCx<'a, Msg> {
     pub content: Size<f32>,
     pub state: &'a mut State,
     pub(crate) msgs: &'a mut Vec<Msg>,
+    pub(crate) updates: &'a mut Vec<Update>,
     pub(crate) capture: bool,
     pub(crate) stop: bool,
     pub(crate) redraw: bool,
@@ -163,6 +194,12 @@ impl<Msg> EventCx<'_, Msg> {
 
     pub fn emit(&mut self, msg: Msg) {
         self.msgs.push(msg);
+    }
+
+    /// Modify a stateful widget's state after this event; its subtree is rebuilt.
+    pub fn update<S: Default + 'static>(&mut self, h: Handle<S>, f: impl FnOnce(&mut S) + 'static) {
+        self.updates
+            .push((h.id, Box::new(move |st: &mut State| f(st.get::<S>()))));
     }
 
     /// Route all pointer events to this widget until pointer up; others get `Cancel`.

@@ -25,32 +25,38 @@ pub(crate) struct Placed {
     pub content: Size<f32>,
 }
 
-/// Pre-order flattening of the element tree.
-pub(crate) fn flatten<Msg>(root: &Element<Msg>) -> Vec<Node<'_, Msg>> {
+/// Pre-order flattening of the element tree, expanding stateful widgets.
+pub(crate) fn flatten<'a, Msg>(
+    root: &'a Element<Msg>,
+    states: &mut HashMap<u64, State>,
+) -> Vec<Node<'a, Msg>> {
     fn go<'a, Msg>(
         e: &'a Element<Msg>,
         parent: Option<usize>,
         slot: u64,
+        states: &mut HashMap<u64, State>,
         out: &mut Vec<Node<'a, Msg>>,
     ) {
         let mut h = DefaultHasher::new();
         parent.map(|p| out[p].id).hash(&mut h);
         e.key.is_some().hash(&mut h);
         e.key.unwrap_or(slot).hash(&mut h);
+        let id = h.finish();
+        e.widget.expand(id, states.entry(id).or_default());
         let i = out.len();
         out.push(Node {
             w: e.widget.as_ref(),
-            id: h.finish(),
+            id,
             parent,
             end: 0,
         });
         for (n, c) in e.widget.children().iter().enumerate() {
-            go(c, Some(i), n as u64, out);
+            go(c, Some(i), n as u64, states, out);
         }
         out[i].end = out.len();
     }
     let mut out = Vec::new();
-    go(root, None, 0, &mut out);
+    go(root, None, 0, states, &mut out);
     out
 }
 
@@ -185,10 +191,11 @@ mod tests {
         .padding(10.0)
         .gap(5.0)
         .into();
-        let nodes = flatten(&root);
+        let mut states = HashMap::new();
+        let nodes = flatten(&root, &mut states);
         let p = layout(
             &nodes,
-            &mut HashMap::new(),
+            &mut states,
             &Text::default(),
             (100.0, 200.0),
             [0.0; 4],

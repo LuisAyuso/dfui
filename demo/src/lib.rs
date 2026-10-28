@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
-use dfui::widgets::{Styled, button, column, container, row, scroll, spacer, text};
+use dfui::widgets::{Styled, button, column, container, row, scroll, spacer, stateful, text};
 use dfui::{App, Color, Element, PaintCx, Shadow, Widget};
 
 const BG: Color = Color::hex(0xf2f3f7);
@@ -179,43 +179,49 @@ impl<M: 'static> From<FpsMeter> for Element<M> {
     }
 }
 
+/// Expanded/collapsed is ephemeral UI state, so it stays local to the card.
 fn card(n: u32) -> Element<Msg> {
-    row([
-        container(text(n.to_string()).size(20.0).color(Color::WHITE))
-            .bg(ACCENT)
-            .radius(24.0)
-            .width(48.0)
-            .height(48.0)
-            .shrink(0.0)
-            .align(AlignItems::CENTER)
-            .justify(JustifyContent::CENTER)
-            .into(),
-        column([
-            text(format!("Card {n}")).size(18.0).color(INK).into(),
-            text("Rounded box SDF with border and soft shadow.")
-                .size(14.0)
-                .color(MUTED)
+    stateful(move |&open: &bool, h| {
+        let mut body = vec![text(format!("Card {n}")).size(18.0).color(INK).into()];
+        if open {
+            body.push(
+                text("Rounded box SDF with border and soft shadow. This text lives in local widget state, toggled without an app message.")
+                    .size(14.0)
+                    .color(MUTED)
+                    .into(),
+            );
+        }
+        row([
+            container(text(n.to_string()).size(20.0).color(Color::WHITE))
+                .bg(ACCENT)
+                .radius(24.0)
+                .width(48.0)
+                .height(48.0)
+                .shrink(0.0)
+                .align(AlignItems::CENTER)
+                .justify(JustifyContent::CENTER)
+                .into(),
+            column(body).gap(4.0).grow(1.0).shrink(1.0).into(),
+            button(text(if open { "less" } else { "more" }).size(14.0).color(INK))
+                .on_click(move |cx| cx.update(h, |open: &mut bool| *open = !*open))
+                .color(Color::hex(0xe8e9ef))
+                .into(),
+            button(text("×").size(20.0).color(INK))
+                .on_press(Msg::Remove(n))
+                .color(Color::hex(0xe8e9ef))
                 .into(),
         ])
-        .gap(4.0)
-        .grow(1.0)
-        .shrink(1.0)
-        .into(),
-        button(text("×").size(20.0).color(INK))
-            .on_press(Msg::Remove(n))
-            .color(Color::hex(0xe8e9ef))
-            .into(),
-    ])
-    .align(AlignItems::CENTER)
-    .gap(14.0)
-    .padding(14.0)
-    .bg(Color::WHITE)
-    .radius(14.0)
-    .border(1.0, Color::hex(0xdfe1e8))
-    .shadow(Shadow {
-        color: Color::BLACK.alpha(0.12),
-        offset: (0.0, 3.0),
-        blur: 8.0,
+        .align(AlignItems::CENTER)
+        .gap(14.0)
+        .padding(14.0)
+        .bg(Color::WHITE)
+        .radius(14.0)
+        .border(1.0, Color::hex(0xdfe1e8))
+        .shadow(Shadow {
+            color: Color::BLACK.alpha(0.12),
+            offset: (0.0, 3.0),
+            blur: 8.0,
+        })
     })
     .into()
 }

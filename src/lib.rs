@@ -14,7 +14,7 @@ pub use render::{Color, Rect, Shadow};
 pub use runtime::snapshot;
 pub use taffy;
 pub use text::Text;
-pub use widget::{Element, Event, EventCx, PaintCx, State, Widget};
+pub use widget::{Element, Event, EventCx, Handle, PaintCx, State, Widget};
 
 pub trait App: 'static {
     type Msg: 'static;
