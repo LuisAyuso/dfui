@@ -22,12 +22,49 @@ fn main() { dfui::run(Counter(0)); }
 - `src/` — the framework crate (`dfui`)
 - `demo/` — demo app, desktop binary and Android `cdylib`
 - `docs/architecture.md` — how it fits together
+- `docs/rendering.md` — renderer details and rendering prototypes
 - `TODO.md` — roadmap and current performance baseline
 
 ## Running
 
 ```sh
-cargo run -p dfui-demo                 # desktop
-cargo apk run -p dfui-demo --release   # Android (aarch64, min SDK 26)
-cargo test
+cargo run -p dfui-demo --release   # desktop
+cargo test                         # GPU tests: cargo test -- --include-ignored
 ```
+
+`DFUI_SHOW_DAMAGE=1` tints the area redrawn each frame (desktop debugging).
+
+## Android
+
+The demo is a NativeActivity app built with `cargo-apk`, aarch64 only,
+min SDK 26, target SDK 35.
+
+One-time setup:
+
+```sh
+rustup target add aarch64-linux-android
+cargo install cargo-apk
+# Android SDK with platform-tools, build-tools, platform android-35 and an NDK
+export ANDROID_HOME=/opt/android-sdk
+export NDK_HOME=$ANDROID_HOME/ndk/<version>
+# Release builds need a keystore; the debug one is fine for development.
+export CARGO_APK_RELEASE_KEYSTORE=$HOME/.android/debug.keystore
+export CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android
+```
+
+`cargo-apk` is capped at platform 35, so `android-35` must be installed even
+if newer platforms are present.
+
+Run on a device (USB debugging on, visible in `adb devices`):
+
+```sh
+cargo apk run -p dfui-demo --lib --release
+adb logcat | grep -E 'dfui|fps'   # logs; frame stats every 2 s
+```
+
+`--lib` is needed because the demo crate also has a desktop binary, which
+makes `cargo-apk` panic ("Bin is not compatible with Cdylib") after building.
+The APK lands in `target/release/apk/dfui-demo.apk`; `cargo apk build`
+instead of `run` only builds it. For real distribution, point the keystore
+variables at a release keystore. Frame stats (`fps … cpu … gpu …`) are how the
+baselines in `TODO.md` are measured; use the demo's Bench screen.
