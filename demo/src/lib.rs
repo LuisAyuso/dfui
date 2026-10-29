@@ -1,10 +1,11 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use dfui::anim::{Lerp, ease};
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
     Styled, button, column, container, row, scroll, spacer, stateful, text, text_input,
 };
-use dfui::{App, Color, Element, Font, PaintCx, Shadow, Widget};
+use dfui::{Animated, App, Color, Element, Font, PaintCx, Rect, Shadow, Widget};
 
 static BOLD: Font = Font(include_bytes!("../../assets/DejaVuSans-Bold.ttf"));
 
@@ -18,6 +19,7 @@ pub struct Demo {
     count: i32,
     items: Vec<u32>,
     bench: bool,
+    playing: bool,
 }
 
 impl Default for Demo {
@@ -26,6 +28,7 @@ impl Default for Demo {
             count: 0,
             items: (1..=12).collect(),
             bench: false,
+            playing: true,
         }
     }
 }
@@ -37,6 +40,7 @@ pub enum Msg {
     Add,
     Remove(u32),
     Bench,
+    Play,
 }
 
 impl App for Demo {
@@ -49,6 +53,7 @@ impl App for Demo {
             Msg::Add => self.items.push(self.items.last().map_or(1, |n| n + 1)),
             Msg::Remove(n) => self.items.retain(|&i| i != n),
             Msg::Bench => self.bench = !self.bench,
+            Msg::Play => self.playing = !self.playing,
         }
     }
 
@@ -86,6 +91,20 @@ impl App for Demo {
                 .color(Color::hex(0x2f9e6a))
                 .into(),
         ])
+        .gap(12.0);
+
+        let pulse = row([
+            Pulse {
+                playing: self.playing,
+            }
+            .into(),
+            button(text(if self.playing { "Pause" } else { "Resume" }).color(INK))
+                .on_press(Msg::Play)
+                .color(Color::hex(0xe8e9ef))
+                .width(96.0)
+                .into(),
+        ])
+        .align(AlignItems::CENTER)
         .gap(12.0);
 
         let chips = row(CHIPS.iter().enumerate().map(|(i, &c)| {
@@ -126,6 +145,7 @@ impl App for Demo {
             header.into(),
             greeting.into(),
             counter.into(),
+            pulse.into(),
             chips.into(),
             text("Shapes are distance fields and glyphs are evaluated from their outlines, so both stay crisp at any size. Resize the window to watch the flex layout reflow.")
                 .size(15.0)
@@ -204,6 +224,79 @@ impl<M: 'static> From<FpsMeter> for Element<M> {
     }
 }
 
+/// Seconds for one sweep of the dot across the track.
+const SWEEP: f32 = 1.2;
+
+#[derive(Default)]
+struct PulseState {
+    /// Sweeps travelled; accumulates frame time scaled by `speed`.
+    phase: f32,
+    last: Option<Instant>,
+    /// 1 while playing, 0 while paused; eased so the dot glides to a stop.
+    speed: Animated<f32>,
+}
+
+impl PulseState {
+    /// Advances to `now`; returns the dot's position in 0..=1 and whether it
+    /// still moves (and so needs another frame).
+    fn advance(&mut self, playing: bool, now: Instant) -> (f32, bool) {
+        let target = if playing { 1.0 } else { 0.0 };
+        self.speed
+            .to(target, now, Duration::from_millis(600), ease::in_out_cubic);
+        let speed = self.speed.get(now);
+        if let Some(last) = self.last {
+            self.phase += (now - last).as_secs_f32() * speed / SWEEP;
+        }
+        // Speed eases up from 0 on resume, so a long pause adds nothing.
+        self.last = Some(now);
+        let moving = speed > 0.0 || self.speed.running(now);
+        let p = self.phase % 2.0;
+        (
+            ease::in_out_cubic(if p < 1.0 { p } else { 2.0 - p }),
+            moving,
+        )
+    }
+}
+
+/// A dot swinging along a track; pausing eases it to a halt instead of freezing it.
+struct Pulse {
+    playing: bool,
+}
+
+impl<M> Widget<M> for Pulse {
+    fn style(&self) -> Style {
+        Style {
+            size: Size {
+                width: Dimension::auto(),
+                height: Dimension::length(36.0),
+            },
+            flex_grow: 1.0,
+            ..Style::default()
+        }
+    }
+
+    fn paint(&self, cx: &mut PaintCx) {
+        let now = cx.now;
+        let (t, moving) = cx.state.get::<PulseState>().advance(self.playing, now);
+        if moving {
+            cx.request_frame();
+        }
+
+        let r = cx.rect;
+        cx.fill(r, r.h / 2.0, Color::hex(0xe8e9ef));
+        let d = r.h - 8.0;
+        let x = r.x + 4.0 + t * (r.w - d - 8.0);
+        let dot = ACCENT.lerp(Color::hex(CHIPS[4]), t);
+        cx.fill(Rect::new(x, r.y + 4.0, d, d), d / 2.0, dot);
+    }
+}
+
+impl<M: 'static> From<Pulse> for Element<M> {
+    fn from(w: Pulse) -> Self {
+        Element::new(w)
+    }
+}
+
 /// Expanded/collapsed is ephemeral UI state, so it stays local to the card.
 fn card(n: u32) -> Element<Msg> {
     stateful(move |&open: &bool, h| {
@@ -262,6 +355,31 @@ fn android_main(app: dfui::AndroidApp) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn pulse_pauses_smoothly_and_resumes_without_jumping() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut s = PulseState::default();
+        s.advance(true, at(0));
+        let (_, moving) = s.advance(true, at(300));
+        assert!(moving);
+        let before = s.phase;
+        // Pausing glides on for a moment before stopping.
+        s.advance(false, at(316));
+        let (_, gliding) = s.advance(false, at(332));
+        assert!(gliding && s.phase > before);
+        let (_, moving) = s.advance(false, at(1000));
+        assert!(!moving, "stopped once eased to zero");
+        let stopped = s.phase;
+        // A long pause adds nothing; resuming starts from rest.
+        s.advance(true, at(9000));
+        assert_eq!(s.phase, stopped);
+        s.advance(true, at(9016));
+        assert!(s.phase - stopped < 0.001, "eases back in");
+    }
+
     #[test]
     #[ignore = "needs a GPU; writes target/demo.png for eyeballing"]
     fn snapshot() {
@@ -277,6 +395,7 @@ mod tests {
         fn update(&mut self, _: ()) {}
         fn view(&self) -> dfui::Element<()> {
             use dfui::widgets::{Styled, column, text};
+
             column([10.0, 13.0, 18.0, 32.0, 64.0, 240.0].map(|s| text("Rag&@ %g1").size(s).into()))
                 .padding(8.0)
                 .into()
