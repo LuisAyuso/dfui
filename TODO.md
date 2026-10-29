@@ -43,8 +43,10 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 
 ## Text
 
-- [ ] Shaping and bidi (rustybuzz); glyph cache keyed by glyph id, not `char`.
-- [ ] Multiple fonts, bold/italic, fallback.
+- [x] Multiple fonts: app-supplied `Font` bytes (bold/italic are just more
+      fonts), glyphs keyed by (font, glyph id), fallback to the default font.
+- [ ] Shaping and bidi (rustybuzz).
+- [ ] Fallback chains beyond the default font (emoji, CJK), system fonts.
 - [ ] Line breaking beyond spaces (long words/URLs).
 - [ ] Adaptive cubic→quadratic split for CFF fonts (fixed 4-way split today).
 - [ ] Test with variable fonts / overlapping contours.

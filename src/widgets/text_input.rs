@@ -3,7 +3,7 @@ use taffy::{AvailableSpace, LengthPercentage, Size, Style};
 
 use super::Styled;
 use crate::render::{Color, Rect};
-use crate::text::Text;
+use crate::text::{Font, Text};
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, Widget};
 
 type OnChange<Msg> = Box<dyn Fn(&mut EventCx<Msg>, String)>;
@@ -17,6 +17,7 @@ struct Caret(usize);
 pub struct TextInput<Msg> {
     value: String,
     placeholder: String,
+    font: Font,
     size: f32,
     color: Color,
     accent: Color,
@@ -28,6 +29,7 @@ pub fn text_input<Msg>(value: impl Into<String>) -> TextInput<Msg> {
     TextInput {
         value: value.into(),
         placeholder: String::new(),
+        font: Font::DEFAULT,
         size: 16.0,
         color: Color::BLACK,
         accent: Color::hex(0x3b6fe0),
@@ -52,6 +54,10 @@ impl<Msg> TextInput<Msg> {
     }
     pub fn placeholder(mut self, s: impl Into<String>) -> Self {
         self.placeholder = s.into();
+        self
+    }
+    pub fn font(mut self, f: Font) -> Self {
+        self.font = f;
         self
     }
     pub fn size(mut self, s: f32) -> Self {
@@ -81,7 +87,7 @@ impl<Msg> TextInput<Msg> {
 
     /// Caret stops and the horizontal shift that keeps the caret in view.
     fn stops(&self, text: &Text, caret: usize, width: f32) -> (Vec<f32>, f32) {
-        let stops = text.caret_stops(&self.value, self.size);
+        let stops = text.caret_stops(&self.value, self.font, self.size);
         let shift = (stops[caret] + 2.0 - width).max(0.0);
         (stops, shift)
     }
@@ -123,7 +129,9 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
     ) -> Size<f32> {
         Size {
             width: known.width.unwrap_or(160.0),
-            height: known.height.unwrap_or(text.line_height(self.size)),
+            height: known
+                .height
+                .unwrap_or(text.line_height(self.font, self.size)),
         }
     }
     fn paint(&self, cx: &mut PaintCx) {
@@ -142,12 +150,26 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
         cx.clip = outer.intersect(&c);
         if self.value.is_empty() {
             let muted = self.color.alpha(0.4);
-            cx.text(&self.placeholder, self.size, muted, None, (c.x, c.y));
+            cx.text(
+                &self.placeholder,
+                self.font,
+                self.size,
+                muted,
+                None,
+                (c.x, c.y),
+            );
         } else {
-            cx.text(&self.value, self.size, self.color, None, (c.x - shift, c.y));
+            cx.text(
+                &self.value,
+                self.font,
+                self.size,
+                self.color,
+                None,
+                (c.x - shift, c.y),
+            );
         }
         if cx.focused {
-            let h = cx.text.line_height(self.size);
+            let h = cx.text.line_height(self.font, self.size);
             let x = c.x + stops[caret] - shift;
             cx.fill(Rect::new(x, c.y, 1.5, h), 0.0, self.accent);
         }

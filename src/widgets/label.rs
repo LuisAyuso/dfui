@@ -2,11 +2,12 @@ use taffy::{AvailableSpace, Size, Style};
 
 use super::Styled;
 use crate::render::Color;
-use crate::text::Text;
+use crate::text::{Font, Text};
 use crate::widget::{Element, PaintCx, Widget};
 
 pub struct Label {
     text: String,
+    font: Font,
     size: f32,
     color: Color,
     style: Style,
@@ -15,6 +16,7 @@ pub struct Label {
 pub fn text(s: impl Into<String>) -> Label {
     Label {
         text: s.into(),
+        font: Font::DEFAULT,
         size: 16.0,
         color: Color::BLACK,
         style: Style::default(),
@@ -22,6 +24,10 @@ pub fn text(s: impl Into<String>) -> Label {
 }
 
 impl Label {
+    pub fn font(mut self, f: Font) -> Self {
+        self.font = f;
+        self
+    }
     pub fn size(mut self, s: f32) -> Self {
         self.size = s;
         self
@@ -59,7 +65,7 @@ impl<Msg> Widget<Msg> for Label {
             AvailableSpace::MinContent => Some(0.0),
             AvailableSpace::MaxContent => None,
         });
-        let l = text.layout(&self.text, self.size, max);
+        let l = text.layout(&self.text, self.font, self.size, max);
         Size {
             width: known.width.unwrap_or(l.width),
             height: known.height.unwrap_or(l.height),
@@ -67,6 +73,6 @@ impl<Msg> Widget<Msg> for Label {
     }
     fn paint(&self, cx: &mut PaintCx) {
         let (r, s, c) = (cx.rect, self.size, self.color);
-        cx.text(&self.text, s, c, Some(r.w + 1.0), (r.x, r.y));
+        cx.text(&self.text, self.font, s, c, Some(r.w + 1.0), (r.x, r.y));
     }
 }

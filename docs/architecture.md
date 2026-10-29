@@ -39,7 +39,7 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 | `runtime.rs` | Event loop, input → `Event` translation, dispatch, pointer capture, frame stats, `snapshot`. |
 | `render.rs` | `Scene`, `Color`/`Rect`/`Shadow`, wgpu setup, the single render pass, GPU timestamp timing, offscreen rendering. |
 | `shader.wgsl` | Vertex expands instances to quads; fragment does SDF shapes (kind 0) and outline glyphs (kind 1). |
-| `text.rs` | Font loading (bundled DejaVu Sans), kerning, greedy word wrap, lazy glyph outline building. |
+| `text.rs` | `Font` handles (bundled DejaVu Sans as default and fallback), kerning, greedy word wrap, lazy glyph outline building. |
 | `outline.rs` | Converts glyph contours to monotonic quadratics and per-glyph band lists for the shader. |
 | `android.rs` | JNI query for system bar / cutout insets. |
 
@@ -117,5 +117,5 @@ Details and design decisions, including partial redraws: `rendering.md`.
 ## Known limits
 
 Tracked in `TODO.md` and as `ponytail:` comments in the code: no IME composition on desktop,
-no shaping/bidi, single font, single pointer, full relayout per frame, all
+no shaping/bidi, fallback only to the default font, single pointer, full relayout per frame, all
 outlines re-uploaded when a glyph is added, linear hit-testing.

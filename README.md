@@ -74,6 +74,6 @@ baselines in `TODO.md` are measured; use the demo's Bench screen.
 
 ## License
 
-[WTFPL](LICENSE). The bundled font `assets/DejaVuSans.ttf` keeps its own
+[WTFPL](LICENSE). The bundled fonts `assets/DejaVuSans*.ttf` keep their own
 license, the DejaVu Fonts License derived from Bitstream Vera:
 [`assets/DejaVuSans-LICENSE.txt`](assets/DejaVuSans-LICENSE.txt).

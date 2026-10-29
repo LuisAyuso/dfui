@@ -4,7 +4,9 @@ use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
     Styled, button, column, container, row, scroll, spacer, stateful, text, text_input,
 };
-use dfui::{App, Color, Element, PaintCx, Shadow, Widget};
+use dfui::{App, Color, Element, Font, PaintCx, Shadow, Widget};
+
+static BOLD: Font = Font(include_bytes!("../../assets/DejaVuSans-Bold.ttf"));
 
 const BG: Color = Color::hex(0xf2f3f7);
 const INK: Color = Color::hex(0x1d2030);
@@ -55,7 +57,7 @@ impl App for Demo {
             return bench();
         }
         let header = row([
-            text("dfui").size(28.0).color(INK).into(),
+            text("dfui").font(BOLD).size(28.0).color(INK).into(),
             spacer().grow(1.0).into(),
             text(format!("count {}", self.count))
                 .size(18.0)
@@ -191,7 +193,7 @@ impl<M> Widget<M> for FpsMeter {
         }
         let label = format!("{:.0} fps", s.fps);
         let r = cx.rect;
-        cx.text(&label, 22.0, ACCENT, None, (r.x, r.y));
+        cx.text(&label, Font::DEFAULT, 22.0, ACCENT, None, (r.x, r.y));
         cx.request_frame();
     }
 }

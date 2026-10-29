@@ -13,7 +13,7 @@ pub mod widgets;
 pub use render::{Color, Rect, Shadow};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;
-pub use text::Text;
+pub use text::{Font, Text};
 pub use widget::{Element, Event, EventCx, Handle, Key, PaintCx, State, Widget};
 
 pub trait App: 'static {

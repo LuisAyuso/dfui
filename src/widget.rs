@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use taffy::{AvailableSpace, Size, Style};
 
 use crate::render::{Color, Rect, Scene, Shadow};
-use crate::text::Text;
+use crate::text::{Font, Text};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -181,13 +181,15 @@ impl PaintCx<'_> {
     pub fn text(
         &mut self,
         s: &str,
+        font: Font,
         size: f32,
         color: Color,
         max_width: Option<f32>,
         origin: (f32, f32),
     ) {
-        self.text
-            .draw(s, size, max_width, origin, color, self.clip, self.scene);
+        self.text.draw(
+            s, font, size, max_width, origin, color, self.clip, self.scene,
+        );
     }
 }
 

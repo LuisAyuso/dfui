@@ -1,5 +1,5 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-use dfui::{Bench, Text};
+use dfui::{Bench, Font, Text};
 
 mod common;
 use common::Cards;
@@ -21,12 +21,12 @@ fn text_layout(c: &mut Criterion) {
         };
         b.iter_batched(
             evict,
-            |_| t.layout(PARAGRAPH, 15.0, Some(320.0)),
+            |_| t.layout(PARAGRAPH, Font::DEFAULT, 15.0, Some(320.0)),
             BatchSize::PerIteration,
         )
     });
     c.bench_function("text/layout_paragraph_cached", |b| {
-        b.iter(|| t.layout(PARAGRAPH, 15.0, Some(320.0)))
+        b.iter(|| t.layout(PARAGRAPH, Font::DEFAULT, 15.0, Some(320.0)))
     });
 }
 
