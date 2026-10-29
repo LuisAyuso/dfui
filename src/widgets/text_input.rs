@@ -2,6 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use taffy::util::ResolveOrZero;
 use taffy::{AvailableSpace, LengthPercentage, Size, Style};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::Styled;
 use crate::render::{Color, Rect};
@@ -10,7 +11,7 @@ use crate::widget::{Element, Event, EventCx, Key, PaintCx, Widget};
 
 type OnChange<Msg> = Box<dyn Fn(&mut EventCx<Msg>, String)>;
 
-/// Caret position in chars.
+/// Caret position in chars, always on a grapheme boundary.
 #[derive(Default)]
 struct Caret(usize);
 
@@ -94,8 +95,24 @@ impl<Msg> TextInput<Msg> {
         (stops, shift)
     }
 
+    /// Char indices where the caret may sit: grapheme cluster boundaries, so
+    /// it never lands between a letter and its accent or inside an emoji.
+    fn boundaries(&self) -> Vec<usize> {
+        let mut n = 0;
+        let ends = self.value.graphemes(true).map(|g| {
+            n += g.chars().count();
+            n
+        });
+        std::iter::once(0).chain(ends).collect()
+    }
+
+    /// The stored caret, snapped back to a boundary if the value changed.
     fn caret(&self, c: &mut Caret) -> usize {
-        c.0 = c.0.min(self.value.chars().count());
+        c.0 = self
+            .boundaries()
+            .into_iter()
+            .rfind(|&b| b <= c.0)
+            .unwrap_or(0);
         c.0
     }
 
@@ -184,7 +201,9 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
     }
     fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
         let caret = self.caret(cx.state.get::<Caret>());
-        let len = self.value.chars().count();
+        let bounds = self.boundaries();
+        let prev = bounds.iter().rfind(|&&b| b < caret).copied();
+        let next = bounds.iter().find(|&&b| b > caret).copied();
         let edit = |cx: &mut EventCx<Msg>, value: String, caret: usize| {
             cx.state.get::<Caret>().0 = caret;
             if let Some(f) = &self.on_change {
@@ -197,7 +216,9 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
                 let c = self.content(cx.rect);
                 let (stops, shift) = self.stops(cx.text, caret, c.w);
                 let at = x - c.x + shift;
-                let nearest = (0..stops.len())
+                let nearest = bounds
+                    .iter()
+                    .copied()
                     .min_by(|&a, &b| (stops[a] - at).abs().total_cmp(&(stops[b] - at).abs()))
                     .unwrap_or(0);
                 cx.state.get::<Caret>().0 = nearest;
@@ -209,22 +230,22 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
                 v.insert_str(self.byte(caret), t);
                 edit(cx, v, caret + t.chars().count());
             }
-            Event::Key(Key::Backspace) if caret > 0 => {
+            Event::Key(Key::Backspace) if let Some(p) = prev => {
                 let mut v = self.value.clone();
-                v.replace_range(self.byte(caret - 1)..self.byte(caret), "");
-                edit(cx, v, caret - 1);
+                v.replace_range(self.byte(p)..self.byte(caret), "");
+                edit(cx, v, p);
             }
-            Event::Key(Key::Delete) if caret < len => {
+            Event::Key(Key::Delete) if let Some(n) = next => {
                 let mut v = self.value.clone();
-                v.replace_range(self.byte(caret)..self.byte(caret + 1), "");
+                v.replace_range(self.byte(caret)..self.byte(n), "");
                 edit(cx, v, caret);
             }
             Event::Key(k @ (Key::Left | Key::Right | Key::Home | Key::End)) => {
                 cx.state.get::<Caret>().0 = match k {
-                    Key::Left => caret.saturating_sub(1),
-                    Key::Right => (caret + 1).min(len),
+                    Key::Left => prev.unwrap_or(caret),
+                    Key::Right => next.unwrap_or(caret),
                     Key::Home => 0,
-                    _ => len,
+                    _ => *bounds.last().unwrap(),
                 };
                 cx.request_redraw();
             }

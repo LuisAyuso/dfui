@@ -59,8 +59,9 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 - [x] Shaping with harfrust (read-fonts replaces ttf-parser): GPOS kerning,
       ligatures, marks, Arabic joining. Each word is shaped on its own.
 - [ ] Bidi (unicode-bidi): mixed-direction lines come out in logical order.
-- [ ] Caret moves by grapheme in `text_input` (moves by char today, so it
-      can land inside a ligature or between a base and its mark).
+- [x] Caret moves, deletes and snaps by grapheme in `text_input`
+      (unicode-segmentation), never between a base and its mark or inside an
+      emoji; inside a ligature it sits at an even split of the glyph.
 - [ ] Fallback chains beyond the default font (emoji, CJK), system fonts.
 - [ ] Line breaking beyond spaces (long words/URLs).
 - [ ] Adaptive cubic→quadratic split for CFF fonts (fixed 4-way split today).

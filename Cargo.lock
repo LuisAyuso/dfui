@@ -518,6 +518,7 @@ dependencies = [
  "pollster",
  "read-fonts",
  "taffy",
+ "unicode-segmentation",
  "wgpu",
  "winit",
 ]

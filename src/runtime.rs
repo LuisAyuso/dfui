@@ -798,4 +798,30 @@ mod tests {
         assert!(frame_at(60, &mut rt), "still fading");
         assert!(!frame_at(500, &mut rt), "settled, loop stops");
     }
+
+    #[test]
+    fn caret_moves_and_deletes_whole_graphemes() {
+        let mut rt = Runtime::new(Field(String::new()));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+        rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+        // "a", "e" + combining acute, a flag (two regional indicators), "b".
+        rt.dispatch(Event::Text("ae\u{301}\u{1f1ea}\u{1f1f8}b".into()));
+        let keys = |rt: &mut Runtime<Field>, keys: &[Key]| {
+            for &k in keys {
+                rt.dispatch(Event::Key(k));
+            }
+        };
+        // Left twice from the end skips "b", then the whole flag.
+        keys(&mut rt, &[Key::Left, Key::Left]);
+        rt.dispatch(Event::Text("|".into()));
+        assert_eq!(rt.app.0, "ae\u{301}|\u{1f1ea}\u{1f1f8}b");
+        // Backspace removes "|", then "e" together with its accent.
+        keys(&mut rt, &[Key::Backspace, Key::Backspace]);
+        assert_eq!(rt.app.0, "a\u{1f1ea}\u{1f1f8}b");
+        // Delete removes the whole flag.
+        keys(&mut rt, &[Key::Delete]);
+        assert_eq!(rt.app.0, "ab");
+    }
 }
