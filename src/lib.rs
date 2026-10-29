@@ -20,6 +20,10 @@ pub trait App: 'static {
     type Msg: 'static;
     fn update(&mut self, msg: Self::Msg);
     fn view(&self) -> Element<Self::Msg>;
+    /// Window background, read every frame.
+    fn background(&self) -> Color {
+        Color::WHITE
+    }
 }
 
 pub fn run<A: App>(app: A) {

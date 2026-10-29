@@ -143,6 +143,7 @@ impl Scene {
                 Rect::new(x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad)
                     .intersect(&Rect::new(cx, cy, cw, ch))
             })
+            .filter(|r| r.w > 0.0 && r.h > 0.0)
             .reduce(|a, b| a.union(&b))
     }
 
@@ -216,6 +217,13 @@ pub(crate) fn damage(
             out = Some(out.map_or(r, |o| o.union(&r)));
         }
     };
+    // Instances before the first span (the background) belong to no node.
+    let lead = |s: &Scene, sp: &Spans| 0..sp.first().map_or(s.len(), |(_, r)| r.start);
+    let (lo, ln) = (lead(old, old_spans), lead(new, new_spans));
+    if bytes(old, &lo) != bytes(new, &ln) {
+        add(old.bounds(lo));
+        add(new.bounds(ln));
+    }
     for (id, r) in new_spans {
         seen.insert(*id);
         match prev.get(id) {
@@ -474,7 +482,6 @@ impl Gpu {
         viewport: [f32; 2],
         scene: &Scene,
         text: &mut Text,
-        clear: Color,
         scissor: Option<[u32; 4]>,
     ) {
         let o = &mut text.outlines;
@@ -521,7 +528,6 @@ impl Gpu {
         let timing = self.timer.as_ref().filter(|t| !t.busy);
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
-            let [r, g, b, a] = clear.rgba();
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
@@ -530,12 +536,7 @@ impl Gpu {
                     ops: wgpu::Operations {
                         load: match scissor {
                             Some(_) => wgpu::LoadOp::Load,
-                            None => wgpu::LoadOp::Clear(wgpu::Color {
-                                r: r as f64,
-                                g: g as f64,
-                                b: b as f64,
-                                a: a as f64,
-                            }),
+                            None => wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         },
                         store: wgpu::StoreOp::Store,
                     },
@@ -589,7 +590,6 @@ pub(crate) struct Renderer {
     show_damage: Option<usize>,
     /// Last presented frame carries the overlay tint; next one must present.
     tinted: bool,
-    pub clear: Color,
 }
 
 fn canvas(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::Texture {
@@ -661,7 +661,6 @@ impl Renderer {
             fresh: true,
             show_damage: std::env::var_os("DFUI_SHOW_DAMAGE").map(|_| 0),
             tinted: false,
-            clear: Color::WHITE,
         }
     }
 
@@ -701,6 +700,10 @@ impl Renderer {
                 self.window.request_redraw();
                 return Outcome::Failed;
             }
+            wgpu::CurrentSurfaceTexture::Timeout => {
+                self.window.request_redraw();
+                return Outcome::Failed;
+            }
             _ => return Outcome::Failed,
         };
         let waited = acquire.elapsed();
@@ -718,8 +721,7 @@ impl Renderer {
         let drawn = match &self.canvas {
             None => {
                 let view = frame.texture.create_view(&view_desc);
-                self.gpu
-                    .draw(&view, viewport, scene, text, self.clear, None);
+                self.gpu.draw(&view, viewport, scene, text, None);
                 None
             }
             Some(canvas) => {
@@ -736,8 +738,7 @@ impl Renderer {
                 });
                 if scissor.is_none_or(|[_, _, sw, sh]| sw > 0 && sh > 0) {
                     let view = canvas.create_view(&view_desc);
-                    self.gpu
-                        .draw(&view, viewport, scene, text, self.clear, scissor);
+                    self.gpu.draw(&view, viewport, scene, text, scissor);
                 }
                 let mut enc = self.gpu.device.create_command_encoder(&Default::default());
                 enc.copy_texture_to_texture(
@@ -773,14 +774,8 @@ impl Renderer {
             let tint = Color::hex(TINTS[*n % TINTS.len()]).alpha(0.3);
             overlay.shape(r, 0.0, tint, 0.0, Color::TRANSPARENT, r);
             let view = frame.texture.create_view(&view_desc);
-            self.gpu.draw(
-                &view,
-                viewport,
-                &overlay,
-                text,
-                self.clear,
-                Some([0, 0, w, h]),
-            );
+            self.gpu
+                .draw(&view, viewport, &overlay, text, Some([0, 0, w, h]));
             // One clean follow-up frame (empty damage) so the tint only flashes.
             // Without a canvas every frame is full, so that would loop.
             if self.canvas.is_some() {
@@ -836,8 +831,7 @@ impl Offscreen {
     ) {
         let s = self.target.size();
         let viewport = [s.width as f32 / scale, s.height as f32 / scale];
-        self.gpu
-            .draw(&self.view, viewport, scene, text, Color::WHITE, scissor);
+        self.gpu.draw(&self.view, viewport, scene, text, scissor);
     }
 
     /// Draws and waits for the GPU; returns the render pass's GPU time from

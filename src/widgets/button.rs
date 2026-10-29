@@ -129,7 +129,8 @@ impl<Msg> Widget<Msg> for Button<Msg> {
                     f(cx);
                 }
             }
-            Event::Cancel => s.pressed = false,
+            Event::Cancel => (s.pressed, s.hovered) = (false, false),
+            Event::Leave => s.hovered = false,
             _ => {}
         }
         let s = cx.state.get::<ButtonState>();

@@ -103,7 +103,7 @@ Details and design decisions, including partial redraws: `rendering.md`.
   resolution-independent text with no atlas. Curves are sorted by reach so
   the scan stops early. This requires fragment-stage storage buffers
   (Vulkan / GLES 3.1+).
-- Colors are specified in sRGB and converted to linear for blending.
+- Colors are specified in sRGB and blended in sRGB (gamma) space.
 - `Renderer` reports CPU time (minus vsync wait) and GPU time via timestamp
   queries, logged every two seconds.
 
@@ -116,6 +116,6 @@ Details and design decisions, including partial redraws: `rendering.md`.
 
 ## Known limits
 
-Tracked in `TODO.md` and as `ponytail:` comments in the code: no text input,
+Tracked in `TODO.md` and as `ponytail:` comments in the code: no IME composition on desktop,
 no shaping/bidi, single font, single pointer, full relayout per frame, all
 outlines re-uploaded when a glyph is added, linear hit-testing.

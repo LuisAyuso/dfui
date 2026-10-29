@@ -291,7 +291,14 @@ impl<A: App> Runtime<A> {
         // Partial redraws load the previous frame, so damage needs its own background.
         let (w, h) = self.viewport;
         let all = Rect::new(0.0, 0.0, w, h);
-        scene.shape(all, 0.0, Color::WHITE, 0.0, Color::TRANSPARENT, all);
+        scene.shape(
+            all,
+            0.0,
+            self.app.background(),
+            0.0,
+            Color::TRANSPARENT,
+            all,
+        );
         let mut spans = Vec::with_capacity(nodes.len());
         for (n, p) in nodes.iter().zip(&self.placed) {
             let start = scene.len();
@@ -457,6 +464,7 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                 let (x, y) = self.cursor;
                 self.dispatch(Event::PointerMove { x, y });
             }
+            WindowEvent::CursorLeft { .. } => self.dispatch(Event::Leave),
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
@@ -489,7 +497,8 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                 };
                 if let Some(k) = key {
                     self.dispatch(Event::Key(k));
-                } else if !(self.mods.control_key() || self.mods.super_key())
+                } else if !(self.mods.control_key() && !self.mods.alt_key()
+                    || self.mods.super_key())
                     && let Some(t) = event.text
                 {
                     let t: String = t.chars().filter(|c| !c.is_control()).collect();
@@ -514,6 +523,7 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                     TouchPhase::Ended => {
                         self.touch = None;
                         self.dispatch(Event::PointerUp { x, y });
+                        self.dispatch(Event::Leave);
                     }
                     TouchPhase::Cancelled => {
                         self.touch = None;
@@ -541,6 +551,13 @@ mod tests {
         }
         fn view(&self) -> Element<i32> {
             column([button(text("+")).on_press(1).height(40.0).into()]).into()
+        }
+        fn background(&self) -> Color {
+            if self.0 > 0 {
+                Color::BLACK
+            } else {
+                Color::WHITE
+            }
         }
     }
 
@@ -672,5 +689,18 @@ mod tests {
             typed.h <= field.h + 4.0 && typed.y >= field.y - 2.0,
             "{typed:?} {field:?}"
         );
+    }
+
+    #[test]
+    fn background_change_damages_everything() {
+        let mut rt = Runtime::new(Counter(0));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        let click = [
+            Event::PointerDown { x: 10.0, y: 10.0 },
+            Event::PointerUp { x: 10.0, y: 10.0 },
+        ];
+        let d = damage_after(&mut rt, click).unwrap();
+        assert!(d.w >= 200.0 && d.h >= 200.0, "{d:?}");
     }
 }

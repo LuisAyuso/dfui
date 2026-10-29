@@ -28,6 +28,8 @@ pub enum Event {
     },
     /// Another widget captured the pointer; drop any in-progress gesture.
     Cancel,
+    /// The pointer is gone: finger lifted or cursor left the window.
+    Leave,
     /// Text typed while this widget has focus.
     Text(String),
     /// Editing key pressed while this widget has focus.

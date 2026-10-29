@@ -39,7 +39,7 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 - [ ] Async commands/subscriptions (Elm `Cmd`/`Sub`).
 - [ ] Multi-touch: per-finger dispatch (runtime is single-pointer today).
 - [ ] Kinetic scrolling and horizontal scroll.
-- [ ] Widget library: text field, checkbox, switch, slider, list, tabs.
+- [ ] Widget library: checkbox, switch, slider, list, tabs.
 
 ## Text
 

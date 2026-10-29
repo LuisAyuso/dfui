@@ -153,14 +153,13 @@ impl Text {
         let mut y = ascent;
         for line in s.split('\n') {
             let mut x = 0.0;
-            for word in line.split(' ') {
+            for (i, word) in line.split(' ').enumerate() {
                 let ww = self.word_width(word, size);
                 if x > 0.0 && x + space + ww > max {
                     width = width.max(x);
                     x = 0.0;
                     y += lh;
-                }
-                if x > 0.0 {
+                } else if i > 0 {
                     x += space;
                 }
                 let mut prev = None;
@@ -269,6 +268,8 @@ mod tests {
         let l = t.layout(s, 20.0, None);
         assert_eq!(stops[3], l.glyphs[2].x);
         assert_eq!(stops[5].ceil(), l.width);
+        let lead = t.caret_stops("  a", 20.0);
+        assert_eq!(lead[2], t.layout("  a", 20.0, None).glyphs[0].x);
     }
 
     #[test]
