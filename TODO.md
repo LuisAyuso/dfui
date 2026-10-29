@@ -35,7 +35,12 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 
 ## Framework
 
-- [ ] Animations: build on `PaintCx::request_frame`; time source + easing.
+- [x] Paint animations: `Animated<T>` eased by `PaintCx::now`, looping via
+      `request_frame` while running; button hover/press fade.
+- [ ] Layout animations (size/position, list insert/remove): need a rebuild
+      or relayout per frame while running.
+- [ ] Timed wakeups (`request_frame_at`) so slow animations like caret
+      blink don't paint at full frame rate.
 - [ ] Theming: shared colors/sizes instead of per-widget constants.
 - [ ] Images.
 - [ ] Async commands/subscriptions (Elm `Cmd`/`Sub`).

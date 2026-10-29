@@ -31,6 +31,8 @@ pub(crate) struct Runtime<A: App> {
     /// Animation frame due after an idle one; idle frames don't block on
     /// vsync, so they're paced by this timer instead.
     next_frame: Option<Instant>,
+    /// Fixed frame time for tests; the wall clock otherwise.
+    clock: Option<Instant>,
     /// Hidden windows don't animate; presents would be throttled anyway.
     occluded: bool,
     focused: Option<u64>,
@@ -94,6 +96,7 @@ impl<A: App> Runtime<A> {
             captured: None,
             prev: None,
             next_frame: None,
+            clock: None,
             occluded: false,
             focused: None,
             mods: ModifiersState::empty(),
@@ -319,9 +322,11 @@ impl<A: App> Runtime<A> {
             all,
         );
         let mut spans = Vec::with_capacity(nodes.len());
+        let now = self.clock.unwrap_or_else(Instant::now);
         for (n, p) in nodes.iter().zip(&self.placed) {
             let start = scene.len();
             n.w.paint(&mut PaintCx {
+                now,
                 rect: p.rect,
                 clip: p.clip,
                 focused: self.focused == Some(n.id),
@@ -689,10 +694,16 @@ mod tests {
         rt: &mut Runtime<A>,
         events: impl IntoIterator<Item = Event>,
     ) -> Option<Rect> {
+        let t = *rt.clock.get_or_insert_with(Instant::now);
         let (a, na) = rt.scene(&mut false);
         for ev in events {
             rt.dispatch(ev);
         }
+        // Transitions start at the first paint after the event; a second paint
+        // a second later shows them settled.
+        rt.clock = Some(t + Duration::from_secs(1));
+        rt.scene(&mut false);
+        rt.clock = Some(t + Duration::from_secs(2));
         let (b, nb) = rt.scene(&mut false);
         damage(&a, &na, &b, &nb)
     }
@@ -766,5 +777,24 @@ mod tests {
             dy: 30.0,
         });
         assert_eq!(rt.placed[3].rect.y, row.y - 60.0);
+    }
+
+    #[test]
+    fn transitions_request_frames_until_settled() {
+        let mut rt = Runtime::new(Counter(0));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        let t = Instant::now();
+        let frame_at = |ms: u64, rt: &mut Runtime<Counter>| {
+            rt.clock = Some(t + Duration::from_millis(ms));
+            let mut frame = false;
+            rt.scene(&mut frame);
+            frame
+        };
+        assert!(!frame_at(0, &mut rt));
+        rt.dispatch(Event::PointerMove { x: 10.0, y: 10.0 });
+        assert!(frame_at(10, &mut rt), "hover fade starts");
+        assert!(frame_at(60, &mut rt), "still fading");
+        assert!(!frame_at(500, &mut rt), "settled, loop stops");
     }
 }

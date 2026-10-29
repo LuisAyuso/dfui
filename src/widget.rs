@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::marker::PhantomData;
+use std::time::Instant;
 
 use taffy::{AvailableSpace, Size, Style};
 
@@ -149,6 +150,8 @@ impl<S> Copy for Handle<S> {}
 pub(crate) type Update = (u64, Box<dyn FnOnce(&mut State)>);
 
 pub struct PaintCx<'a> {
+    /// Frame time, shared by every widget painted this frame.
+    pub now: Instant,
     pub rect: Rect,
     pub clip: Rect,
     pub focused: bool,

@@ -2,6 +2,7 @@
 
 #[cfg(target_os = "android")]
 mod android;
+pub mod anim;
 mod layout;
 mod outline;
 mod render;
@@ -10,6 +11,7 @@ mod text;
 mod widget;
 pub mod widgets;
 
+pub use anim::Animated;
 pub use render::{Color, Rect, Shadow};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;

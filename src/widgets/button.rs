@@ -1,15 +1,23 @@
+use std::time::Duration;
+
 use taffy::{AlignItems, JustifyContent, LengthPercentage, Style};
 
 use super::Styled;
+use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Shadow};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
 type Handler<Msg> = Box<dyn Fn(&mut EventCx<Msg>)>;
 
+const FADE: Duration = Duration::from_millis(120);
+
 #[derive(Default)]
 struct ButtonState {
     pressed: bool,
     hovered: bool,
+    /// 0..=1 toward the hovered and pressed looks.
+    hover: Animated<f32>,
+    press: Animated<f32>,
 }
 
 pub struct Button<Msg> {
@@ -82,24 +90,26 @@ impl<Msg> Widget<Msg> for Button<Msg> {
         &self.child
     }
     fn paint(&self, cx: &mut PaintCx) {
+        let now = cx.now;
         let s = cx.state.get::<ButtonState>();
+        let flag = |b: bool| if b { 1.0 } else { 0.0 };
+        s.hover.to(flag(s.hovered), now, FADE, ease::out_cubic);
+        s.press.to(flag(s.pressed), now, FADE, ease::out_cubic);
+        let (hover, press) = (s.hover.get(now), s.press.get(now));
+        if s.hover.running(now) || s.press.running(now) {
+            cx.request_frame();
+        }
+        let k = 1.0.lerp(0.9, hover).lerp(0.75, press);
         let c = self.color;
-        let k = if s.pressed {
-            0.75
-        } else if s.hovered {
-            0.9
-        } else {
-            1.0
-        };
         let fill = Color {
             r: c.r * k,
             g: c.g * k,
             b: c.b * k,
             a: c.a,
         };
-        if !s.pressed {
+        if press < 1.0 {
             let sh = Shadow {
-                color: Color::BLACK.alpha(0.25),
+                color: Color::BLACK.alpha(0.25 * (1.0 - press)),
                 offset: (0.0, 2.0),
                 blur: 4.0,
             };
