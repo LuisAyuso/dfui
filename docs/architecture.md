@@ -9,7 +9,7 @@
   coverage from Bézier outlines. No texture atlases, no tessellation.
 - Mobile first: Android via `android-activity`, edge-to-edge with system bar
   insets, 60 fps on a mid-range Mali GPU (baseline numbers in `TODO.md`).
-- Small: few dependencies (wgpu, winit, taffy, ttf-parser), little code.
+- Small: few dependencies (wgpu, winit, taffy, read-fonts, harfrust), little code.
 
 ## Frame loop
 
@@ -39,7 +39,7 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 | `runtime.rs` | Event loop, input → `Event` translation, dispatch, pointer capture, frame stats, `snapshot`. |
 | `render.rs` | `Scene`, `Color`/`Rect`/`Shadow`, wgpu setup, the single render pass, GPU timestamp timing, offscreen rendering. |
 | `shader.wgsl` | Vertex expands instances to quads; fragment does SDF shapes (kind 0) and outline glyphs (kind 1). |
-| `text.rs` | `Font` handles (bundled DejaVu Sans as default and fallback), kerning, greedy word wrap, lazy glyph outline building. |
+| `text.rs` | `Font` handles (bundled DejaVu Sans as default and fallback), per-word shaping with harfrust, greedy word wrap, lazy glyph outline building. |
 | `outline.rs` | Converts glyph contours to monotonic quadratics and per-glyph band lists for the shader. |
 | `android.rs` | JNI query for system bar / cutout insets. |
 
@@ -117,5 +117,5 @@ Details and design decisions, including partial redraws: `rendering.md`.
 ## Known limits
 
 Tracked in `TODO.md` and as `ponytail:` comments in the code: no IME composition on desktop,
-no shaping/bidi, fallback only to the default font, single pointer, full relayout per frame, all
+no bidi, fallback only to the default font, single pointer, full relayout per frame, all
 outlines re-uploaded when a glyph is added, linear hit-testing.

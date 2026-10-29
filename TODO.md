@@ -45,7 +45,11 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 
 - [x] Multiple fonts: app-supplied `Font` bytes (bold/italic are just more
       fonts), glyphs keyed by (font, glyph id), fallback to the default font.
-- [ ] Shaping and bidi (rustybuzz).
+- [x] Shaping with harfrust (read-fonts replaces ttf-parser): GPOS kerning,
+      ligatures, marks, Arabic joining. Each word is shaped on its own.
+- [ ] Bidi (unicode-bidi): mixed-direction lines come out in logical order.
+- [ ] Caret moves by grapheme in `text_input` (moves by char today, so it
+      can land inside a ligature or between a base and its mark).
 - [ ] Fallback chains beyond the default font (emoji, CJK), system fonts.
 - [ ] Line breaking beyond spaces (long words/URLs).
 - [ ] Adaptive cubic→quadratic split for CFF fonts (fixed 4-way split today).
@@ -57,12 +61,12 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 
 CPU baseline (`cargo bench`, desktop): one frame of rebuild + layout + paint
 + diff costs ~265 µs for 10 cards and scales linearly (~32 µs/card, 32 ms
-for 1000). Laying out a 300-char paragraph: ~67 µs uncached, ~0.1 µs cached.
+for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs cached.
 
 - [x] Cache text layouts per (text, size, width), evicted after an unused
       frame. Cut frame CPU ~82%.
-- [ ] Cheaper layout misses (changing text: typing, counters): cache
-      per-char advances and kerning pairs instead of re-querying the font.
+- [ ] Cheaper layout misses (changing text: typing, counters): cache shaped
+      words, since each word is shaped on its own.
 - [x] Run the benches on the phone (`scripts/android-bench.sh`): partial
       frame ~44× cheaper than full on Mali. Still unmeasured in the real
       app: canvas copy and `LoadOp::Load` bandwidth.

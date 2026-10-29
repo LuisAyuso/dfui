@@ -1,7 +1,9 @@
 //! Glyph outlines as monotonic quadratic Béziers plus per-glyph band lists; the
 //! fragment shader evaluates glyph coverage directly from these curves.
 
-use ttf_parser::{Face, GlyphId, OutlineBuilder};
+use read_fonts::model::Font;
+use read_fonts::model::glyph::outline::{DrawMemory, DrawOptions, PathSink};
+use read_fonts::types::GlyphId;
 
 type P = [f32; 2];
 type Quad = [P; 3];
@@ -25,14 +27,17 @@ pub(crate) struct Outlines {
 }
 
 impl Outlines {
-    pub fn add(&mut self, face: &Face, id: GlyphId) -> Option<OutlineGlyph> {
+    pub fn add(&mut self, font: &Font, id: GlyphId) -> Option<OutlineGlyph> {
         let mut b = Builder {
-            em: face.units_per_em() as f32,
+            em: font.units_per_em() as f32,
             start: [0.0; 2],
             cur: [0.0; 2],
             quads: Vec::new(),
         };
-        face.outline_glyph(id, &mut b)?;
+        let glyph = font.outline_glyphs().get(id)?;
+        glyph
+            .draw(&DrawOptions::new(), DrawMemory::Scratch, &mut b)
+            .ok()?;
         b.close();
         let mut quads = Vec::new();
         for q in b.quads {
@@ -109,7 +114,7 @@ impl Builder {
     }
 }
 
-impl OutlineBuilder for Builder {
+impl PathSink for Builder {
     fn move_to(&mut self, x: f32, y: f32) {
         self.close();
         self.start = self.p(x, y);
@@ -249,9 +254,10 @@ mod tests {
 
     #[test]
     fn o_has_a_hole() {
-        let face = Face::parse(include_bytes!("../assets/DejaVuSans.ttf"), 0).unwrap();
+        let font = Font::new(&include_bytes!("../assets/DejaVuSans.ttf")[..], 0).unwrap();
         let mut o = Outlines::default();
-        let g = o.add(&face, face.glyph_index('O').unwrap()).unwrap();
+        let id = font.charmap().map_unicode('O').unwrap();
+        let g = o.add(&font, id).unwrap();
         let [x0, y0, x1, y1] = g.bbox;
         let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
         assert_eq!(winding(&o, &g, [cx, cy]), 0, "center of O is the hole");
