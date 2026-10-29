@@ -18,6 +18,14 @@ pub(crate) struct Node<'a, Msg> {
     pub end: usize,
 }
 
+/// Taffy's result for a node: box relative to its parent's origin, plus the
+/// extent of its children (scrollable content).
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Measured {
+    pub rect: Rect,
+    pub content: Size<f32>,
+}
+
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Placed {
     pub rect: Rect,
@@ -75,17 +83,16 @@ pub(crate) fn children<Msg>(nodes: &[Node<'_, Msg>], i: usize) -> impl Iterator<
 /// Insets in logical px: top, right, bottom, left.
 pub(crate) type Insets = [f32; 4];
 
-/// Flex layout via taffy, then absolute placement with scroll offsets and clips.
-/// The root fills the viewport; `insets` (system bars) are added to its padding
-/// so backgrounds bleed edge to edge while content stays clear.
-pub(crate) fn layout<Msg>(
+/// Flex layout via taffy. The root fills the viewport; `insets` (system bars)
+/// are added to its padding so backgrounds bleed edge to edge while content
+/// stays clear. Only needed when the tree or viewport changes.
+pub(crate) fn measure<Msg>(
     nodes: &[Node<'_, Msg>],
-    states: &mut HashMap<u64, State>,
     text: &Text,
     viewport: (f32, f32),
     insets: Insets,
-) -> Vec<Placed> {
-    // ponytail: full relayout every frame; cache taffy nodes if profiling says so.
+) -> Vec<Measured> {
+    // ponytail: rebuilds the whole taffy tree; keep it and mark dirty nodes if rebuilds get slow.
     let mut tree: TaffyTree<usize> = TaffyTree::new();
     let mut ids = vec![NodeId::from(0u64); nodes.len()];
     for i in (0..nodes.len()).rev() {
@@ -129,7 +136,30 @@ pub(crate) fn layout<Msg>(
         )
     })
     .unwrap();
+    (0..nodes.len())
+        .map(|i| {
+            let l = tree.layout(ids[i]).unwrap();
+            Measured {
+                rect: Rect::new(l.location.x, l.location.y, l.size.width, l.size.height),
+                content: children(nodes, i).fold(Size::ZERO, |s, c| {
+                    let cl = tree.layout(ids[c]).unwrap();
+                    Size {
+                        width: s.width.max(cl.location.x + cl.size.width),
+                        height: s.height.max(cl.location.y + cl.size.height),
+                    }
+                }),
+            }
+        })
+        .collect()
+}
 
+/// Absolute boxes from `measure`'s result, with scroll offsets and clips;
+/// cheap enough to run on every redraw.
+pub(crate) fn place<Msg>(
+    nodes: &[Node<'_, Msg>],
+    measured: &[Measured],
+    states: &mut HashMap<u64, State>,
+) -> Vec<Placed> {
     let full = Rect::new(
         f32::MIN / 4.0,
         f32::MIN / 4.0,
@@ -139,7 +169,7 @@ pub(crate) fn layout<Msg>(
     let mut placed = vec![Placed::default(); nodes.len()];
     let mut offsets = vec![None; nodes.len()];
     for i in 0..nodes.len() {
-        let l = tree.layout(ids[i]).unwrap();
+        let m = measured[i];
         let (origin, clip) = match nodes[i].parent {
             None => ((0.0, 0.0), full),
             Some(p) => {
@@ -153,23 +183,10 @@ pub(crate) fn layout<Msg>(
                 ((pr.x - dx, pr.y - dy), clip)
             }
         };
-        let rect = Rect::new(
-            origin.0 + l.location.x,
-            origin.1 + l.location.y,
-            l.size.width,
-            l.size.height,
-        );
-        let content = children(nodes, i).fold(Size::ZERO, |s, c| {
-            let cl = tree.layout(ids[c]).unwrap();
-            Size {
-                width: s.width.max(cl.location.x + cl.size.width),
-                height: s.height.max(cl.location.y + cl.size.height),
-            }
-        });
         placed[i] = Placed {
-            rect,
+            rect: Rect::new(origin.0 + m.rect.x, origin.1 + m.rect.y, m.rect.w, m.rect.h),
             clip,
-            content,
+            content: m.content,
         };
         offsets[i] = nodes[i].w.scroll(states.entry(nodes[i].id).or_default());
     }
@@ -193,13 +210,8 @@ mod tests {
         .into();
         let mut states = HashMap::new();
         let nodes = flatten(&root, &mut states);
-        let p = layout(
-            &nodes,
-            &mut states,
-            &Text::default(),
-            (100.0, 200.0),
-            [0.0; 4],
-        );
+        let m = measure(&nodes, &Text::default(), (100.0, 200.0), [0.0; 4]);
+        let p = place(&nodes, &m, &mut states);
         assert_eq!(p[0].rect, Rect::new(0.0, 0.0, 100.0, 200.0));
         assert_eq!(p[1].rect, Rect::new(10.0, 10.0, 80.0, 20.0));
         // 200 - 2*10 padding - 20 - 30 - 2*5 gap = 120

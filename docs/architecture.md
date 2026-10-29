@@ -16,7 +16,10 @@
 ```
 input event ──► dispatch ──► Msg* ──► App::update ──► App::view ──► new Element tree
                                                                         │
-RedrawRequested ◄── request_redraw ◄── relayout (taffy) ◄───────────────┘
+RedrawRequested ◄── request_redraw ◄── measure (taffy) + place ◄───────┘
+      │                       ▲
+      │                       └── place only: redraw without a rebuild
+      │                           (hover, press, scroll, caret)
       │
       ▼
  paint every node ──► Scene (flat instance list) ──► Renderer (one pass) ──► surface
@@ -35,7 +38,7 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 | `widget.rs` | `Element`, `Widget` trait, `Event`, `State`, `PaintCx`, `EventCx`. |
 | `widgets/mod.rs` | Widget infrastructure: the `Styled` flex modifiers, re-exports. |
 | `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `text_input`. |
-| `layout.rs` | Flattens the tree to pre-order nodes, runs taffy, produces absolute rects, clips and scroll offsets. |
+| `layout.rs` | Flattens the tree to pre-order nodes; `measure` runs taffy, `place` produces absolute rects, clips and scroll offsets. |
 | `runtime.rs` | Event loop, input → `Event` translation, dispatch, pointer capture, frame stats, `snapshot`. |
 | `render.rs` | `Scene`, `Color`/`Rect`/`Shadow`, wgpu setup, the single render pass, GPU timestamp timing, offscreen rendering. |
 | `shader.wgsl` | Vertex expands instances to quads; fragment does SDF shapes (kind 0) and outline glyphs (kind 1). |
@@ -66,13 +69,16 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 
 ## Layout
 
-`flatten` produces a pre-order `Vec<Node>`; `layout` builds a taffy tree from
-each widget's `style()`/`measure()`, then walks it to place nodes absolutely,
-applying `scroll()` offsets and intersecting clip rects. The root fills the
+`flatten` produces a pre-order `Vec<Node>`; `measure` builds a taffy tree from
+each widget's `style()`/`measure()` and keeps each node's parent-relative box;
+`place` turns those into absolute rects, applying `scroll()` offsets and
+intersecting clip rects. The runtime keeps `measure`'s result until the tree
+is rebuilt or the viewport changes, so redraws without a rebuild only rerun
+`place`. The root fills the
 viewport, with insets added to its padding so backgrounds bleed under system
 bars. Text layouts are cached in `Text` by (string, size, width) and evicted
 after a frame that doesn't use them, so repeated `measure` calls and
-per-frame rebuilds of the same strings are cheap. Full relayout happens on every change (see `ponytail:` note).
+per-frame rebuilds of the same strings are cheap. Every rebuild still runs a full taffy layout (see `ponytail:` note).
 
 ## Input
 
@@ -117,5 +123,5 @@ Details and design decisions, including partial redraws: `rendering.md`.
 ## Known limits
 
 Tracked in `TODO.md` and as `ponytail:` comments in the code: no IME composition on desktop,
-no bidi, fallback only to the default font, single pointer, full relayout per frame, all
+no bidi, fallback only to the default font, single pointer, full relayout per rebuild, all
 outlines re-uploaded when a glyph is added, linear hit-testing.

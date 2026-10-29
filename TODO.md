@@ -25,8 +25,9 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 - [x] Partial repaint (GPU): scissored retained canvas, per-node damage
       from a scene diff, idle frames skipped (`docs/rendering.md`). Still to
       measure on the phone against the Bench baseline.
-- [ ] Partial rebuild and relayout (CPU): every change still runs the whole
-      `App::view`, a full taffy layout and a full paint. Open questions:
+- [ ] Partial rebuild and relayout (CPU): every rebuild still runs the whole
+      `App::view`, a full taffy layout and a full paint (redraws without a
+      rebuild reuse taffy's result: 1000-card scroll frame 31 → 6 ms). Open questions:
       rebuild only dirty `stateful` subtrees; cache taffy nodes for
       incremental layout; skip off-screen scroll content; how this interacts
       with global state change notification.

@@ -1,5 +1,5 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-use dfui::{Bench, Font, Text};
+use dfui::{Bench, Event, Font, Text};
 
 mod common;
 use common::Cards;
@@ -36,6 +36,22 @@ fn frame(c: &mut Criterion) {
         let mut bench = Bench::new(Cards(n), VIEWPORT);
         g.bench_with_input(BenchmarkId::new("cards", n), &n, |b, _| {
             b.iter(|| bench.frame())
+        });
+    }
+    // A wheel tick: no rebuild, so taffy's result is reused.
+    for n in [10, 100, 1000] {
+        let mut bench = Bench::new(Cards(n), VIEWPORT);
+        let mut dy = 40.0;
+        g.bench_with_input(BenchmarkId::new("scroll", n), &n, |b, _| {
+            b.iter(|| {
+                dy = -dy;
+                bench.event(Event::Wheel {
+                    x: 200.0,
+                    y: 400.0,
+                    dy,
+                });
+                bench.paint()
+            })
         });
     }
     g.finish();

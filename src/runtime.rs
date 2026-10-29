@@ -9,7 +9,7 @@ use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::App;
-use crate::layout::{Insets, Placed, flatten, layout};
+use crate::layout::{Insets, Measured, Placed, flatten, measure, place};
 use crate::render::{
     Color, Offscreen, Outcome, Rect, Renderer, Scene, Spans, damage, render_offscreen,
 };
@@ -21,6 +21,8 @@ pub(crate) struct Runtime<A: App> {
     root: Element<A::Msg>,
     states: HashMap<u64, State>,
     text: Text,
+    /// Taffy's last result; reused until the tree or viewport changes.
+    measured: Vec<Measured>,
     placed: Vec<Placed>,
     captured: Option<u64>,
     /// Last painted frame, diffed against the next one for damage.
@@ -85,6 +87,7 @@ impl<A: App> Runtime<A> {
             root,
             states: HashMap::new(),
             text: Text::default(),
+            measured: Vec::new(),
             placed: Vec::new(),
             captured: None,
             prev: None,
@@ -116,13 +119,8 @@ impl<A: App> Runtime<A> {
 
     fn relayout(&mut self) {
         let nodes = flatten(&self.root, &mut self.states);
-        self.placed = layout(
-            &nodes,
-            &mut self.states,
-            &self.text,
-            self.viewport,
-            self.insets,
-        );
+        self.measured = measure(&nodes, &self.text, self.viewport, self.insets);
+        self.placed = place(&nodes, &self.measured, &mut self.states);
     }
 
     /// System bars cover part of an edge-to-edge window; the content rect is what's left.
@@ -141,6 +139,21 @@ impl<A: App> Runtime<A> {
 
     fn redraw(&mut self) {
         self.relayout();
+        self.request_redraw();
+    }
+
+    /// Redraw for changes that keep every size (hover, press, scroll, caret):
+    /// only placement reruns.
+    fn reposition(&mut self) {
+        let nodes = flatten(&self.root, &mut self.states);
+        if nodes.len() != self.measured.len() {
+            return self.redraw();
+        }
+        self.placed = place(&nodes, &self.measured, &mut self.states);
+        self.request_redraw();
+    }
+
+    fn request_redraw(&self) {
         if let Some(r) = &self.renderer {
             r.window().request_redraw();
         }
@@ -210,7 +223,8 @@ impl<A: App> Runtime<A> {
             redraw |= self.set_focus(focus);
         }
 
-        if !msgs.is_empty() || !updates.is_empty() {
+        let rebuild = !msgs.is_empty() || !updates.is_empty();
+        if rebuild {
             for (id, f) in updates {
                 f(self.states.entry(id).or_default());
             }
@@ -227,10 +241,11 @@ impl<A: App> Runtime<A> {
             if self.focused.is_some_and(|id| !live.contains(&id)) {
                 self.set_focus(None);
             }
-            redraw = true;
         }
-        if redraw {
+        if rebuild {
             self.redraw();
+        } else if redraw {
+            self.reposition();
         }
     }
 
@@ -338,6 +353,12 @@ impl<A: App> Bench<A> {
         let rt = &mut self.0;
         rt.root = rt.app.view();
         rt.relayout();
+        self.paint()
+    }
+
+    /// Paint and damage diff only, as after an event that kept the tree.
+    pub fn paint(&mut self) -> usize {
+        let rt = &mut self.0;
         let (scene, spans) = rt.scene(&mut false);
         if let Some((ps, pn)) = &rt.prev {
             std::hint::black_box(damage(ps, pn, &scene, &spans));
@@ -540,7 +561,7 @@ impl<A: App> ApplicationHandler for Runtime<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widgets::{Styled, button, column, stateful, text, text_input};
+    use crate::widgets::{Styled, button, column, scroll, stateful, text, text_input};
 
     struct Counter(i32);
 
@@ -702,5 +723,38 @@ mod tests {
         ];
         let d = damage_after(&mut rt, click).unwrap();
         assert!(d.w >= 200.0 && d.h >= 200.0, "{d:?}");
+    }
+
+    struct Long;
+
+    impl App for Long {
+        type Msg = ();
+        fn update(&mut self, _: ()) {}
+        fn view(&self) -> Element<()> {
+            let rows = (0..10).map(|_| column([]).height(50.0).into());
+            column([scroll(column(rows)).grow(1.0).into()]).into()
+        }
+    }
+
+    #[test]
+    fn wheel_scroll_moves_content_without_relayout() {
+        let mut rt = Runtime::new(Long);
+        rt.viewport = (100.0, 200.0);
+        rt.relayout();
+        let row = rt.placed[3].rect;
+        rt.measured.clear();
+        rt.dispatch(Event::Wheel {
+            x: 10.0,
+            y: 10.0,
+            dy: 30.0,
+        });
+        // A cleared taffy result forces a full relayout, which must agree.
+        assert_eq!(rt.placed[3].rect.y, row.y - 30.0);
+        rt.dispatch(Event::Wheel {
+            x: 10.0,
+            y: 10.0,
+            dy: 30.0,
+        });
+        assert_eq!(rt.placed[3].rect.y, row.y - 60.0);
     }
 }
