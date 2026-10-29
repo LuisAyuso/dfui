@@ -1,11 +1,11 @@
 use std::time::{Duration, Instant};
 
-use dfui::anim::{Lerp, ease};
+use dfui::anim::{Lerp, Morph, ease};
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
     Styled, button, column, container, row, scroll, spacer, stateful, text, text_input,
 };
-use dfui::{Animated, App, Color, Element, Font, PaintCx, Rect, Shadow, Widget};
+use dfui::{Animated, App, Color, Element, Font, PaintCx, Path, Rect, Shadow, Widget};
 
 static BOLD: Font = Font(include_bytes!("../../assets/DejaVuSans-Bold.ttf"));
 
@@ -94,6 +94,16 @@ impl App for Demo {
         .gap(12.0);
 
         let pulse = row([
+            MorphShape {
+                playing: self.playing,
+                shapes: rect_hexagon,
+            }
+            .into(),
+            MorphShape {
+                playing: self.playing,
+                shapes: d_to_o,
+            }
+            .into(),
             Pulse {
                 playing: self.playing,
             }
@@ -295,6 +305,100 @@ impl<M: 'static> From<Pulse> for Element<M> {
     fn from(w: Pulse) -> Self {
         Element::new(w)
     }
+}
+
+/// The two outlines a `MorphShape` swings between, for a `w`×`h` box.
+type Shapes = fn(&PaintCx, f32, f32) -> (Path, Path);
+
+#[derive(Default)]
+struct MorphState {
+    pulse: PulseState,
+    /// Built for the box size it was made for.
+    morph: Option<((f32, f32), Morph)>,
+}
+
+/// Morphs back and forth between two outlines, paused along with the pulse.
+struct MorphShape {
+    playing: bool,
+    shapes: Shapes,
+}
+
+impl<M> Widget<M> for MorphShape {
+    fn style(&self) -> Style {
+        Style {
+            size: Size {
+                width: Dimension::length(48.0),
+                height: Dimension::length(48.0),
+            },
+            flex_shrink: 0.0,
+            ..Style::default()
+        }
+    }
+
+    fn paint(&self, cx: &mut PaintCx) {
+        let (now, r) = (cx.now, cx.rect);
+        let size = (r.w, r.h);
+        let fresh = match &cx.state.get::<MorphState>().morph {
+            Some((s, _)) => *s != size,
+            None => true,
+        };
+        if fresh {
+            let (a, b) = (self.shapes)(cx, r.w, r.h);
+            cx.state.get::<MorphState>().morph = Some((size, Morph::new(&a, &b)));
+        }
+        let s = cx.state.get::<MorphState>();
+        let (t, moving) = s.pulse.advance(self.playing, now);
+        let path = s.morph.as_ref().unwrap().1.at(t).offset(r.x, r.y);
+        if moving {
+            cx.request_frame();
+        }
+        cx.path(&path, ACCENT.lerp(Color::hex(CHIPS[4]), t));
+    }
+}
+
+impl<M: 'static> From<MorphShape> for Element<M> {
+    fn from(w: MorphShape) -> Self {
+        Element::new(w)
+    }
+}
+
+fn rect_hexagon(_: &PaintCx, w: f32, h: f32) -> (Path, Path) {
+    let (cx, cy) = (w / 2.0, h / 2.0);
+    let (rw, rh) = (w * 0.4, h * 0.28);
+    let rect = Path::polygon(&[
+        [cx - rw, cy - rh],
+        [cx + rw, cy - rh],
+        [cx + rw, cy + rh],
+        [cx - rw, cy + rh],
+    ]);
+    let r = w.min(h) * 0.46;
+    let corner = |k: usize| {
+        // Pointy top: the rect's long edges are cut at the tips.
+        let a = std::f32::consts::FRAC_PI_3 * k as f32 - std::f32::consts::FRAC_PI_2;
+        [cx + r * a.cos(), cy + r * a.sin()]
+    };
+    (rect, Path::polygon(&(0..6).map(corner).collect::<Vec<_>>()))
+}
+
+fn d_to_o(cx: &PaintCx, w: f32, h: f32) -> (Path, Path) {
+    let glyph = |c| {
+        centered(
+            cx.glyph_path(Font::DEFAULT, c, 44.0).unwrap_or_default(),
+            w,
+            h,
+        )
+    };
+    (glyph('D'), glyph('O'))
+}
+
+/// `p` moved so its bounding box is centred in a `w`×`h` box at the origin.
+fn centered(p: Path, w: f32, h: f32) -> Path {
+    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for q in p.contours.iter().flatten().flatten() {
+        lo = [lo[0].min(q[0]), lo[1].min(q[1])];
+        hi = [hi[0].max(q[0]), hi[1].max(q[1])];
+    }
+    p.offset((w - lo[0] - hi[0]) / 2.0, (h - lo[1] - hi[1]) / 2.0)
 }
 
 /// Expanded/collapsed is ephemeral UI state, so it stays local to the card.
