@@ -5,6 +5,7 @@ mod android;
 pub mod anim;
 mod layout;
 mod outline;
+pub mod path;
 mod render;
 mod runtime;
 mod text;
@@ -12,6 +13,7 @@ mod widget;
 pub mod widgets;
 
 pub use anim::Animated;
+pub use path::Path;
 pub use render::{Color, Rect, Shadow};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;

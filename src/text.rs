@@ -8,6 +8,7 @@ use read_fonts::model::Font as Face;
 use read_fonts::types::GlyphId;
 
 use crate::outline::Outlines;
+use crate::path::Path;
 use crate::render::{Color, Rect, Scene};
 
 /// TrueType/OpenType font data. Fonts are told apart by address, so keep each
@@ -228,6 +229,27 @@ impl Text {
         layout
     }
 
+    /// Outline of `c` at `size` px (no shaping), pen at the origin on the
+    /// baseline, y down. Falls back to the default font like `layout`.
+    pub fn glyph_path(&self, font: Font, c: char, size: f32) -> Option<Path> {
+        let face = self.face_id(font);
+        let faces = self.faces.borrow();
+        let (f, id) = [face, 0]
+            .into_iter()
+            .find_map(|f| Some((f, faces[f].1.charmap().map_unicode(c)?)))?;
+        let contours = crate::outline::contours(&faces[f].1, id)?;
+        Some(Path {
+            contours: contours
+                .into_iter()
+                .map(|c| {
+                    c.into_iter()
+                        .map(|q| q.map(|[x, y]| [x * size, -y * size]))
+                        .collect()
+                })
+                .collect(),
+        })
+    }
+
     /// Drops cached layouts not used since the last call; the runtime calls
     /// this once per frame.
     pub fn end_frame(&self) {
@@ -438,5 +460,24 @@ mod tests {
         let s = t.caret_stops("fi", Font::DEFAULT, 20.0);
         assert_eq!(s.len(), 3);
         assert!((s[1] - s[2] / 2.0).abs() < 1e-3, "{s:?}");
+    }
+
+    #[test]
+    fn glyphs_morph_contour_by_contour() {
+        let t = Text::default();
+        let o = t.glyph_path(Font::DEFAULT, 'O', 40.0).unwrap();
+        let c = t.glyph_path(Font::DEFAULT, 'C', 40.0).unwrap();
+        assert_eq!((o.contours.len(), c.contours.len()), (2, 1));
+        let m = crate::anim::Morph::new(&o, &c);
+        for k in 0..=4 {
+            let p = m.at(k as f32 / 4.0);
+            assert_eq!(p.contours.len(), 2);
+            for c in &p.contours {
+                for (a, b) in c.iter().zip(c.iter().cycle().skip(1)) {
+                    assert!((a[2][0] - b[0][0]).abs() < 1e-3 && (a[2][1] - b[0][1]).abs() < 1e-3);
+                }
+            }
+        }
+        assert_eq!(m.at(0.0).contours[1], o.contours[1]);
     }
 }

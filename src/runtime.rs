@@ -321,6 +321,7 @@ impl<A: App> Runtime<A> {
             Color::TRANSPARENT,
             all,
         );
+        self.text.outlines.begin_frame();
         let mut spans = Vec::with_capacity(nodes.len());
         let now = self.clock.unwrap_or_else(Instant::now);
         for (n, p) in nodes.iter().zip(&self.placed) {

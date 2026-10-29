@@ -503,7 +503,14 @@ impl Gpu {
             // ponytail: re-uploads all outlines when any glyph is added; append-only writes if fonts get big.
             self.queue.write_buffer(&self.curves, 0, cb);
             self.queue.write_buffer(&self.bands, 0, bb);
-            o.dirty = false;
+            (o.dirty, o.transient_dirty) = (false, false);
+        } else if o.transient_dirty {
+            let (c, b) = o.transient_data();
+            self.queue
+                .write_buffer(&self.curves, 0, bytemuck::cast_slice(c));
+            self.queue
+                .write_buffer(&self.bands, 0, bytemuck::cast_slice(b));
+            o.transient_dirty = false;
         }
 
         let globals = Globals {

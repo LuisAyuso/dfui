@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use taffy::{AvailableSpace, Size, Style};
 
+use crate::path::Path;
 use crate::render::{Color, Rect, Scene, Shadow};
 use crate::text::{Font, Text};
 
@@ -165,6 +166,40 @@ impl PaintCx<'_> {
     /// Paint again next frame, for animations or live readouts.
     pub fn request_frame(&mut self) {
         *self.frame = true;
+    }
+
+    /// Fills `path` through the glyph renderer.
+    pub fn path(&mut self, path: &Path, color: Color) {
+        let quads = path.contours.iter().flatten();
+        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for p in quads.clone().flatten() {
+            lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+            hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+        }
+        let span = (hi[0] - lo[0]).max(hi[1] - lo[1]);
+        if !span.is_finite() || span <= 0.0 {
+            return;
+        }
+        // Stored like a glyph: y up, scaled to a unit box, which keeps the
+        // shader's line test and precision where glyphs have them.
+        let s = 1.0 / span;
+        let unit = quads
+            .map(|q| q.map(|[x, y]| [(x - lo[0]) * s, (hi[1] - y) * s]))
+            .collect();
+        // 1px padding keeps the edge antialiasing.
+        let Some(g) = self.text.outlines.transient(unit, s) else {
+            return;
+        };
+        let [x0, y0, x1, y1] = g.bbox;
+        let r = Rect::new(lo[0] + x0 / s, hi[1] - y1 / s, (x1 - x0) / s, (y1 - y0) / s);
+        let bands = [g.header as f32, g.bands_h as f32, g.bands_v as f32];
+        self.scene
+            .glyph(r, [x0, y1, x1, y0], color, self.clip, bands);
+    }
+
+    /// Outline of `c` at `size` px, pen at the origin on the baseline.
+    pub fn glyph_path(&self, font: Font, c: char, size: f32) -> Option<Path> {
+        self.text.glyph_path(font, c, size)
     }
 
     pub fn fill(&mut self, r: Rect, radius: f32, color: Color) {

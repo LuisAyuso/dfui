@@ -37,6 +37,10 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 
 - [x] Paint animations: `Animated<T>` eased by `PaintCx::now`, looping via
       `request_frame` while running; button hover/press fade.
+- [x] Path morphing (`anim::Morph`): glyph or polygon outlines, drawn by the
+      glyph renderer; demo morphs rect ↔ hexagon and D ↔ O.
+- [ ] Morphs across topology changes (O → C): an unpaired hole shrinks to
+      its centre but can leave the outer contour on the way, showing as fill.
 - [ ] Layout animations (size/position, list insert/remove): need a rebuild
       or relayout per frame while running.
 - [ ] Timed wakeups (`request_frame_at`) so slow animations like caret

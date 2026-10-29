@@ -5,8 +5,7 @@ use read_fonts::model::Font;
 use read_fonts::model::glyph::outline::{DrawMemory, DrawOptions, PathSink};
 use read_fonts::types::GlyphId;
 
-type P = [f32; 2];
-type Quad = [P; 3];
+use crate::path::{Point as P, Quad, line};
 
 /// Where a glyph's data lives in the shared buffers. Coordinates are em, y up.
 #[derive(Clone, Copy, Debug)]
@@ -17,30 +16,57 @@ pub(crate) struct OutlineGlyph {
     pub bbox: [f32; 4],
 }
 
+/// Curves and band entries reserved at the front of the buffers for shapes
+/// that change every frame (`PaintCx::polygon`); glyphs are stored after them.
+const TRANSIENT_CURVES: usize = 512;
+const TRANSIENT_BANDS: usize = 4096;
+
 /// GPU-bound storage: each curve is two vec4s `(p0, p1), (p2, 0, 0)`; `bands` holds
 /// per-glyph `[start, count]` headers (horizontal then vertical) and curve indices.
-#[derive(Default)]
 pub(crate) struct Outlines {
     pub curves: Vec<[f32; 4]>,
     pub bands: Vec<u32>,
+    /// Glyphs were added: upload everything.
     pub dirty: bool,
+    /// Only the transient region changed.
+    pub transient_dirty: bool,
+    /// Next free curve and band entry in the transient region.
+    transient: (usize, usize),
+}
+
+impl Default for Outlines {
+    fn default() -> Self {
+        Outlines {
+            curves: vec![[0.0; 4]; 2 * TRANSIENT_CURVES],
+            bands: vec![0; TRANSIENT_BANDS],
+            dirty: true,
+            transient_dirty: false,
+            transient: (0, 0),
+        }
+    }
 }
 
 impl Outlines {
     pub fn add(&mut self, font: &Font, id: GlyphId) -> Option<OutlineGlyph> {
-        let mut b = Builder {
-            em: font.units_per_em() as f32,
-            start: [0.0; 2],
-            cur: [0.0; 2],
-            quads: Vec::new(),
-        };
-        let glyph = font.outline_glyphs().get(id)?;
-        glyph
-            .draw(&DrawOptions::new(), DrawMemory::Scratch, &mut b)
-            .ok()?;
-        b.close();
+        let quads = contours(font, id)?.into_iter().flatten().collect();
+        self.insert(quads, 0.0, false)
+    }
+
+    /// Frees the transient region; the runtime calls this before painting.
+    pub fn begin_frame(&mut self) {
+        self.transient = (0, 0);
+    }
+
+    /// Stores closed contours (y up) until the next `begin_frame`. `pad` widens
+    /// the box so antialiasing on its edges isn't cut off. `None` once the
+    /// transient region is full.
+    pub fn transient(&mut self, quads: Vec<Quad>, pad: f32) -> Option<OutlineGlyph> {
+        self.insert(quads, pad, true)
+    }
+
+    fn insert(&mut self, raw: Vec<Quad>, pad: f32, transient: bool) -> Option<OutlineGlyph> {
         let mut quads = Vec::new();
-        for q in b.quads {
+        for q in raw {
             split_monotonic(q, &mut quads);
         }
         if quads.is_empty() {
@@ -51,27 +77,26 @@ impl Outlines {
         for q in &quads {
             for p in q {
                 for a in 0..2 {
-                    lo[a] = lo[a].min(p[a]);
-                    hi[a] = hi[a].max(p[a]);
+                    lo[a] = lo[a].min(p[a] - pad);
+                    hi[a] = hi[a].max(p[a] + pad);
                 }
             }
         }
 
-        let first = (self.curves.len() / 2) as u32;
-        for q in &quads {
-            self.curves.push([q[0][0], q[0][1], q[1][0], q[1][1]]);
-            self.curves.push([q[2][0], q[2][1], 0.0, 0.0]);
-        }
-
         let n = ((quads.len() as f32 / 2.0).ceil() as u32).clamp(1, 32);
-        let header = self.bands.len() as u32;
-        self.bands.resize(self.bands.len() + 4 * n as usize, 0);
+        let (first, header) = if transient {
+            let (c, b) = self.transient;
+            (c as u32, b as u32)
+        } else {
+            ((self.curves.len() / 2) as u32, self.bands.len() as u32)
+        };
+        let mut bands = vec![0u32; 4 * n as usize];
         // Horizontal bands slice y and are scanned by +x rays; vertical bands the reverse.
         for (axis, base) in [(1usize, 0u32), (0, n)] {
             let size = (hi[axis] - lo[axis]) / n as f32;
             for i in 0..n {
                 let (b0, b1) = (lo[axis] + i as f32 * size, lo[axis] + (i + 1) as f32 * size);
-                let start = self.bands.len() as u32;
+                let start = header + bands.len() as u32;
                 let mut members: Vec<usize> = (0..quads.len())
                     .filter(|&k| {
                         let q = &quads[k];
@@ -85,13 +110,37 @@ impl Outlines {
                     let reach = |k: usize| quads[k][0][ray].max(quads[k][2][ray]);
                     reach(b).total_cmp(&reach(a))
                 });
-                self.bands.extend(members.iter().map(|&k| first + k as u32));
-                let h = (header + 2 * (base + i)) as usize;
-                self.bands[h] = start;
-                self.bands[h + 1] = self.bands.len() as u32 - start;
+                bands.extend(members.iter().map(|&k| first + k as u32));
+                let h = 2 * (base + i) as usize;
+                bands[h] = start;
+                bands[h + 1] = header + bands.len() as u32 - start;
             }
         }
-        self.dirty = true;
+        let curves = quads.iter().flat_map(|q| {
+            [
+                [q[0][0], q[0][1], q[1][0], q[1][1]],
+                [q[2][0], q[2][1], 0.0, 0.0],
+            ]
+        });
+
+        if transient {
+            let (c, b) = self.transient;
+            let (c_end, b_end) = (c + quads.len(), b + bands.len());
+            // ponytail: fixed transient capacity; shapes past it are dropped. Grow the region if real screens hit it.
+            if c_end > TRANSIENT_CURVES || b_end > TRANSIENT_BANDS {
+                return None;
+            }
+            for (dst, src) in self.curves[2 * c..2 * c_end].iter_mut().zip(curves) {
+                *dst = src;
+            }
+            self.bands[b..b_end].copy_from_slice(&bands);
+            self.transient = (c_end, b_end);
+            self.transient_dirty = true;
+        } else {
+            self.curves.extend(curves);
+            self.bands.extend(bands);
+            self.dirty = true;
+        }
         Some(OutlineGlyph {
             header,
             bands_h: n,
@@ -99,38 +148,69 @@ impl Outlines {
             bbox: [lo[0], lo[1], hi[0], hi[1]],
         })
     }
+
+    /// The transient region's slices, to upload when only it changed.
+    pub fn transient_data(&self) -> (&[[f32; 4]], &[u32]) {
+        (
+            &self.curves[..2 * TRANSIENT_CURVES],
+            &self.bands[..TRANSIENT_BANDS],
+        )
+    }
+}
+
+/// A glyph's closed contours in em units, y up.
+pub(crate) fn contours(font: &Font, id: GlyphId) -> Option<Vec<Vec<Quad>>> {
+    let mut b = Builder {
+        em: font.units_per_em() as f32,
+        start: [0.0; 2],
+        cur: [0.0; 2],
+        contours: Vec::new(),
+    };
+    let glyph = font.outline_glyphs().get(id)?;
+    glyph
+        .draw(&DrawOptions::new(), DrawMemory::Scratch, &mut b)
+        .ok()?;
+    b.close();
+    b.contours.retain(|c| !c.is_empty());
+    Some(b.contours)
 }
 
 struct Builder {
     em: f32,
     start: P,
     cur: P,
-    quads: Vec<Quad>,
+    contours: Vec<Vec<Quad>>,
 }
 
 impl Builder {
     fn p(&self, x: f32, y: f32) -> P {
         [x / self.em, y / self.em]
     }
+
+    fn push(&mut self, q: Quad) {
+        if let Some(c) = self.contours.last_mut() {
+            c.push(q);
+        }
+    }
 }
 
 impl PathSink for Builder {
     fn move_to(&mut self, x: f32, y: f32) {
         self.close();
+        self.contours.push(Vec::new());
         self.start = self.p(x, y);
         self.cur = self.start;
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
         let p = self.p(x, y);
-        let mid = [(self.cur[0] + p[0]) / 2.0, (self.cur[1] + p[1]) / 2.0];
-        self.quads.push([self.cur, mid, p]);
+        self.push(line(self.cur, p));
         self.cur = p;
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         let (c, p) = (self.p(x1, y1), self.p(x, y));
-        self.quads.push([self.cur, c, p]);
+        self.push([self.cur, c, p]);
         self.cur = p;
     }
 
@@ -159,7 +239,7 @@ impl PathSink for Builder {
             let h = (t1 - t0) / 2.0;
             // Average of the two tangent-implied control points.
             let c = [0, 1].map(|a| (p0[a] + d0[a] * h + p2[a] - d2[a] * h) / 2.0);
-            self.quads.push([p0, c, p2]);
+            self.push([p0, c, p2]);
         }
         self.cur = cubic[3];
     }
@@ -268,5 +348,21 @@ mod tests {
             "left of glyph is outside"
         );
         assert_ne!(winding(&o, &g, [cx, y1 - 0.02]), 0, "top stroke is inside");
+    }
+
+    #[test]
+    fn transient_shapes_fill_and_recycle_each_frame() {
+        let square =
+            crate::path::Path::polygon(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]);
+        let quads: Vec<Quad> = square.contours.concat();
+        let mut o = Outlines::default();
+        let g = o.transient(quads.clone(), 1.0).unwrap();
+        assert_eq!(g.header, 0);
+        assert_ne!(winding(&o, &g, [5.0, 5.0]), 0);
+        assert_eq!(winding(&o, &g, [10.5, 5.0]), 0, "padding is outside");
+        let second = o.transient(quads.clone(), 1.0).unwrap();
+        assert_ne!(second.header, 0);
+        o.begin_frame();
+        assert_eq!(o.transient(quads, 1.0).unwrap().header, 0);
     }
 }
