@@ -1,3 +1,5 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use taffy::{AvailableSpace, Size, Style};
 
 use super::Styled;
@@ -70,6 +72,11 @@ impl<Msg> Widget<Msg> for Label {
             width: known.width.unwrap_or(l.width),
             height: known.height.unwrap_or(l.height),
         }
+    }
+    fn measure_key(&self) -> u64 {
+        let mut h = DefaultHasher::new();
+        (&self.text, self.font, self.size.to_bits()).hash(&mut h);
+        h.finish()
     }
     fn paint(&self, cx: &mut PaintCx) {
         let (r, s, c) = (cx.rect, self.size, self.color);

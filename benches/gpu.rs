@@ -19,7 +19,7 @@ fn frames(c: &mut Criterion) {
     gpu_time(
         c,
         "gpu/cards_10",
-        GpuBench::new(Cards(10), SIZE, SCALE),
+        GpuBench::new(Cards::new(10), SIZE, SCALE),
         None,
     );
     gpu_time(

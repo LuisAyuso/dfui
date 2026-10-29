@@ -74,11 +74,14 @@ each widget's `style()`/`measure()` and keeps each node's parent-relative box;
 `place` turns those into absolute rects, applying `scroll()` offsets and
 intersecting clip rects. The runtime keeps `measure`'s result until the tree
 is rebuilt or the viewport changes, so redraws without a rebuild only rerun
-`place`. The root fills the
+`place`. The taffy tree itself is kept across rebuilds, matched by node id:
+only nodes whose style, children or `measure_key()` changed are marked
+dirty, and taffy's cache recomputes just their path to the root. Widgets
+whose `measure` depends on their own data must override `measure_key`. The root fills the
 viewport, with insets added to its padding so backgrounds bleed under system
 bars. Text layouts are cached in `Text` by (string, size, width) and evicted
 after a frame that doesn't use them, so repeated `measure` calls and
-per-frame rebuilds of the same strings are cheap. Every rebuild still runs a full taffy layout (see `ponytail:` note).
+per-frame rebuilds of the same strings are cheap.
 
 ## Input
 
@@ -123,5 +126,5 @@ Details and design decisions, including partial redraws: `rendering.md`.
 ## Known limits
 
 Tracked in `TODO.md` and as `ponytail:` comments in the code: no IME composition on desktop,
-no bidi, fallback only to the default font, single pointer, full relayout per rebuild, all
+no bidi, fallback only to the default font, single pointer, full `view` rebuild and paint per change, all
 outlines re-uploaded when a glyph is added, linear hit-testing.

@@ -6,13 +6,25 @@ use dfui::widgets::{Styled, button, column, container, row, scroll, text};
 use dfui::{App, Color, Element, Shadow};
 
 /// A scrolling list of demo-style cards: the common shape of a real screen.
-pub struct Cards(pub u32);
+/// Each update bumps a count shown on the first card.
+pub struct Cards {
+    n: u32,
+    edits: u32,
+}
+
+impl Cards {
+    pub fn new(n: u32) -> Self {
+        Cards { n, edits: 0 }
+    }
+}
 
 impl App for Cards {
     type Msg = ();
-    fn update(&mut self, _: ()) {}
+    fn update(&mut self, _: ()) {
+        self.edits += 1;
+    }
     fn view(&self) -> Element<()> {
-        let cards = (1..=self.0).map(|n| {
+        let cards = (1..=self.n).map(|n| {
             let card: Element<()> = row([
                 container(text(n.to_string()).size(20.0).color(Color::WHITE))
                     .bg(Color::hex(0x3b6fe0))
@@ -21,7 +33,13 @@ impl App for Cards {
                     .height(48.0)
                     .into(),
                 column([
-                    text(format!("Card {n}")).size(18.0).into(),
+                    text(if n == 1 {
+                        format!("Card {n}, edited {}", self.edits)
+                    } else {
+                        format!("Card {n}")
+                    })
+                    .size(18.0)
+                    .into(),
                     text("Rounded box SDF with border and soft shadow.")
                         .size(14.0)
                         .into(),

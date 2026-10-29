@@ -1,3 +1,5 @@
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use taffy::util::ResolveOrZero;
 use taffy::{AvailableSpace, LengthPercentage, Size, Style};
 
@@ -120,6 +122,11 @@ impl<Msg> Styled for TextInput<Msg> {
 impl<Msg> Widget<Msg> for TextInput<Msg> {
     fn style(&self) -> Style {
         self.style.clone()
+    }
+    fn measure_key(&self) -> u64 {
+        let mut h = DefaultHasher::new();
+        (self.font, self.size.to_bits()).hash(&mut h);
+        h.finish()
     }
     fn measure(
         &self,

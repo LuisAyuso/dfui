@@ -93,6 +93,13 @@ pub trait Widget<Msg> {
         Size::ZERO
     }
 
+    /// Hash of everything `measure` reads besides its arguments. Layout is
+    /// kept across rebuilds and a leaf is only re-measured when this changes,
+    /// so widgets whose size depends on their data must override it.
+    fn measure_key(&self) -> u64 {
+        0
+    }
+
     /// Children are clipped to this widget's rect and shifted by the returned offset.
     fn scroll(&self, _state: &mut State) -> Option<(f32, f32)> {
         None

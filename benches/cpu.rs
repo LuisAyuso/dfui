@@ -33,14 +33,21 @@ fn text_layout(c: &mut Criterion) {
 fn frame(c: &mut Criterion) {
     let mut g = c.benchmark_group("frame");
     for n in [10, 100, 1000] {
-        let mut bench = Bench::new(Cards(n), VIEWPORT);
+        let mut bench = Bench::new(Cards::new(n), VIEWPORT);
         g.bench_with_input(BenchmarkId::new("cards", n), &n, |b, _| {
             b.iter(|| bench.frame())
         });
     }
+    // One label changes: a rebuild where most of the tree is unchanged.
+    for n in [10, 100, 1000] {
+        let mut bench = Bench::new(Cards::new(n), VIEWPORT);
+        g.bench_with_input(BenchmarkId::new("edit", n), &n, |b, _| {
+            b.iter(|| bench.update(()))
+        });
+    }
     // A wheel tick: no rebuild, so taffy's result is reused.
     for n in [10, 100, 1000] {
-        let mut bench = Bench::new(Cards(n), VIEWPORT);
+        let mut bench = Bench::new(Cards::new(n), VIEWPORT);
         let mut dy = 40.0;
         g.bench_with_input(BenchmarkId::new("scroll", n), &n, |b, _| {
             b.iter(|| {
@@ -59,7 +66,7 @@ fn frame(c: &mut Criterion) {
 
 fn startup(c: &mut Criterion) {
     c.bench_function("startup/cards_10", |b| {
-        b.iter(|| Bench::new(Cards(10), VIEWPORT))
+        b.iter(|| Bench::new(Cards::new(10), VIEWPORT))
     });
 }
 

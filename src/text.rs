@@ -20,6 +20,12 @@ impl Font {
     pub const DEFAULT: Font = Font(include_bytes!("../assets/DejaVuSans.ttf"));
 }
 
+impl Hash for Font {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        self.0.as_ptr().hash(h);
+    }
+}
+
 impl Default for Font {
     fn default() -> Self {
         Font::DEFAULT

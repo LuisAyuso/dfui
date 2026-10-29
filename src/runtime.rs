@@ -9,7 +9,7 @@ use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::App;
-use crate::layout::{Insets, Measured, Placed, flatten, measure, place};
+use crate::layout::{Insets, Layout, Measured, Placed, flatten, place};
 use crate::render::{
     Color, Offscreen, Outcome, Rect, Renderer, Scene, Spans, damage, render_offscreen,
 };
@@ -21,6 +21,7 @@ pub(crate) struct Runtime<A: App> {
     root: Element<A::Msg>,
     states: HashMap<u64, State>,
     text: Text,
+    layout: Layout,
     /// Taffy's last result; reused until the tree or viewport changes.
     measured: Vec<Measured>,
     placed: Vec<Placed>,
@@ -87,6 +88,7 @@ impl<A: App> Runtime<A> {
             root,
             states: HashMap::new(),
             text: Text::default(),
+            layout: Layout::default(),
             measured: Vec::new(),
             placed: Vec::new(),
             captured: None,
@@ -119,7 +121,9 @@ impl<A: App> Runtime<A> {
 
     fn relayout(&mut self) {
         let nodes = flatten(&self.root, &mut self.states);
-        self.measured = measure(&nodes, &self.text, self.viewport, self.insets);
+        self.measured = self
+            .layout
+            .measure(&nodes, &self.text, self.viewport, self.insets);
         self.placed = place(&nodes, &self.measured, &mut self.states);
     }
 
@@ -354,6 +358,12 @@ impl<A: App> Bench<A> {
         rt.root = rt.app.view();
         rt.relayout();
         self.paint()
+    }
+
+    /// Applies `msg`, then one full CPU frame.
+    pub fn update(&mut self, msg: A::Msg) -> usize {
+        self.0.app.update(msg);
+        self.frame()
     }
 
     /// Paint and damage diff only, as after an event that kept the tree.
