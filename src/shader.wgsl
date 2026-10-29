@@ -106,14 +106,12 @@ fn ray_coverage(p_in: vec2<f32>, header: u32, band_count: f32, lo: f32, hi: f32,
         let qa = p0.y - 2.0 * p1.y + p2.y;
         let qb = 2.0 * (p1.y - p0.y);
         let qc = p0.y - p.y;
-        var t: f32;
-        if abs(qa) < 1e-7 {
-            t = -qc / qb;
-        } else {
-            let d = sqrt(max(qb * qb - 4.0 * qa * qc, 0.0));
-            let t1 = (-qb + d) / (2.0 * qa);
-            t = select((-qb - d) / (2.0 * qa), t1, t1 >= -1e-4 && t1 <= 1.0 + 1e-4);
-        }
+        // Stable roots q / qa and qc / q: the second stays accurate as the
+        // curve approaches a line (qa -> 0), with no threshold to tune.
+        let d = sqrt(max(qb * qb - 4.0 * qa * qc, 0.0));
+        let q = -0.5 * (qb + select(-d, d, qb >= 0.0));
+        let t2 = qc / q;
+        let t = select(q / qa, t2, t2 >= -1e-4 && t2 <= 1.0 + 1e-4);
         let x = mix(mix(p0.x, p1.x, t), mix(p1.x, p2.x, t), t);
         let r = (x - p.x) / px;
         sum += sign(p2.y - p0.y) * clamp(r + 0.5, 0.0, 1.0);
