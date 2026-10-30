@@ -174,6 +174,10 @@ a requested frame turns out idle, the runtime paces the next one with
 Presented frames still pace themselves on vsync. While the window is
 occluded, idle animation frames stop entirely and resume when it's visible.
 
+Slow animations use `request_frame_at(t)` instead: after a paint with no
+`request_frame`, the runtime sleeps until the earliest requested time. The
+caret blink paints twice a second this way.
+
 Exceptions: a fresh canvas always draws, and with the damage overlay on, the
 frame after a tinted one presents so the tint clears.
 

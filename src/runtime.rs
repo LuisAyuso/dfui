@@ -33,6 +33,8 @@ pub(crate) struct Runtime<A: App> {
     /// Animation frame due after an idle one; idle frames don't block on
     /// vsync, so they're paced by this timer instead.
     next_frame: Option<Instant>,
+    /// Earliest `request_frame_at` from the last paint.
+    wake: Option<Instant>,
     /// Fixed frame time for tests; the wall clock otherwise.
     clock: Option<Instant>,
     /// Hidden windows don't animate; presents would be throttled anyway.
@@ -44,6 +46,7 @@ pub(crate) struct Runtime<A: App> {
     viewport: (f32, f32),
     cursor: (f32, f32),
     touch: Option<u64>,
+    clipboard: Clipboard,
     stats: Stats,
     insets: Insets,
     #[cfg(target_os = "android")]
@@ -101,6 +104,7 @@ impl<A: App> Runtime<A> {
             captured: None,
             prev: None,
             next_frame: None,
+            wake: None,
             clock: None,
             occluded: false,
             focused: None,
@@ -110,6 +114,7 @@ impl<A: App> Runtime<A> {
             viewport: (0.0, 0.0),
             cursor: (0.0, 0.0),
             touch: None,
+            clipboard: Clipboard::default(),
             stats: Stats::default(),
             insets: [0.0; 4],
             #[cfg(target_os = "android")]
@@ -184,6 +189,7 @@ impl<A: App> Runtime<A> {
         }
         let mut msgs = Vec::new();
         let mut updates = Vec::new();
+        let mut copied = None;
         let mut redraw = false;
         let mut focus = None;
         let keyboard = matches!(ev, Event::Text(_) | Event::Key(_));
@@ -203,10 +209,12 @@ impl<A: App> Runtime<A> {
                 clip: p.clip,
                 content: p.content,
                 focused: self.focused == Some(n.id),
+                shift: self.mods.shift_key(),
                 state: states.entry(n.id).or_default(),
                 text: &self.text,
                 msgs: &mut msgs,
                 updates: &mut updates,
+                copied: &mut copied,
                 capture: false,
                 focus: false,
                 stop: false,
@@ -235,6 +243,9 @@ impl<A: App> Runtime<A> {
         }
         if matches!(ev, Event::PointerUp { .. }) {
             self.captured = None;
+        }
+        if let Some(t) = copied {
+            self.clipboard.set(t);
         }
         // A tap that no widget claims for focus blurs the focused one.
         if matches!(ev, Event::PointerDown { .. }) {
@@ -312,11 +323,18 @@ impl<A: App> Runtime<A> {
                 }
             }
         }
+        if !frame
+            && !self.occluded
+            && let Some(t) = self.wake
+        {
+            self.next_frame = Some(t);
+        }
         self.prev = Some((scene, spans));
     }
 
     fn scene(&mut self, frame: &mut bool) -> (Scene, Spans) {
         let nodes = walk(&self.root, &self.ids);
+        self.wake = None;
         let mut scene = Scene::default();
         // Partial redraws load the previous frame, so damage needs its own background.
         let (w, h) = self.viewport;
@@ -343,11 +361,61 @@ impl<A: App> Runtime<A> {
                 scene: &mut scene,
                 text: &mut self.text,
                 frame: &mut *frame,
+                wake: &mut self.wake,
             });
             spans.push((n.id, start..scene.len()));
         }
         self.text.end_frame();
         (scene, spans)
+    }
+}
+
+fn printable(t: &str) -> String {
+    t.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// The system clipboard on desktop; an in-app one on Android and in tests.
+// ponytail: Android could use ClipboardManager over JNI once there's a touch selection UI.
+#[derive(Default)]
+struct Clipboard {
+    #[cfg(not(any(test, target_os = "android")))]
+    sys: Option<arboard::Clipboard>,
+    #[cfg(any(test, target_os = "android"))]
+    text: Option<String>,
+}
+
+#[cfg(not(any(test, target_os = "android")))]
+impl Clipboard {
+    fn sys(&mut self) -> Option<&mut arboard::Clipboard> {
+        if self.sys.is_none() {
+            self.sys = arboard::Clipboard::new()
+                .inspect_err(|e| log::warn!("clipboard unavailable: {e}"))
+                .ok();
+        }
+        self.sys.as_mut()
+    }
+
+    fn get(&mut self) -> Option<String> {
+        self.sys()?.get_text().ok()
+    }
+
+    fn set(&mut self, t: String) {
+        if let Some(c) = self.sys()
+            && let Err(e) = c.set_text(t)
+        {
+            log::warn!("clipboard write failed: {e}");
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "android"))]
+impl Clipboard {
+    fn get(&mut self) -> Option<String> {
+        self.text.clone()
+    }
+
+    fn set(&mut self, t: String) {
+        self.text = Some(t);
     }
 }
 
@@ -535,6 +603,15 @@ impl<A: App> ApplicationHandler for Runtime<A> {
             }
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                let command = if cfg!(target_os = "macos") {
+                    self.mods.super_key()
+                } else {
+                    self.mods.control_key()
+                };
+                let shortcut = |k: &str| {
+                    command
+                        && matches!(&event.logical_key, WKey::Character(c) if c.eq_ignore_ascii_case(k))
+                };
                 let key = match event.logical_key {
                     WKey::Named(NamedKey::Backspace) => Some(Key::Backspace),
                     WKey::Named(NamedKey::Delete) => Some(Key::Delete),
@@ -542,15 +619,26 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                     WKey::Named(NamedKey::ArrowRight) => Some(Key::Right),
                     WKey::Named(NamedKey::Home) => Some(Key::Home),
                     WKey::Named(NamedKey::End) => Some(Key::End),
+                    _ if shortcut("a") => Some(Key::SelectAll),
+                    _ if shortcut("c") => Some(Key::Copy),
+                    _ if shortcut("x") => Some(Key::Cut),
                     _ => None,
                 };
                 if let Some(k) = key {
                     self.dispatch(Event::Key(k));
+                } else if shortcut("v") {
+                    // Pasting is typing the clipboard's text.
+                    if self.focused.is_some()
+                        && let Some(t) = self.clipboard.get().map(|t| printable(&t))
+                        && !t.is_empty()
+                    {
+                        self.dispatch(Event::Text(t));
+                    }
                 } else if !(self.mods.control_key() && !self.mods.alt_key()
                     || self.mods.super_key())
                     && let Some(t) = event.text
                 {
-                    let t: String = t.chars().filter(|c| !c.is_control()).collect();
+                    let t = printable(&t);
                     if !t.is_empty() {
                         self.dispatch(Event::Text(t));
                     }
@@ -835,5 +923,93 @@ mod tests {
         // Delete removes the whole flag.
         keys(&mut rt, &[Key::Delete]);
         assert_eq!(rt.app.0, "ab");
+    }
+
+    #[test]
+    fn selection_extends_with_shift_and_is_replaced_by_edits() {
+        let mut rt = Runtime::new(Field(String::new()));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+        rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+        rt.dispatch(Event::Text("hello world".into()));
+        // Shift+Left x5 selects "world"; typing replaces it.
+        rt.mods = ModifiersState::SHIFT;
+        for _ in 0..5 {
+            rt.dispatch(Event::Key(Key::Left));
+        }
+        rt.mods = ModifiersState::empty();
+        rt.dispatch(Event::Text("there".into()));
+        assert_eq!(rt.app.0, "hello there");
+        // Shift+Home selects back to the start; Left collapses to it.
+        rt.mods = ModifiersState::SHIFT;
+        rt.dispatch(Event::Key(Key::Home));
+        rt.mods = ModifiersState::empty();
+        rt.dispatch(Event::Key(Key::Left));
+        rt.dispatch(Event::Text(">".into()));
+        assert_eq!(rt.app.0, ">hello there");
+        // Select all, then Backspace clears it.
+        rt.dispatch(Event::Key(Key::SelectAll));
+        rt.dispatch(Event::Key(Key::Backspace));
+        assert_eq!(rt.app.0, "");
+        // Dragging from the start of new text selects it.
+        rt.dispatch(Event::Text("drag".into()));
+        rt.dispatch(Event::PointerDown { x: 0.0, y: 10.0 });
+        rt.dispatch(Event::PointerMove { x: 190.0, y: 10.0 });
+        rt.dispatch(Event::PointerUp { x: 190.0, y: 10.0 });
+        rt.dispatch(Event::Text("x".into()));
+        assert_eq!(rt.app.0, "x");
+    }
+
+    #[test]
+    fn copy_and_cut_take_the_selection() {
+        let mut rt = Runtime::new(Field(String::new()));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+        rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+        rt.dispatch(Event::Text("héllo wörld".into()));
+        rt.dispatch(Event::Key(Key::Copy));
+        assert_eq!(rt.clipboard.get(), None, "nothing selected");
+        rt.mods = ModifiersState::SHIFT;
+        for _ in 0..5 {
+            rt.dispatch(Event::Key(Key::Left));
+        }
+        rt.mods = ModifiersState::empty();
+        rt.dispatch(Event::Key(Key::Cut));
+        assert_eq!(rt.clipboard.get().as_deref(), Some("wörld"));
+        assert_eq!(rt.app.0, "héllo ");
+        rt.dispatch(Event::Key(Key::SelectAll));
+        rt.dispatch(Event::Key(Key::Copy));
+        assert_eq!(rt.clipboard.get().as_deref(), Some("héllo "));
+        assert_eq!(rt.app.0, "héllo ");
+    }
+
+    #[test]
+    fn caret_blinks_on_timed_wakeups() {
+        let mut rt = Runtime::new(Field(String::new()));
+        rt.viewport = (200.0, 200.0);
+        rt.relayout();
+        let t = Instant::now();
+        let paint_at = |ms: u64, rt: &mut Runtime<Field>| {
+            rt.clock = Some(t + Duration::from_millis(ms));
+            let mut frame = false;
+            let n = rt.scene(&mut frame).0.len();
+            assert!(!frame, "a blink never asks for every frame");
+            n
+        };
+        let idle = paint_at(0, &mut rt);
+        assert_eq!(rt.wake, None, "unfocused fields don't wake");
+        rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+        let on = paint_at(100, &mut rt);
+        assert_eq!(on, idle + 1, "caret shown");
+        assert_eq!(rt.wake, Some(t + Duration::from_millis(600)));
+        assert_eq!(paint_at(600, &mut rt), idle, "caret hidden");
+        assert_eq!(rt.wake, Some(t + Duration::from_millis(1100)));
+        // Typing restarts the cycle with the caret shown.
+        rt.dispatch(Event::Text("a".into()));
+        let typed = paint_at(700, &mut rt);
+        assert_eq!(rt.wake, Some(t + Duration::from_millis(1200)));
+        assert!(typed > paint_at(1200, &mut rt), "hidden again 500ms later");
     }
 }

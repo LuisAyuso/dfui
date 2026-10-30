@@ -95,7 +95,11 @@ until pointer up. Touch is single-pointer.
 
 One widget at a time holds keyboard focus, claimed with `cx.focus()` on
 pointer down; a tap no widget claims blurs it. `Event::Text` and `Event::Key`
-go only to the focused widget, which sees `cx.focused` in event and paint. On
+go only to the focused widget, which sees `cx.focused` in event and paint,
+and `cx.shift` for extending selections. Ctrl/Cmd+A, C and X arrive as
+`Key::SelectAll`, `Key::Copy` and `Key::Cut`; a widget hands text to the
+clipboard with `cx.copy`. Paste arrives as `Event::Text` with the
+clipboard's contents. On
 Android, focus toggles the soft keyboard via `set_ime_allowed`; NativeActivity
 delivers its input as key events.
 

@@ -46,6 +46,9 @@ pub enum Key {
     Right,
     Home,
     End,
+    SelectAll,
+    Copy,
+    Cut,
 }
 
 /// A retained node description. `view` rebuilds the tree; framework-owned
@@ -160,12 +163,19 @@ pub struct PaintCx<'a> {
     pub(crate) scene: &'a mut Scene,
     pub(crate) text: &'a mut Text,
     pub(crate) frame: &'a mut bool,
+    pub(crate) wake: &'a mut Option<Instant>,
 }
 
 impl PaintCx<'_> {
     /// Paint again next frame, for animations or live readouts.
     pub fn request_frame(&mut self) {
         *self.frame = true;
+    }
+
+    /// Paint again at `t`, for slow animations like a caret blink; the
+    /// runtime sleeps until then instead of painting every frame.
+    pub fn request_frame_at(&mut self, t: Instant) {
+        *self.wake = Some(self.wake.map_or(t, |w| w.min(t)));
     }
 
     /// Fills `path` through the glyph renderer.
@@ -244,10 +254,13 @@ pub struct EventCx<'a, Msg> {
     /// Extent of laid-out children, relative to this widget's origin.
     pub content: Size<f32>,
     pub focused: bool,
+    /// Shift is held: arrows and clicks extend a selection.
+    pub shift: bool,
     pub state: &'a mut State,
     pub(crate) text: &'a Text,
     pub(crate) msgs: &'a mut Vec<Msg>,
     pub(crate) updates: &'a mut Vec<Update>,
+    pub(crate) copied: &'a mut Option<String>,
     pub(crate) capture: bool,
     pub(crate) focus: bool,
     pub(crate) stop: bool,
@@ -272,6 +285,11 @@ impl<Msg> EventCx<'_, Msg> {
     /// Route all pointer events to this widget until pointer up; others get `Cancel`.
     pub fn capture(&mut self) {
         self.capture = true;
+    }
+
+    /// Put `text` on the clipboard after this event.
+    pub fn copy(&mut self, text: impl Into<String>) {
+        *self.copied = Some(text.into());
     }
 
     /// Take keyboard focus; on touch devices this shows the soft keyboard.

@@ -7,8 +7,11 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 
 - [x] Text input + keyboard focus: single-line `text_input`, tap to focus,
       Android soft keyboard, caret.
-- [ ] Text input follow-ups: selection, clipboard, caret blink, desktop IME
-      composition, multi-line, keyboard-aware insets on Android.
+- [x] Text input selection (shift+arrows/click, drag, select all), clipboard
+      (arboard on desktop, in-app on Android), caret blink.
+- [ ] Text input follow-ups: desktop IME composition, multi-line,
+      keyboard-aware insets on Android, Android system clipboard and touch
+      selection handles.
 - [ ] Faster outline text: store curves inline in each band list (drop the
       index indirection, one fewer dependent load per curve). Re-measure with
       the Bench screen.
@@ -43,8 +46,8 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
       its centre but can leave the outer contour on the way, showing as fill.
 - [ ] Layout animations (size/position, list insert/remove): need a rebuild
       or relayout per frame while running.
-- [ ] Timed wakeups (`request_frame_at`) so slow animations like caret
-      blink don't paint at full frame rate.
+- [x] Timed wakeups (`PaintCx::request_frame_at`): the caret blink sleeps
+      between toggles instead of painting every frame.
 - [ ] Theming: shared colors/sizes instead of per-widget constants.
 - [ ] Images.
 - [ ] Async commands/subscriptions (Elm `Cmd`/`Sub`).

@@ -1,4 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::ops::Range;
+use std::time::{Duration, Instant};
 
 use taffy::util::ResolveOrZero;
 use taffy::{AvailableSpace, LengthPercentage, Size, Style};
@@ -11,12 +13,20 @@ use crate::widget::{Element, Event, EventCx, Key, PaintCx, Widget};
 
 type OnChange<Msg> = Box<dyn Fn(&mut EventCx<Msg>, String)>;
 
-/// Caret position in chars, always on a grapheme boundary.
+/// Caret and selection anchor in chars, always on grapheme boundaries; the
+/// selection is the range between them.
 #[derive(Default)]
-struct Caret(usize);
+struct Caret {
+    pos: usize,
+    anchor: usize,
+    dragging: bool,
+    /// Start of the blink cycle: the next paint after the caret last moved.
+    blink: Option<Instant>,
+}
+
+const BLINK: Duration = Duration::from_millis(500);
 
 /// Single-line controlled text field: shows `value`, reports edits via `on_change`.
-// ponytail: no selection, clipboard or caret blink yet.
 pub struct TextInput<Msg> {
     value: String,
     placeholder: String,
@@ -106,14 +116,23 @@ impl<Msg> TextInput<Msg> {
         std::iter::once(0).chain(ends).collect()
     }
 
-    /// The stored caret, snapped back to a boundary if the value changed.
-    fn caret(&self, c: &mut Caret) -> usize {
-        c.0 = self
-            .boundaries()
+    /// The stored caret and anchor, snapped back to boundaries if the value changed.
+    fn caret(&self, c: &mut Caret) -> (usize, usize) {
+        let bounds = self.boundaries();
+        let snap = |i: usize| bounds.iter().copied().rfind(|&b| b <= i).unwrap_or(0);
+        (c.pos, c.anchor) = (snap(c.pos), snap(c.anchor));
+        (c.pos, c.anchor)
+    }
+
+    /// Boundary nearest to `x`, with the field laid out for `caret`.
+    fn index_at(&self, text: &Text, r: Rect, caret: usize, x: f32) -> usize {
+        let c = self.content(r);
+        let (stops, shift) = self.stops(text, caret, c.w);
+        let at = x - c.x + shift;
+        self.boundaries()
             .into_iter()
-            .rfind(|&b| b <= c.0)
-            .unwrap_or(0);
-        c.0
+            .min_by(|&a, &b| (stops[a] - at).abs().total_cmp(&(stops[b] - at).abs()))
+            .unwrap_or(0)
     }
 
     fn byte(&self, caret: usize) -> usize {
@@ -168,10 +187,16 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
         cx.fill_bordered(r, 8.0, Color::WHITE, bw, bc);
 
         let c = self.content(r);
-        let caret = self.caret(cx.state.get::<Caret>());
+        let (caret, anchor) = self.caret(cx.state.get::<Caret>());
         let (stops, shift) = self.stops(cx.text, caret, c.w);
+        let h = cx.text.line_height(self.font, self.size);
         let outer = cx.clip;
         cx.clip = outer.intersect(&c);
+        if cx.focused && caret != anchor {
+            let (a, b) = (stops[caret.min(anchor)], stops[caret.max(anchor)]);
+            let sel = Rect::new(c.x + a - shift, c.y, b - a, h);
+            cx.fill(sel, 0.0, self.accent.alpha(0.25));
+        }
         if self.value.is_empty() {
             let muted = self.color.alpha(0.4);
             cx.text(
@@ -193,61 +218,77 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
             );
         }
         if cx.focused {
-            let h = cx.text.line_height(self.font, self.size);
-            let x = c.x + stops[caret] - shift;
-            cx.fill(Rect::new(x, c.y, 1.5, h), 0.0, self.accent);
+            let now = cx.now;
+            let start = *cx.state.get::<Caret>().blink.get_or_insert(now);
+            let phase = now.saturating_duration_since(start).as_millis() / BLINK.as_millis();
+            if phase.is_multiple_of(2) {
+                let x = c.x + stops[caret] - shift;
+                cx.fill(Rect::new(x, c.y, 1.5, h), 0.0, self.accent);
+            }
+            cx.request_frame_at(start + BLINK * (phase as u32 + 1));
         }
         cx.clip = outer;
     }
     fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
-        let caret = self.caret(cx.state.get::<Caret>());
+        let (caret, anchor) = self.caret(cx.state.get::<Caret>());
+        let sel = caret.min(anchor)..caret.max(anchor);
         let bounds = self.boundaries();
         let prev = bounds.iter().rfind(|&&b| b < caret).copied();
         let next = bounds.iter().find(|&&b| b > caret).copied();
-        let edit = |cx: &mut EventCx<Msg>, value: String, caret: usize| {
-            cx.state.get::<Caret>().0 = caret;
-            if let Some(f) = &self.on_change {
-                f(cx, value);
-            }
+        let select = |cx: &mut EventCx<Msg>, pos: usize, anchor: usize| {
+            let c = cx.state.get::<Caret>();
+            (c.pos, c.anchor) = (pos, anchor);
+            // Restart the blink, solid first, so the caret shows while typing.
+            c.blink = None;
             cx.request_redraw();
+        };
+        // Replaces `range` (chars) with `with` and puts the caret after it.
+        let replace = |cx: &mut EventCx<Msg>, range: Range<usize>, with: &str| {
+            let mut v = self.value.clone();
+            v.replace_range(self.byte(range.start)..self.byte(range.end), with);
+            let at = range.start + with.chars().count();
+            select(cx, at, at);
+            if let Some(f) = &self.on_change {
+                f(cx, v);
+            }
         };
         match ev {
             Event::PointerDown { x, y } if cx.hit(*x, *y) => {
-                let c = self.content(cx.rect);
-                let (stops, shift) = self.stops(cx.text, caret, c.w);
-                let at = x - c.x + shift;
-                let nearest = bounds
-                    .iter()
-                    .copied()
-                    .min_by(|&a, &b| (stops[a] - at).abs().total_cmp(&(stops[b] - at).abs()))
-                    .unwrap_or(0);
-                cx.state.get::<Caret>().0 = nearest;
+                let at = self.index_at(cx.text, cx.rect, caret, *x);
+                let keep = if cx.shift { anchor } else { at };
+                select(cx, at, keep);
+                cx.state.get::<Caret>().dragging = true;
                 cx.focus();
-                cx.request_redraw();
             }
-            Event::Text(t) => {
-                let mut v = self.value.clone();
-                v.insert_str(self.byte(caret), t);
-                edit(cx, v, caret + t.chars().count());
+            Event::PointerMove { x, .. } if cx.state.get::<Caret>().dragging => {
+                let at = self.index_at(cx.text, cx.rect, caret, *x);
+                if at != caret {
+                    select(cx, at, anchor);
+                }
             }
-            Event::Key(Key::Backspace) if let Some(p) = prev => {
-                let mut v = self.value.clone();
-                v.replace_range(self.byte(p)..self.byte(caret), "");
-                edit(cx, v, p);
-            }
-            Event::Key(Key::Delete) if let Some(n) = next => {
-                let mut v = self.value.clone();
-                v.replace_range(self.byte(caret)..self.byte(n), "");
-                edit(cx, v, caret);
-            }
+            Event::PointerUp { .. } | Event::Cancel => cx.state.get::<Caret>().dragging = false,
+            Event::Text(t) => replace(cx, sel, t),
+            Event::Key(Key::Backspace | Key::Delete) if !sel.is_empty() => replace(cx, sel, ""),
+            Event::Key(Key::Backspace) if let Some(p) = prev => replace(cx, p..caret, ""),
+            Event::Key(Key::Delete) if let Some(n) = next => replace(cx, caret..n, ""),
             Event::Key(k @ (Key::Left | Key::Right | Key::Home | Key::End)) => {
-                cx.state.get::<Caret>().0 = match k {
+                let collapse = !cx.shift && !sel.is_empty();
+                let to = match k {
+                    Key::Left if collapse => sel.start,
+                    Key::Right if collapse => sel.end,
                     Key::Left => prev.unwrap_or(caret),
                     Key::Right => next.unwrap_or(caret),
                     Key::Home => 0,
                     _ => *bounds.last().unwrap(),
                 };
-                cx.request_redraw();
+                select(cx, to, if cx.shift { anchor } else { to });
+            }
+            Event::Key(Key::SelectAll) => select(cx, *bounds.last().unwrap(), 0),
+            Event::Key(k @ (Key::Copy | Key::Cut)) if !sel.is_empty() => {
+                cx.copy(&self.value[self.byte(sel.start)..self.byte(sel.end)]);
+                if *k == Key::Cut {
+                    replace(cx, sel, "");
+                }
             }
             _ => {}
         }

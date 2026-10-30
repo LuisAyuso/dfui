@@ -30,6 +30,9 @@ members = ["demo"]
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
 
+[target.'cfg(not(target_os = "android"))'.dependencies]
+arboard = { version = "3.7", default-features = false }
+
 [dev-dependencies]
 criterion = "0.8"
 
