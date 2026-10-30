@@ -9,7 +9,7 @@ use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::App;
-use crate::layout::{Insets, Layout, Measured, Placed, flatten, place};
+use crate::layout::{Insets, Layout, Measured, Placed, flatten, place, walk};
 use crate::render::{
     Color, Offscreen, Outcome, Rect, Renderer, Scene, Spans, damage, render_offscreen,
 };
@@ -19,6 +19,8 @@ use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
 pub(crate) struct Runtime<A: App> {
     app: A,
     root: Element<A::Msg>,
+    /// Pre-order ids of `root`, so frames that keep the tree skip `flatten`.
+    ids: Vec<u64>,
     states: HashMap<u64, State>,
     text: Text,
     layout: Layout,
@@ -85,10 +87,13 @@ impl Stats {
 impl<A: App> Runtime<A> {
     pub fn new(app: A) -> Self {
         let root = app.view();
+        let mut states = HashMap::new();
+        let ids = flat_ids(&root, &mut states);
         Runtime {
             app,
             root,
-            states: HashMap::new(),
+            ids,
+            states,
             text: Text::default(),
             layout: Layout::default(),
             measured: Vec::new(),
@@ -122,8 +127,14 @@ impl<A: App> Runtime<A> {
             .map_or(1.0, |r| r.window().scale_factor() as f32)
     }
 
+    /// The only way `root` changes, so `ids` always matches it.
+    fn set_root(&mut self, root: Element<A::Msg>) {
+        self.root = root;
+        self.ids = flat_ids(&self.root, &mut self.states);
+    }
+
     fn relayout(&mut self) {
-        let nodes = flatten(&self.root, &mut self.states);
+        let nodes = walk(&self.root, &self.ids);
         self.measured = self
             .layout
             .measure(&nodes, &self.text, self.viewport, self.insets);
@@ -152,7 +163,7 @@ impl<A: App> Runtime<A> {
     /// Redraw for changes that keep every size (hover, press, scroll, caret):
     /// only placement reruns.
     fn reposition(&mut self) {
-        let nodes = flatten(&self.root, &mut self.states);
+        let nodes = walk(&self.root, &self.ids);
         if nodes.len() != self.measured.len() {
             return self.redraw();
         }
@@ -167,7 +178,7 @@ impl<A: App> Runtime<A> {
     }
 
     fn dispatch(&mut self, ev: Event) {
-        let nodes = flatten(&self.root, &mut self.states);
+        let nodes = walk(&self.root, &self.ids);
         if nodes.len() != self.placed.len() {
             return;
         }
@@ -239,11 +250,8 @@ impl<A: App> Runtime<A> {
                 self.app.update(m);
             }
             // ponytail: any update rebuilds the whole tree; rebuild only dirty stateful subtrees if views get expensive.
-            self.root = self.app.view();
-            let live: std::collections::HashSet<u64> = flatten(&self.root, &mut self.states)
-                .iter()
-                .map(|n| n.id)
-                .collect();
+            self.set_root(self.app.view());
+            let live: std::collections::HashSet<u64> = self.ids.iter().copied().collect();
             self.states.retain(|id, _| live.contains(id));
             if self.focused.is_some_and(|id| !live.contains(&id)) {
                 self.set_focus(None);
@@ -308,7 +316,7 @@ impl<A: App> Runtime<A> {
     }
 
     fn scene(&mut self, frame: &mut bool) -> (Scene, Spans) {
-        let nodes = flatten(&self.root, &mut self.states);
+        let nodes = walk(&self.root, &self.ids);
         let mut scene = Scene::default();
         // Partial redraws load the previous frame, so damage needs its own background.
         let (w, h) = self.viewport;
@@ -343,6 +351,10 @@ impl<A: App> Runtime<A> {
     }
 }
 
+fn flat_ids<Msg>(root: &Element<Msg>, states: &mut HashMap<u64, State>) -> Vec<u64> {
+    flatten(root, states).iter().map(|n| n.id).collect()
+}
+
 /// CPU side of frames for benchmarks: rebuild, layout, paint and damage diff,
 /// through the real runtime but without a window or GPU.
 #[doc(hidden)]
@@ -361,7 +373,7 @@ impl<A: App> Bench<A> {
     /// One full CPU frame as after a state change; returns the instance count.
     pub fn frame(&mut self) -> usize {
         let rt = &mut self.0;
-        rt.root = rt.app.view();
+        rt.set_root(rt.app.view());
         rt.relayout();
         self.paint()
     }
@@ -644,7 +656,7 @@ mod tests {
             rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
         }
         assert_eq!(rt.app.0, 20);
-        let id = flatten(&rt.root, &mut rt.states)[0].id;
+        let id = rt.ids[0];
         assert_eq!(*rt.states.get_mut(&id).unwrap().get::<i32>(), 2);
     }
 

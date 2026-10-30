@@ -61,6 +61,13 @@ fn frame(c: &mut Criterion) {
             })
         });
     }
+    // Hover over a gap between cards: dispatch only, nothing changes.
+    for n in [10, 100, 1000] {
+        let mut bench = Bench::new(Cards::new(n), VIEWPORT);
+        g.bench_with_input(BenchmarkId::new("pointer_move", n), &n, |b, _| {
+            b.iter(|| bench.event(Event::PointerMove { x: 10.0, y: 10.0 }))
+        });
+    }
     g.finish();
 }
 

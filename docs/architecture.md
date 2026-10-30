@@ -71,7 +71,8 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 
 ## Layout
 
-`flatten` produces a pre-order `Vec<Node>`; `measure` builds a taffy tree from
+`flatten` produces a pre-order `Vec<Node>`, once per rebuilt tree; other
+passes re-walk it from cached ids (`tree.md`). `measure` builds a taffy tree from
 each widget's `style()`/`measure()` and keeps each node's parent-relative box;
 `place` turns those into absolute rects, applying `scroll()` offsets and
 intersecting clip rects. The runtime keeps `measure`'s result until the tree

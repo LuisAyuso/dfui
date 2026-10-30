@@ -23,6 +23,7 @@ fn main() { dfui::run(Counter(0)); }
 - `demo/` — demo app, desktop binary and Android `cdylib`
 - `docs/architecture.md` — how it fits together
 - `docs/rendering.md` — renderer details and design decisions
+- `docs/tree.md` — the flattened node list and its id cache
 - `TODO.md` — roadmap and current performance baseline
 
 ## Running

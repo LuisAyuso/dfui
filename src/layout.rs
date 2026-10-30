@@ -68,6 +68,33 @@ pub(crate) fn flatten<'a, Msg>(
     out
 }
 
+/// `flatten` of a tree whose ids it already returned: same nodes, without
+/// hashing ids, touching `states` or expanding.
+pub(crate) fn walk<'a, Msg>(root: &'a Element<Msg>, ids: &[u64]) -> Vec<Node<'a, Msg>> {
+    fn go<'a, Msg>(
+        e: &'a Element<Msg>,
+        parent: Option<usize>,
+        ids: &[u64],
+        out: &mut Vec<Node<'a, Msg>>,
+    ) {
+        let i = out.len();
+        out.push(Node {
+            w: e.widget.as_ref(),
+            id: ids[i],
+            parent,
+            end: 0,
+        });
+        for c in e.widget.children() {
+            go(c, Some(i), ids, out);
+        }
+        out[i].end = out.len();
+    }
+    let mut out = Vec::with_capacity(ids.len());
+    go(root, None, ids, &mut out);
+    debug_assert_eq!(out.len(), ids.len(), "tree changed without re-flattening");
+    out
+}
+
 pub(crate) fn children<Msg>(nodes: &[Node<'_, Msg>], i: usize) -> impl Iterator<Item = usize> {
     let end = nodes[i].end;
     let mut j = i + 1;
@@ -273,7 +300,7 @@ pub(crate) fn place<Msg>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widgets::{Styled, column, row, spacer, text};
+    use crate::widgets::{Styled, column, row, spacer, stateful, text};
 
     #[test]
     fn column_padding_gap_grow() {
@@ -304,6 +331,25 @@ mod tests {
         column([column(rows).gap(4.0).into(), text("footer").into()])
             .padding(8.0)
             .into()
+    }
+
+    #[test]
+    fn walk_matches_flatten() {
+        let root: Element<()> = column([
+            list(&[(1, "a"), (2, "b")]),
+            stateful(|_: &u8, _| row([text("x").into(), spacer().into()])).into(),
+        ])
+        .into();
+        let mut states = HashMap::new();
+        let flat = flatten(&root, &mut states);
+        let ids: Vec<u64> = flat.iter().map(|n| n.id).collect();
+        let walked = walk(&root, &ids);
+        let shape = |ns: &[Node<()>]| {
+            ns.iter()
+                .map(|n| (n.id, n.parent, n.end))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shape(&walked), shape(&flat));
     }
 
     #[test]

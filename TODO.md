@@ -84,7 +84,10 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
       app: canvas copy and `LoadOp::Load` bandwidth.
 - [ ] Cheaper shadows: cards outweigh a page of glyphs on the GPU bench.
 - [ ] Upload only newly added glyph data (all outlines re-uploaded today).
-- [ ] Event hit-testing index (every event visits every node today).
+- [x] Flatten once per rebuild: ids cached, other passes re-walk the tree
+      (`docs/tree.md`). Pointer move −57%, scroll frame −21% at 1000 cards.
+- [ ] Event hit-testing index: every pointer event still visits every node
+      (~215 µs of a 282 µs pointer move at 1000 cards).
 - [ ] Profile 120 Hz devices; outline text costs ~1.6 ms more than the old
       MSDF path on a typical screen.
 
