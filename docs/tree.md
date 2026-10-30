@@ -99,6 +99,10 @@ isn't in the new `ids` are dropped.
 Rebuild frames gain little: they still flatten the new tree once, and their
 cost is dominated by `view`, layout and paint.
 
+On the Pixel 10a (`scripts/android-bench.sh cpu`, A/B against the previous
+commit): `frame/scroll` 765 → 631 µs at 100 cards and 10.2 → 8.4 ms at
+1000; `frame/edit` unchanged.
+
 ## Not done
 
 - Dispatch still offers each pointer event to every node (about 215 µs of

@@ -2,6 +2,8 @@
 
 Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 60 fps, ~5.1 ms GPU / ~2.2 ms CPU per frame; normal demo screen ~4.5 ms GPU.
+At 120 Hz (full redraws forced): bench ~3.2 ms GPU / ~1.8 ms CPU, demo
+screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 
 ## Next
 
@@ -89,15 +91,16 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
       frame ~44× cheaper than full on Mali. Still unmeasured in the real
       app: canvas copy and `LoadOp::Load` bandwidth.
 - [x] Cheaper shadows: drawn as a ring around the opaque shape on top of
-      them (`gpu/cards_10` 156 → 133 µs desktop). Still to measure on the
-      phone.
+      them (`gpu/cards_10` 156 → 133 µs desktop; no measurable change on
+      the Pixel 10a in A/B runs).
 - [ ] Upload only newly added glyph data (all outlines re-uploaded today).
 - [x] Flatten once per rebuild: ids cached, other passes re-walk the tree
       (`docs/tree.md`). Pointer move −57%, scroll frame −21% at 1000 cards.
 - [ ] Event hit-testing index: every pointer event still visits every node
       (~215 µs of a 282 µs pointer move at 1000 cards).
-- [ ] Profile 120 Hz devices; outline text costs ~1.6 ms more than the old
-      MSDF path on a typical screen.
+- [x] Profile 120 Hz: Pixel 10a at 120 Hz with every frame forced to a full
+      redraw holds 120 fps; Bench screen ~3.2 ms GPU / ~1.8 ms CPU, main
+      screen ~2.6 ms GPU / ~2.3 ms CPU, against an 8.3 ms budget.
 
 ## Tooling
 

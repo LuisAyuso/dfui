@@ -88,7 +88,7 @@ cross-compiles the bench and runs it over `adb shell`.
 
 | bench | desktop GPU | Pixel 10a (Mali-G715) |
 |---|---|---|
-| `gpu/cards_10` | 133 µs | 3.18 ms (before ring shadows) |
+| `gpu/cards_10` | 133 µs | 3.18 ms |
 | `gpu/text_wall` (Bench screen) | 110 µs | 3.28 ms |
 | `gpu/text_wall_partial` (FPS meter area) | 10.7 µs | 75 µs |
 
@@ -100,6 +100,13 @@ comparable: different scene and a real surface.
 Ring shadows cut the shadows' share of `gpu/cards_10` from ~39 µs to ~16 µs
 on desktop (156 → 133 µs); what's left is the blur band itself. Even with
 no shadows at all the frame is ~117 µs, a bit above a page of 64px glyphs.
+
+On the Pixel 10a they make no measurable difference: interleaved A/B runs
+gave a best of 2.87 ms before and 2.90 ms after, with run-to-run swings of
+up to 40% from GPU clock scaling. Likely the tiler blends overdraw in
+on-chip tile memory, so cheap hidden fragments cost it little (unverified).
+Absolute phone numbers drift between sessions, so compare builds
+back to back rather than against this table.
 
 ## Partial redraws
 
