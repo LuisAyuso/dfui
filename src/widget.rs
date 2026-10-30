@@ -105,8 +105,9 @@ pub trait Widget<Msg> {
         0
     }
 
-    /// Children are clipped to this widget's rect and shifted by the returned offset.
-    fn scroll(&self, _state: &mut State) -> Option<(f32, f32)> {
+    /// Children are clipped to this widget's rect and shifted by the returned
+    /// offset, as of frame time `now`.
+    fn scroll(&self, _state: &mut State, _now: Instant) -> Option<(f32, f32)> {
         None
     }
 
@@ -164,12 +165,20 @@ pub struct PaintCx<'a> {
     pub(crate) text: &'a mut Text,
     pub(crate) frame: &'a mut bool,
     pub(crate) wake: &'a mut Option<Instant>,
+    pub(crate) place: &'a mut bool,
 }
 
 impl PaintCx<'_> {
     /// Paint again next frame, for animations or live readouts.
     pub fn request_frame(&mut self) {
         *self.frame = true;
+    }
+
+    /// Re-run placement (`Widget::scroll`) and paint again next frame, for
+    /// animated scroll offsets.
+    pub fn request_placement(&mut self) {
+        *self.frame = true;
+        *self.place = true;
     }
 
     /// Paint again at `t`, for slow animations like a caret blink; the
@@ -249,6 +258,8 @@ impl PaintCx<'_> {
 }
 
 pub struct EventCx<'a, Msg> {
+    /// When the event was dispatched.
+    pub now: Instant,
     pub rect: Rect,
     pub clip: Rect,
     /// Extent of laid-out children, relative to this widget's origin.

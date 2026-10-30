@@ -93,6 +93,13 @@ Events are offered in reverse pre-order (deepest / topmost first). A widget can
 receives `Event::Cancel` and subsequent pointer events go only to the captor
 until pointer up. Touch is single-pointer.
 
+`scroll` captures the pointer once a drag passes a 6px slop. On release it
+flings: the offset speed (from the last 100ms of pointer samples) decays as
+e^(-t/0.35s) until it drops below 10 px/s or hits an edge. The offset is
+computed in `Widget::scroll` from the frame time, and the scroll view's
+paint calls `request_placement` so placement reruns every frame while the
+fling lasts, without a relayout.
+
 One widget at a time holds keyboard focus, claimed with `cx.focus()` on
 pointer down; a tap no widget claims blurs it. `Event::Text` and `Event::Key`
 go only to the focused widget, which sees `cx.focused` in event and paint,

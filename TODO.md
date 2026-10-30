@@ -52,7 +52,10 @@ Baseline (Pixel 10a, Mali-G715, release build): bench screen of 64dp text at
 - [ ] Images.
 - [ ] Async commands/subscriptions (Elm `Cmd`/`Sub`).
 - [ ] Multi-touch: per-finger dispatch (runtime is single-pointer today).
-- [ ] Kinetic scrolling and horizontal scroll.
+- [x] Kinetic scrolling: a released drag flings with exponential friction,
+      stopping at the edges; re-placed per frame via `request_placement`.
+- [ ] Horizontal scroll; overscroll bounce/glow; a press that catches a
+      fling still reaches the widget under it.
 - [ ] Widget library: checkbox, switch, slider, list, tabs.
 
 ## Text

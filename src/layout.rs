@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::time::Instant;
 
 use taffy::util::ResolveOrZero;
 use taffy::{
@@ -263,6 +264,7 @@ pub(crate) fn place<Msg>(
     nodes: &[Node<'_, Msg>],
     measured: &[Measured],
     states: &mut HashMap<u64, State>,
+    now: Instant,
 ) -> Vec<Placed> {
     let full = Rect::new(
         f32::MIN / 4.0,
@@ -292,7 +294,9 @@ pub(crate) fn place<Msg>(
             clip,
             content: m.content,
         };
-        offsets[i] = nodes[i].w.scroll(states.entry(nodes[i].id).or_default());
+        offsets[i] = nodes[i]
+            .w
+            .scroll(states.entry(nodes[i].id).or_default(), now);
     }
     placed
 }
@@ -315,7 +319,7 @@ mod tests {
         let mut states = HashMap::new();
         let nodes = flatten(&root, &mut states);
         let m = Layout::default().measure(&nodes, &Text::default(), (100.0, 200.0), [0.0; 4]);
-        let p = place(&nodes, &m, &mut states);
+        let p = place(&nodes, &m, &mut states, Instant::now());
         assert_eq!(p[0].rect, Rect::new(0.0, 0.0, 100.0, 200.0));
         assert_eq!(p[1].rect, Rect::new(10.0, 10.0, 80.0, 20.0));
         // 200 - 2*10 padding - 20 - 30 - 2*5 gap = 120

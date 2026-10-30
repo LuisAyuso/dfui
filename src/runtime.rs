@@ -35,6 +35,8 @@ pub(crate) struct Runtime<A: App> {
     next_frame: Option<Instant>,
     /// Earliest `request_frame_at` from the last paint.
     wake: Option<Instant>,
+    /// A widget asked for placement to rerun before the next paint.
+    place: bool,
     /// Fixed frame time for tests; the wall clock otherwise.
     clock: Option<Instant>,
     /// Hidden windows don't animate; presents would be throttled anyway.
@@ -105,6 +107,7 @@ impl<A: App> Runtime<A> {
             prev: None,
             next_frame: None,
             wake: None,
+            place: false,
             clock: None,
             occluded: false,
             focused: None,
@@ -126,6 +129,10 @@ impl<A: App> Runtime<A> {
         event_loop.run_app(&mut self).expect("event loop");
     }
 
+    fn now(&self) -> Instant {
+        self.clock.unwrap_or_else(Instant::now)
+    }
+
     fn scale(&self) -> f32 {
         self.renderer
             .as_ref()
@@ -143,7 +150,8 @@ impl<A: App> Runtime<A> {
         self.measured = self
             .layout
             .measure(&nodes, &self.text, self.viewport, self.insets);
-        self.placed = place(&nodes, &self.measured, &mut self.states);
+        let now = self.now();
+        self.placed = place(&nodes, &self.measured, &mut self.states, now);
     }
 
     /// System bars cover part of an edge-to-edge window; the content rect is what's left.
@@ -172,7 +180,8 @@ impl<A: App> Runtime<A> {
         if nodes.len() != self.measured.len() {
             return self.redraw();
         }
-        self.placed = place(&nodes, &self.measured, &mut self.states);
+        let now = self.now();
+        self.placed = place(&nodes, &self.measured, &mut self.states, now);
         self.request_redraw();
     }
 
@@ -191,6 +200,7 @@ impl<A: App> Runtime<A> {
         let mut updates = Vec::new();
         let mut copied = None;
         let mut redraw = false;
+        let now = self.now();
         let mut focus = None;
         let keyboard = matches!(ev, Event::Text(_) | Event::Key(_));
         let targets: Vec<usize> = match (keyboard, self.captured) {
@@ -205,6 +215,7 @@ impl<A: App> Runtime<A> {
         let mut send = |i: usize, ev: &Event, states: &mut HashMap<u64, State>| {
             let (n, p) = (&nodes[i], self.placed[i]);
             let mut cx = EventCx {
+                now,
                 rect: p.rect,
                 clip: p.clip,
                 content: p.content,
@@ -334,6 +345,10 @@ impl<A: App> Runtime<A> {
 
     fn scene(&mut self, frame: &mut bool) -> (Scene, Spans) {
         let nodes = walk(&self.root, &self.ids);
+        let now = self.now();
+        if std::mem::take(&mut self.place) && nodes.len() == self.measured.len() {
+            self.placed = place(&nodes, &self.measured, &mut self.states, now);
+        }
         self.wake = None;
         let mut scene = Scene::default();
         // Partial redraws load the previous frame, so damage needs its own background.
@@ -349,7 +364,6 @@ impl<A: App> Runtime<A> {
         );
         self.text.outlines.begin_frame();
         let mut spans = Vec::with_capacity(nodes.len());
-        let now = self.clock.unwrap_or_else(Instant::now);
         for (n, p) in nodes.iter().zip(&self.placed) {
             let start = scene.len();
             n.w.paint(&mut PaintCx {
@@ -362,6 +376,7 @@ impl<A: App> Runtime<A> {
                 text: &mut self.text,
                 frame: &mut *frame,
                 wake: &mut self.wake,
+                place: &mut self.place,
             });
             spans.push((n.id, start..scene.len()));
         }
@@ -1011,5 +1026,53 @@ mod tests {
         let typed = paint_at(700, &mut rt);
         assert_eq!(rt.wake, Some(t + Duration::from_millis(1200)));
         assert!(typed > paint_at(1200, &mut rt), "hidden again 500ms later");
+    }
+
+    #[test]
+    fn released_drag_flings_and_settles_at_the_edge() {
+        let mut rt = Runtime::new(Long);
+        rt.viewport = (100.0, 200.0);
+        rt.relayout();
+        let t = Instant::now();
+        let at = |ms: u64| t + Duration::from_millis(ms);
+        let offset = |rt: &Runtime<Long>| -rt.placed[3].rect.y;
+        let paint_at = |ms: u64, rt: &mut Runtime<Long>| {
+            rt.clock = Some(at(ms));
+            let mut frame = false;
+            rt.scene(&mut frame);
+            frame
+        };
+        // Drag up 80px over 64ms: 1250 px/s.
+        rt.clock = Some(at(0));
+        rt.dispatch(Event::PointerDown { x: 50.0, y: 150.0 });
+        for i in 1..=4 {
+            rt.clock = Some(at(16 * i));
+            let y = 150.0 - 20.0 * i as f32;
+            rt.dispatch(Event::PointerMove { x: 50.0, y });
+        }
+        rt.dispatch(Event::PointerUp { x: 50.0, y: 70.0 });
+        assert_eq!(offset(&rt), 80.0);
+        assert!(paint_at(64, &mut rt), "fling animates");
+        // 80 + 1250·τ·(1 - e^(-0.1/τ)) at 100ms in, τ = 0.35s.
+        let want = 80.0 + 1250.0 * 0.35 * (1.0 - (-0.1f32 / 0.35).exp());
+        assert!(paint_at(164, &mut rt));
+        assert!(
+            (offset(&rt) - want).abs() < 0.5,
+            "{} vs {want}",
+            offset(&rt)
+        );
+        // Would travel past the end (300): stops there.
+        assert!(!paint_at(2000, &mut rt), "settled");
+        assert_eq!(offset(&rt), 300.0);
+
+        // A drag that pauses before lifting doesn't fling.
+        rt.clock = Some(at(3000));
+        rt.dispatch(Event::PointerDown { x: 50.0, y: 50.0 });
+        rt.clock = Some(at(3016));
+        rt.dispatch(Event::PointerMove { x: 50.0, y: 100.0 });
+        rt.clock = Some(at(3300));
+        rt.dispatch(Event::PointerUp { x: 50.0, y: 100.0 });
+        assert!(!paint_at(3300, &mut rt));
+        assert_eq!(offset(&rt), 250.0);
     }
 }
