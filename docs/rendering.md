@@ -11,9 +11,10 @@ One render pass, one pipeline, one instanced draw per frame:
   (logical px). Each instance is a rect + params: rounded box (radius,
   border, colors), shadow (box with blur), or glyph (band header, em-space
   quad).
-- The whole list is uploaded each frame and drawn as `draw(0..6, 0..n)`. The
+- The whole list is uploaded each frame and drawn as `draw(0..24, 0..n)`. The
   vertex shader expands each instance to a quad, padded by blur + 1px so AA
-  and shadows aren't cut off.
+  and shadows aren't cut off. Only shadows with a hole use all 24 vertices
+  (see Shapes); other instances collapse the extra 18 to nothing.
 - The fragment shader branches on kind and applies the instance's clip rect
   (scroll views) by discarding.
 - Output is premultiplied alpha, blended in painter's order. No depth buffer,
@@ -26,6 +27,16 @@ Signed distance to a rounded box (`sd_round_box`). Coverage is
 per-pixel rate of the distance. (`fwidth` overestimates it by up to √2 on
 diagonals and blurs corners unevenly.) Borders mix fill and border color
 on a second distance `d + border`. Shadows use `smoothstep(-blur, blur, d)`.
+
+A shadow is usually followed by an opaque shape of the same box (a card or
+button on its own shadow), which hides most of it. `Scene::shape` then
+records a hole in the shadow's `uv`: the shape's rect inset to fit inside its
+rounded corners, minus 1px of edge antialiasing, intersected with its clip.
+The vertex shader draws that shadow as four strips around the hole, so the
+hidden pixels are never shaded or blended. The output is the same except for
+interpolation rounding (at most a few levels on pixels that sit exactly on
+an edge). Translucent shapes, or shadows not followed by a shape, keep the
+full quad.
 
 ## Text
 
@@ -77,7 +88,7 @@ cross-compiles the bench and runs it over `adb shell`.
 
 | bench | desktop GPU | Pixel 10a (Mali-G715) |
 |---|---|---|
-| `gpu/cards_10` | 155 µs | 3.18 ms |
+| `gpu/cards_10` | 133 µs | 3.18 ms (before ring shadows) |
 | `gpu/text_wall` (Bench screen) | 110 µs | 3.28 ms |
 | `gpu/text_wall_partial` (FPS meter area) | 10.7 µs | 75 µs |
 
@@ -86,8 +97,9 @@ render pass only; the app's canvas copy and the tiler's `LoadOp::Load`
 traffic aren't included. The in-app Bench baseline (~5.1 ms) isn't directly
 comparable: different scene and a real surface.
 
-Ten cards cost more than a page of 64px glyphs, likely the blurred shadows:
-each shades its full card area plus blur radius.
+Ring shadows cut the shadows' share of `gpu/cards_10` from ~39 µs to ~16 µs
+on desktop (156 → 133 µs); what's left is the blur band itself. Even with
+no shadows at all the frame is ~117 µs, a bit above a page of 64px glyphs.
 
 ## Partial redraws
 

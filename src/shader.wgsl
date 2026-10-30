@@ -16,7 +16,7 @@ struct Instance {
     @location(3) border_color: vec4<f32>,
     // shape: radius, border width, blur, kind 0
     // glyph: band header, horizontal bands, vertical bands, kind 1
-    // uv: glyph em-space quad corners
+    // uv: glyph em-space quad corners; shadow: hole (x0, y0, x1, y1) left undrawn
     @location(4) params: vec4<f32>,
     @location(5) clip: vec4<f32>,
 }
@@ -40,14 +40,31 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Instance) -> VsOut {
         vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0),
         vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
     );
-    let c = corners[vi];
+    let c = corners[vi % 6u];
+    let strip = vi / 6u;
     // Shapes grow by blur + 1px and glyphs by 1px so AA isn't cut off.
     var pad = 1.0;
     if inst.params.w < 0.5 {
         pad = inst.params.z + 1.0;
     }
-    let size = inst.rect.zw + 2.0 * pad;
-    let world = inst.rect.xy - pad + c * size;
+    var lo = inst.rect.xy - pad;
+    var hi = inst.rect.xy + inst.rect.zw + pad;
+    // 24 vertices: one quad, or for a shadow with a hole four strips around
+    // it. Unused strips collapse to nothing.
+    let hole = inst.uv;
+    if inst.params.w < 0.5 && hole.z > hole.x && hole.w > hole.y {
+        let h0 = clamp(hole.xy, lo, hi);
+        let h1 = clamp(hole.zw, lo, hi);
+        switch strip {
+            case 0u: { hi.y = h0.y; }
+            case 1u: { lo.y = h1.y; }
+            case 2u: { lo.y = h0.y; hi.y = h1.y; hi.x = h0.x; }
+            default: { lo.y = h0.y; hi.y = h1.y; lo.x = h1.x; }
+        }
+    } else if strip > 0u {
+        hi = lo;
+    }
+    let world = mix(lo, hi, c);
 
     var out: VsOut;
     out.pos = vec4(world / g.viewport * vec2(2.0, -2.0) + vec2(-1.0, 1.0), 0.0, 1.0);

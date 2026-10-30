@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::f32::consts::FRAC_1_SQRT_2;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -157,6 +158,23 @@ impl Scene {
         border_color: Color,
         clip: Rect,
     ) {
+        // An opaque shape right over a shadow (a card on its own shadow)
+        // hides what's under it; the shadow is drawn as a ring around that.
+        let opaque = fill.a >= 1.0 && (border <= 0.0 || border_color.a >= 1.0);
+        if opaque
+            && let Some(prev) = self.instances.last_mut()
+            && prev.params[3] == 0.0
+            && prev.params[2] > 0.0
+        {
+            // Inscribed in the rounded corners, minus 1px of edge antialiasing.
+            let k = radius.min(r.w.min(r.h) * 0.5) * (1.0 - FRAC_1_SQRT_2) + 1.0;
+            prev.uv = [
+                (r.x + k).max(clip.x),
+                (r.y + k).max(clip.y),
+                (r.x + r.w - k).min(clip.x + clip.w),
+                (r.y + r.h - k).min(clip.y + clip.h),
+            ];
+        }
         self.instances.push(Instance {
             rect: [r.x, r.y, r.w, r.h],
             uv: [0.0; 4],
@@ -562,7 +580,7 @@ impl Gpu {
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.outline_group, &[]);
             pass.set_vertex_buffer(0, self.instances.slice(..));
-            pass.draw(0..6, 0..scene.instances.len() as u32);
+            pass.draw(0..24, 0..scene.instances.len() as u32);
         }
         if let Some(t) = timing {
             enc.resolve_query_set(&t.set, 0..2, &t.resolve, 0);
@@ -991,6 +1009,29 @@ mod tests {
             diff(&base, &base[..1]),
             Some(Rect::new(19.0, -1.0, 12.0, 12.0))
         );
+    }
+
+    #[test]
+    fn opaque_shape_cuts_a_hole_in_the_shadow_under_it() {
+        let r = Rect::new(0.0, 0.0, 100.0, 50.0);
+        let sh = Shadow {
+            color: Color::BLACK,
+            offset: (0.0, 3.0),
+            blur: 8.0,
+        };
+        let hole = |fill: Color, clip: Rect| {
+            let mut s = Scene::default();
+            s.shadow(r, 0.0, sh, ALL);
+            s.shape(r, 0.0, fill, 0.0, Color::TRANSPARENT, clip);
+            s.instances[0].uv
+        };
+        assert_eq!(hole(Color::WHITE, ALL), [1.0, 1.0, 99.0, 49.0]);
+        assert_eq!(
+            hole(Color::WHITE, Rect::new(0.0, 0.0, 100.0, 20.0)),
+            [1.0, 1.0, 99.0, 20.0]
+        );
+        // The shadow shows through a translucent shape.
+        assert_eq!(hole(Color::WHITE.alpha(0.5), ALL), [0.0; 4]);
     }
 
     #[test]

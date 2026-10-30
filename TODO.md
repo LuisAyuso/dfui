@@ -82,7 +82,9 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
 - [x] Run the benches on the phone (`scripts/android-bench.sh`): partial
       frame ~44× cheaper than full on Mali. Still unmeasured in the real
       app: canvas copy and `LoadOp::Load` bandwidth.
-- [ ] Cheaper shadows: cards outweigh a page of glyphs on the GPU bench.
+- [x] Cheaper shadows: drawn as a ring around the opaque shape on top of
+      them (`gpu/cards_10` 156 → 133 µs desktop). Still to measure on the
+      phone.
 - [ ] Upload only newly added glyph data (all outlines re-uploaded today).
 - [x] Flatten once per rebuild: ids cached, other passes re-walk the tree
       (`docs/tree.md`). Pointer move −57%, scroll frame −21% at 1000 cards.
