@@ -20,6 +20,83 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [ ] Status bar icon color: light/dark appearance so icons stay visible on
       light backgrounds.
 
+## Findings from a real app
+
+From building the movies-thing music player (dfui on Android and Linux: a
+custom card-stack widget, background downloads, a playback service).
+
+Android lifecycle and platform:
+
+- [ ] Leave the run loop on `MainEvent::Destroy`. Today `run_android` never
+      returns, and `NativeActivity.onDestroy` waits for `android_main` to
+      return, so the UI thread blocks forever. With the process kept alive (a
+      service, a download), reopening calls `android_main` again and winit
+      refuses a second event loop (`RecreationAttempt`). The app had to
+      subclass NativeActivity and `System.exit` before `super.onDestroy()`.
+      Document whatever the supported answer is.
+- [ ] Packaging beyond cargo-apk: services, resources (launcher icon) and
+      app Java classes can't be declared, so the app builds its APK by hand
+      (javac, d8, aapt2 compile/link, zipalign, apksigner). Ship that as a
+      script/template, or fold it into the cargo-apk replacement (Tooling).
+- [ ] JNI helper: run a closure on a JNI-attached thread with the activity
+      at hand. Native threads can't see the app's class loader, so app
+      classes must be reached by name (`Intent.setClassName`); worth
+      documenting next to the helper.
+- [ ] Logging: `eprintln!` is lost on Android; document `log` +
+      `android_logger` as the way to log from app code.
+
+State and async:
+
+- [ ] A notify handle any thread can trigger to rebuild (e.g.
+      `Notifier::notify()`). Today it takes a futures channel, an
+      `Extend<()>` dummy type for `stream_builder` and a
+      `Cell<Option<Receiver>>` taken in `App::view`.
+- [ ] Keep-alive / offstage children (an `IndexedStack`): state is keyed by
+      tree position, so switching tabs drops the hidden page's state (e.g.
+      its scroll offset).
+- [ ] Frequent background updates (download progress at 2 Hz) rebuild the
+      whole tree, including a list of hundreds of rows; see "Partial
+      rebuild (CPU)" and the virtualized list below.
+
+Layout:
+
+- [ ] `min_height`/`min_width` modifiers on `Styled` (or a `fill()` that is
+      `grow(1)` + zero basis). A `scroll` nested in flex columns doesn't
+      bound: each column's automatic minimum height is its content's, so the
+      scroll grows to the whole list. The app needed `.grow(1).height(0)` on
+      every wrapper. Mention it in `scroll`'s docs.
+
+Custom widgets:
+
+- [ ] Public kinetic-drag helpers (drag slop, velocity window, fling decay).
+      A custom scrolling widget (the card stack) copied them from
+      `scroll.rs`.
+- [ ] `PaintCx::with_clip(rect, |cx| ..)` instead of swapping the public
+      `cx.clip` field by hand.
+- [ ] Text measurement for widgets outside the crate (`PaintCx`'s `Text`
+      is `pub(crate)`), needed to right-align or truncate in `paint`.
+
+Text:
+
+- [ ] Single-line labels with ellipsis / `max_lines` (titles in rows and
+      cards are only clipped today).
+- [ ] Export the bundled bold face (`Font::BOLD`); apps copy
+      `DejaVuSans-Bold.ttf` to get it.
+- [ ] `text_input` password masking (and input type hints for the Android
+      keyboard).
+
+Widgets:
+
+- [ ] Transparent / icon button: `flat()` only drops the shadow, so every
+      icon button passes its surface color to look borderless (see Theming).
+- [ ] Determinate progress bar (playback position, download progress).
+- [ ] Virtualized list: build and lay out only the visible rows.
+- [ ] List row: title, subtitle, trailing actions.
+- [ ] Image fit modes and a placeholder (also under Image follow-ups);
+      apps downscale covers themselves for lack of mipmaps.
+- [ ] Stroked paths, for line icon sets like Feather (stroke-only SVGs)
+      to be drawn as vectors instead of pre-rendered PNGs.
+
 ## Design studies (need discussion before code)
 
 - [x] Global state management: messages removed; `provide` injects
