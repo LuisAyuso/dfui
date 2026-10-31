@@ -89,6 +89,8 @@ Widgets:
 
 - [ ] Transparent / icon button: `flat()` only drops the shadow, so every
       icon button passes its surface color to look borderless (see Theming).
+- [ ] `tabs`/`segmented` styling: label font, size and colors, and the
+      divider color are fixed for a light theme (see Theming).
 - [ ] Determinate progress bar (playback position, download progress).
 - [ ] Virtualized list: build and lay out only the visible rows.
 - [ ] List row: title, subtitle, trailing actions.
