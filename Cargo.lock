@@ -547,6 +547,7 @@ dependencies = [
  "read-fonts",
  "taffy",
  "unicode-segmentation",
+ "web-time",
  "wgpu",
  "winit",
 ]

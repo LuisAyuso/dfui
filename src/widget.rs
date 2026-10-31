@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::marker::PhantomData;
-use std::time::Instant;
+use web_time::Instant;
 
 use taffy::{AvailableSpace, Size, Style};
 

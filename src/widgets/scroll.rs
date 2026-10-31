@@ -1,6 +1,7 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use taffy::{Display, Overflow, Point, Style};
+use web_time::Instant;
 
 use super::Styled;
 use crate::widget::{Element, Event, EventCx, PaintCx, State, Widget};

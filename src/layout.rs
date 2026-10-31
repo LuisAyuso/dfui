@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::time::Instant;
+use web_time::Instant;
 
 use taffy::util::ResolveOrZero;
 use taffy::{

@@ -14,7 +14,7 @@ pollster = "1.0.1"
 read-fonts = "0.46"
 taffy = "0.15"
 unicode-segmentation = "1.13"
-wgpu = "30"
+web-time = "1.1"
 winit = { version = "0.30", features = ["android-native-activity"] }
 
 [[bench]]
@@ -28,10 +28,17 @@ harness = false
 [workspace]
 members = ["demo"]
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+wgpu = "30"
+
+# WebGPU only: the other backends would just add size to the wasm.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["std", "webgpu", "wgsl"] }
+
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_arch = "wasm32")))'.dependencies]
 arboard = { version = "3.7", default-features = false }
 
 [dev-dependencies]

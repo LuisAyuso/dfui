@@ -359,14 +359,17 @@ fn outline_group(
 }
 
 impl Gpu {
-    fn new(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> Gpu {
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            // Outline text needs fragment-stage storage buffers (GLES 3.1+/Vulkan).
-            required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
-            required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
-            ..Default::default()
-        }))
-        .expect("request device");
+    async fn new(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> Gpu {
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                // Outline text needs fragment-stage storage buffers (GLES 3.1+/Vulkan/WebGPU).
+                required_limits: wgpu::Limits::downlevel_defaults()
+                    .using_resolution(adapter.limits()),
+                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
+                ..Default::default()
+            })
+            .await
+            .expect("request device");
 
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
@@ -639,15 +642,19 @@ fn canvas(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::T
 }
 
 impl Renderer {
-    pub fn new(instance: &wgpu::Instance, window: Arc<Window>) -> Renderer {
+    /// Async because adapter and device requests are; on native they resolve
+    /// on first poll, on the web they wait for the browser.
+    pub async fn new(instance: wgpu::Instance, window: Arc<Window>) -> Renderer {
         let surface = instance
             .create_surface(window.clone())
             .expect("create surface");
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .expect("no GPU adapter");
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            })
+            .await
+            .expect("no GPU adapter");
         let caps = surface.get_capabilities(&adapter);
         let format = caps
             .formats
@@ -657,7 +664,7 @@ impl Renderer {
             .unwrap_or(caps.formats[0]);
         // Blend in sRGB space like browsers do; linear blending makes AA edges look thin and stepped.
         let view_format = format.remove_srgb_suffix();
-        let gpu = Gpu::new(&adapter, view_format);
+        let gpu = Gpu::new(&adapter, view_format).await;
         let size = window.inner_size();
         let copyable = caps.usages.contains(wgpu::TextureUsages::COPY_DST);
         let config = wgpu::SurfaceConfiguration {
@@ -720,7 +727,7 @@ impl Renderer {
         if empty && self.canvas.is_some() && !self.fresh && !self.tinted {
             return Outcome::Idle;
         }
-        let acquire = std::time::Instant::now();
+        let acquire = web_time::Instant::now();
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -832,7 +839,7 @@ impl Offscreen {
         let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
             .expect("no GPU adapter");
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let gpu = Gpu::new(&adapter, format);
+        let gpu = pollster::block_on(Gpu::new(&adapter, format));
         let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
             size: wgpu::Extent3d {
@@ -872,7 +879,7 @@ impl Offscreen {
         scale: f32,
         scissor: Option<[u32; 4]>,
     ) -> std::time::Duration {
-        let start = std::time::Instant::now();
+        let start = web_time::Instant::now();
         self.draw(scene, text, scale, scissor);
         self.gpu
             .device

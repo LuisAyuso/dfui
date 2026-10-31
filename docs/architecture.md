@@ -92,6 +92,19 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
   an event loop (tests, benches) the waker is a no-op and `drive` is called
   directly.
 
+## Web
+
+- Builds for `wasm32-unknown-unknown`; WebGPU only. `run` uses winit's
+  `spawn_app`, and the window is a canvas appended to the page, sized by CSS.
+- GPU setup is async on every platform: `resumed` stores `Renderer::new` as
+  a future and polls it with the task waker. Native adapters resolve on the
+  first poll; in the browser the waker fires when the promises settle.
+- `dfui::sleep` registers deadlines on the UI thread; `about_to_wait` wakes
+  due ones and sleeps the loop until the next (`ControlFlow::WaitUntil`), so
+  timed async work needs no threads or runtime.
+- Time is `web_time::Instant` throughout (std's clock panics on wasm32);
+  natively it is std's type. The clipboard is in-app on the web.
+
 ## Layout
 
 `flatten` produces a pre-order `Vec<Node>`, once per rebuilt tree; other

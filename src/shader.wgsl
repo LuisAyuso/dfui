@@ -1,3 +1,7 @@
+// Derivatives sit in branches on per-instance values, uniform within each
+// primitive; Chrome's compiler cannot prove that and rejects the shader.
+diagnostic(off, derivative_uniformity);
+
 struct Globals {
     viewport: vec2<f32>,
 }

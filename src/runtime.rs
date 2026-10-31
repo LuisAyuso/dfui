@@ -1,8 +1,11 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::task::Waker;
-use std::time::{Duration, Instant};
+use std::task::{Context, Poll, Waker};
+use std::time::Duration;
 
+use web_time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -51,6 +54,8 @@ pub(crate) struct Runtime<A: App> {
     mods: ModifiersState,
     instance: Option<wgpu::Instance>,
     renderer: Option<Renderer>,
+    /// GPU setup started in `resumed`; polled like a task until it resolves.
+    pending_renderer: Option<Pin<Box<dyn Future<Output = Renderer>>>>,
     viewport: (f32, f32),
     cursor: (f32, f32),
     touch: Option<u64>,
@@ -124,6 +129,7 @@ impl<A: App> Runtime<A> {
             mods: ModifiersState::empty(),
             instance: None,
             renderer: None,
+            pending_renderer: None,
             viewport: (0.0, 0.0),
             cursor: (0.0, 0.0),
             touch: None,
@@ -140,6 +146,9 @@ impl<A: App> Runtime<A> {
         self.waker = w.clone().into();
         self.loop_waker = Some(w);
         self.drive();
+        #[cfg(target_arch = "wasm32")]
+        winit::platform::web::EventLoopExtWebSys::spawn_app(event_loop, self);
+        #[cfg(not(target_arch = "wasm32"))]
         event_loop.run_app(&mut self).expect("event loop");
     }
 
@@ -168,6 +177,22 @@ impl<A: App> Runtime<A> {
         self.tasks.retain(|id, _| live.contains(id));
         if self.focused.is_some_and(|id| !live.contains(&id)) {
             self.set_focus(None);
+        }
+    }
+
+    fn poll_renderer(&mut self) {
+        let Some(f) = &mut self.pending_renderer else {
+            return;
+        };
+        if let Poll::Ready(r) = f.as_mut().poll(&mut Context::from_waker(&self.waker)) {
+            self.pending_renderer = None;
+            // Resizes during setup were scaled without the window's factor.
+            let w = r.window();
+            let size = w.inner_size().to_logical::<f32>(w.scale_factor());
+            self.viewport = (size.width, size.height);
+            self.renderer = Some(r);
+            self.update_insets();
+            self.redraw();
         }
     }
 
@@ -416,17 +441,17 @@ fn printable(t: &str) -> String {
     t.chars().filter(|c| !c.is_control()).collect()
 }
 
-/// The system clipboard on desktop; an in-app one on Android and in tests.
+/// The system clipboard on desktop; an in-app one on Android, the web and in tests.
 // ponytail: Android could use ClipboardManager over JNI once there's a touch selection UI.
 #[derive(Default)]
 struct Clipboard {
-    #[cfg(not(any(test, target_os = "android")))]
+    #[cfg(not(any(test, target_os = "android", target_arch = "wasm32")))]
     sys: Option<arboard::Clipboard>,
-    #[cfg(any(test, target_os = "android"))]
+    #[cfg(any(test, target_os = "android", target_arch = "wasm32"))]
     text: Option<String>,
 }
 
-#[cfg(not(any(test, target_os = "android")))]
+#[cfg(not(any(test, target_os = "android", target_arch = "wasm32")))]
 impl Clipboard {
     fn sys(&mut self) -> Option<&mut arboard::Clipboard> {
         if self.sys.is_none() {
@@ -450,7 +475,7 @@ impl Clipboard {
     }
 }
 
-#[cfg(any(test, target_os = "android"))]
+#[cfg(any(test, target_os = "android", target_arch = "wasm32"))]
 impl Clipboard {
     fn get(&mut self) -> Option<String> {
         self.text.clone()
@@ -560,10 +585,15 @@ pub fn snapshot<A: App>(app: A, size: (u32, u32), scale: f32) -> image::RgbaImag
 
 impl<A: App> ApplicationHandler for Runtime<A> {
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        let window = Arc::new(
-            el.create_window(Window::default_attributes().with_title("dfui"))
-                .expect("create window"),
-        );
+        #[allow(unused_mut)]
+        let mut attrs = Window::default_attributes().with_title("dfui");
+        // The page sizes the canvas with CSS.
+        #[cfg(target_arch = "wasm32")]
+        {
+            use winit::platform::web::WindowAttributesExtWebSys;
+            attrs = attrs.with_append(true);
+        }
+        let window = Arc::new(el.create_window(attrs).expect("create window"));
         let instance = self.instance.get_or_insert_with(|| {
             let mut desc = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
                 el.owned_display_handle(),
@@ -575,37 +605,39 @@ impl<A: App> ApplicationHandler for Runtime<A> {
         });
         let size = window.inner_size().to_logical::<f32>(window.scale_factor());
         self.viewport = (size.width, size.height);
-        self.renderer = Some(Renderer::new(instance, window));
-        self.update_insets();
-        self.redraw();
+        self.pending_renderer = Some(Box::pin(Renderer::new(instance.clone(), window)));
+        self.poll_renderer();
     }
 
     fn user_event(&mut self, _: &ActiveEventLoop, (): ()) {
         if let Some(w) = &self.loop_waker {
             w.clear();
         }
+        self.poll_renderer();
         if self.drive() {
             self.redraw();
         }
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        match self.next_frame {
-            Some(t) if Instant::now() >= t => {
-                self.next_frame = None;
-                if let Some(r) = &self.renderer {
-                    r.window().request_redraw();
-                }
-                el.set_control_flow(ControlFlow::Wait);
+        let now = Instant::now();
+        if self.next_frame.is_some_and(|t| now >= t) {
+            self.next_frame = None;
+            if let Some(r) = &self.renderer {
+                r.window().request_redraw();
             }
-            Some(t) => el.set_control_flow(ControlFlow::WaitUntil(t)),
-            None => el.set_control_flow(ControlFlow::Wait),
         }
+        let timer = task::fire_timers(now);
+        el.set_control_flow(match self.next_frame.into_iter().chain(timer).min() {
+            Some(t) => ControlFlow::WaitUntil(t),
+            None => ControlFlow::Wait,
+        });
     }
 
     // Android destroys the native window when backgrounded.
     fn suspended(&mut self, _: &ActiveEventLoop) {
         self.renderer = None;
+        self.pending_renderer = None;
     }
 
     fn window_event(&mut self, el: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
@@ -1307,5 +1339,39 @@ mod tests {
             .unwrap()
             .get::<Snapshot<Option<u32>>>();
         assert_eq!((s.data, s.done), (Some(42), true));
+    }
+
+    struct Later;
+
+    impl App for Later {
+        fn view(&self) -> Element {
+            future_builder(
+                (),
+                |_| async {
+                    crate::sleep(Duration::from_millis(20)).await;
+                    7
+                },
+                |snap: &Snapshot<Option<u32>>| text(format!("{:?}", snap.data)),
+            )
+            .into()
+        }
+    }
+
+    #[test]
+    fn sleep_resolves_after_its_deadline() {
+        let mut rt = Runtime::new(Later);
+        assert!(!rt.drive());
+        let due = task::fire_timers(Instant::now()).expect("timer registered");
+        assert!(!rt.drive(), "polling again doesn't finish early");
+        std::thread::sleep(due - Instant::now());
+        assert_eq!(task::fire_timers(Instant::now()), None, "fired and removed");
+        assert!(rt.drive());
+        let id = rt.ids[0];
+        let s = rt
+            .states
+            .get_mut(&id)
+            .unwrap()
+            .get::<Snapshot<Option<u32>>>();
+        assert_eq!(s.data, Some(7));
     }
 }

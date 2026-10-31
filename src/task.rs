@@ -1,10 +1,15 @@
 //! Futures and streams owned by widgets, polled on the UI thread.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Wake, Waker};
+use std::task::{self, Context, Wake, Waker};
+use std::time::Duration;
 
+use web_time::Instant;
 use winit::event_loop::EventLoopProxy;
 
 use crate::widget::State;
@@ -71,4 +76,49 @@ impl Wake for LoopWaker {
             let _ = self.proxy.lock().unwrap().send_event(());
         }
     }
+}
+
+thread_local! {
+    /// Pending `sleep` deadlines on the UI thread.
+    static TIMERS: RefCell<Vec<(Instant, Waker)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Completes after `d`, on every platform including the web. Driven by the
+/// dfui event loop, so await it in builder sources, not on another runtime.
+pub fn sleep(d: Duration) -> Sleep {
+    Sleep(Instant::now() + d)
+}
+
+pub struct Sleep(Instant);
+
+impl Future for Sleep {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> task::Poll<()> {
+        if Instant::now() >= self.0 {
+            return task::Poll::Ready(());
+        }
+        TIMERS.with_borrow_mut(|t| {
+            if !t
+                .iter()
+                .any(|(d, w)| *d == self.0 && w.will_wake(cx.waker()))
+            {
+                t.push((self.0, cx.waker().clone()));
+            }
+        });
+        task::Poll::Pending
+    }
+}
+
+/// Wakes timers due at `now`; returns the next deadline.
+pub(crate) fn fire_timers(now: Instant) -> Option<Instant> {
+    TIMERS.with_borrow_mut(|t| {
+        t.retain(|(d, w)| {
+            if *d <= now {
+                w.wake_by_ref();
+            }
+            *d > now
+        });
+        t.iter().map(|(d, _)| *d).min()
+    })
 }

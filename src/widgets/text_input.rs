@@ -1,10 +1,11 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use taffy::util::ResolveOrZero;
 use taffy::{AvailableSpace, LengthPercentage, Size, Style};
 use unicode_segmentation::UnicodeSegmentation;
+use web_time::Instant;
 
 use super::Styled;
 use crate::render::{Color, Rect};

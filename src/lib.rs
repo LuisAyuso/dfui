@@ -18,7 +18,9 @@ pub use path::Path;
 pub use render::{Color, Rect, Shadow};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;
+pub use task::{Sleep, sleep};
 pub use text::{Font, Text};
+pub use web_time::Instant;
 pub use widget::{BuildCx, Element, Event, EventCx, Handle, Key, PaintCx, Scope, State, Widget};
 
 /// Root of the UI. State lives in `stateful` widgets and in external sources

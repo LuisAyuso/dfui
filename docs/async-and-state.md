@@ -119,19 +119,20 @@ covers simple polling loops. This also unblocks the web port's async GPU init.
 
 ## Web port checklist
 
-Independent of the state design, measured with
-`cargo check --target wasm32-unknown-unknown`:
+Done; see `architecture.md`, "Web". Independent of the state design, found
+with `cargo check --target wasm32-unknown-unknown`:
 
 - `arboard` has no web backend: move under
   `cfg(not(any(target_os = "android", target_arch = "wasm32")))`; the
   clipboard falls back to the in-memory stub.
 - `std::time::Instant` → `web_time::Instant` (already in the lockfile via
   winit); std's panics on wasm32 and winit's `WaitUntil` expects web-time's.
-- Async GPU init via the user-event channel above.
+- Async GPU init: `Renderer::new` is async and polled like a task, woken
+  through the same event-loop waker.
 - `EventLoopExtWebSys::spawn_app` instead of `run_app`; window into a canvas
   with `WindowAttributesExtWebSys::with_canvas`/`with_append`.
 - WebGPU only: `shader.wgsl` reads `var<storage>` buffers in the fragment
-  stage, which WebGL2 lacks. Docs pages can fall back to a `snapshot()` PNG.
+  stage, which WebGL2 lacks. Docs pages fall back to a `snapshot()` PNG.
 - Web-only deps go under `[target.'cfg(target_arch = "wasm32")'.dependencies]`
   rather than a cargo feature: the target already decides, and native builds
   never compile them.

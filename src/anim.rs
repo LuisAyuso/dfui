@@ -1,6 +1,8 @@
 //! Time-based transitions for values drawn in `paint`.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use crate::path::{Path, Point, Quad};
 use crate::render::Color;
