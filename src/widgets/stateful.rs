@@ -15,6 +15,7 @@ pub struct Stateful<S> {
     style: Style,
 }
 
+/// Builds a subtree from local state `S`, kept across rebuilds.
 pub fn stateful<S, E>(build: impl Fn(&S, Handle<S>) -> E + 'static) -> Stateful<S>
 where
     S: Default + 'static,

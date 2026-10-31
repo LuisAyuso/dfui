@@ -15,6 +15,7 @@ pub struct Label {
     style: Style,
 }
 
+/// A run of text, wrapped at spaces to the available width.
 pub fn text(s: impl Into<String>) -> Label {
     Label {
         text: s.into(),

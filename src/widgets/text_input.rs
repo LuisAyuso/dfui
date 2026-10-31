@@ -39,6 +39,7 @@ pub struct TextInput {
     style: Style,
 }
 
+/// Single-line editable text showing `value`; edits arrive in `on_change`.
 pub fn text_input(value: impl Into<String>) -> TextInput {
     TextInput {
         value: value.into(),

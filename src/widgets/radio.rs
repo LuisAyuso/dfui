@@ -32,6 +32,7 @@ pub struct Radio {
     style: Style,
 }
 
+/// One choice of a group: a ring, filled when `selected`, and a label.
 pub fn radio(selected: bool, child: impl Into<Element>) -> Radio {
     Radio {
         child: [child.into()],

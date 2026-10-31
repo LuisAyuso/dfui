@@ -22,6 +22,7 @@ pub struct Slider {
     style: Style,
 }
 
+/// Thumb on a track for a value in `range`; tap to jump, drag to follow.
 pub fn slider(value: f32, range: RangeInclusive<f32>) -> Slider {
     Slider {
         value,

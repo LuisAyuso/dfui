@@ -28,6 +28,7 @@ pub struct Toggle {
     style: Style,
 }
 
+/// On/off switch; `on_change` gets the new value.
 pub fn toggle(on: bool) -> Toggle {
     Toggle {
         on,

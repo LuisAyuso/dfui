@@ -55,6 +55,7 @@ pub struct Button {
     radius: f32,
 }
 
+/// Tappable box around `child`; `on_click` runs on a release inside it.
 pub fn button(child: impl Into<Element>) -> Button {
     Button {
         child: [child.into()],

@@ -69,6 +69,7 @@ pub struct Scroll {
     style: Style,
 }
 
+/// Vertical scroll view: wheel, drag and fling, clipping `child` to its box.
 pub fn scroll(child: impl Into<Element>) -> Scroll {
     Scroll {
         child: [child.into()],

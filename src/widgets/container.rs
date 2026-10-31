@@ -14,6 +14,7 @@ pub struct Container {
     shadow: Option<Shadow>,
 }
 
+/// Lays `children` out left to right.
 pub fn row(children: impl IntoIterator<Item = Element>) -> Container {
     Container {
         style: Style {
@@ -28,12 +29,14 @@ pub fn row(children: impl IntoIterator<Item = Element>) -> Container {
     }
 }
 
+/// Lays `children` out top to bottom.
 pub fn column(children: impl IntoIterator<Item = Element>) -> Container {
     let mut c = row(children);
     c.style.flex_direction = FlexDirection::Column;
     c
 }
 
+/// A single child with optional background, radius, border and shadow.
 pub fn container(child: impl Into<Element>) -> Container {
     column([child.into()])
 }
