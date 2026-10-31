@@ -28,7 +28,8 @@ pub struct Demo {
 
 impl App for Demo {
     fn view(&self) -> Element {
-        provide(self.jobs.clone(), stateful(Screen::view)).into()
+        // Grows to the window so each page's scroll is bounded.
+        provide(self.jobs.clone(), stateful(Screen::view).grow(1.0)).into()
     }
 }
 
@@ -86,6 +87,9 @@ impl Screen {
             3 => self.cards(h),
             _ => jobs(),
         };
+        let mut body = scroll(container(page).padding(4.0)).grow(1.0);
+        // Zero basis, so the page's height doesn't push the screen past the window.
+        body.style_mut().flex_basis = Dimension::length(0.0);
         column([
             header.into(),
             tabs(PAGES, self.tab)
@@ -93,10 +97,11 @@ impl Screen {
                 .on_change(move |cx, i| cx.update(h, move |s: &mut Screen| s.tab = i))
                 .into(),
             // Keyed per page so each keeps its own scroll offset.
-            Element::from(scroll(container(page).padding(4.0)).grow(1.0)).key(self.tab as u64),
+            Element::from(body).key(self.tab as u64),
         ])
         .padding(20.0)
         .gap(16.0)
+        .grow(1.0)
         .bg(BG)
         .into()
     }

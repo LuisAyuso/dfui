@@ -641,6 +641,19 @@ fn canvas(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::T
     })
 }
 
+/// `d` (logical px) rounded out to physical pixels with a 2px margin for AA
+/// fringes, within a `size` target; zero-sized when nothing of it is inside.
+fn scissor(d: Rect, scale: f32, (w, h): (u32, u32)) -> [u32; 4] {
+    if d.w <= 0.0 || d.h <= 0.0 {
+        return [0; 4];
+    }
+    let x0 = ((d.x - 2.0) * scale).floor().clamp(0.0, w as f32) as u32;
+    let y0 = ((d.y - 2.0) * scale).floor().clamp(0.0, h as f32) as u32;
+    let x1 = ((d.x + d.w + 2.0) * scale).ceil().clamp(0.0, w as f32) as u32;
+    let y1 = ((d.y + d.h + 2.0) * scale).ceil().clamp(0.0, h as f32) as u32;
+    [x0, y0, x1 - x0, y1 - y0]
+}
+
 impl Renderer {
     /// Async because adapter and device requests are; on native they resolve
     /// on first poll, on the web they wait for the browser.
@@ -722,6 +735,13 @@ impl Renderer {
     /// Redraws `damage` (logical px; empty redraws nothing), or everything when
     /// `None`.
     pub fn render(&mut self, scene: &Scene, text: &mut Text, damage: Option<Rect>) -> Outcome {
+        let scale = self.window.scale_factor() as f32;
+        let viewport = [
+            self.config.width as f32 / scale,
+            self.config.height as f32 / scale,
+        ];
+        // Content can lie past the window edge; only what's on screen counts.
+        let damage = damage.map(|d| d.intersect(&Rect::new(0.0, 0.0, viewport[0], viewport[1])));
         // The window already shows the canvas: nothing to acquire, copy or present.
         let empty = damage.is_some_and(|d| d.w <= 0.0 || d.h <= 0.0);
         if empty && self.canvas.is_some() && !self.fresh && !self.tinted {
@@ -743,11 +763,6 @@ impl Renderer {
             _ => return Outcome::Failed,
         };
         let waited = acquire.elapsed();
-        let scale = self.window.scale_factor() as f32;
-        let viewport = [
-            self.config.width as f32 / scale,
-            self.config.height as f32 / scale,
-        ];
         let view_desc = wgpu::TextureViewDescriptor {
             format: Some(self.config.format.remove_srgb_suffix()),
             ..Default::default()
@@ -761,17 +776,9 @@ impl Renderer {
                 None
             }
             Some(canvas) => {
-                let scissor = damage.filter(|_| !self.fresh).map(|d| {
-                    if d.w <= 0.0 || d.h <= 0.0 {
-                        return [0; 4];
-                    }
-                    // Round out to whole pixels; 2px margin covers AA fringes.
-                    let x0 = ((d.x - 2.0) * scale).floor().clamp(0.0, w as f32) as u32;
-                    let y0 = ((d.y - 2.0) * scale).floor().clamp(0.0, h as f32) as u32;
-                    let x1 = ((d.x + d.w + 2.0) * scale).ceil().clamp(0.0, w as f32) as u32;
-                    let y1 = ((d.y + d.h + 2.0) * scale).ceil().clamp(0.0, h as f32) as u32;
-                    [x0, y0, (x1 - x0).max(1), (y1 - y0).max(1)]
-                });
+                let scissor = damage
+                    .filter(|_| !self.fresh)
+                    .map(|d| scissor(d, scale, (w, h)));
                 if scissor.is_none_or(|[_, _, sw, sh]| sw > 0 && sh > 0) {
                     let view = canvas.create_view(&view_desc);
                     self.gpu.draw(&view, viewport, scene, text, scissor);
@@ -974,6 +981,22 @@ mod tests {
         assert_eq!(img.get_pixel(5, 5).0, [255, 0, 0, 255]);
         assert_eq!(img.get_pixel(15, 15).0, [0, 0, 255, 255]);
         assert_eq!(img.get_pixel(35, 35).0, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn scissor_stays_inside_the_target() {
+        let size = (800, 600);
+        assert_eq!(
+            scissor(Rect::new(10.0, 10.0, 20.0, 20.0), 1.0, size),
+            [8, 8, 24, 24]
+        );
+        assert_eq!(
+            scissor(Rect::new(790.0, 590.0, 50.0, 50.0), 1.0, size),
+            [788, 588, 12, 12]
+        );
+        // Below the window: nothing to draw, not a 1px strip past the edge.
+        let [_, _, w, h] = scissor(Rect::new(23.0, 772.0, 302.0, 202.0), 1.0, size);
+        assert_eq!(w * h, 0);
     }
 
     const ALL: Rect = Rect::new(-1e4, -1e4, 2e4, 2e4);

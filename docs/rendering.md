@@ -152,8 +152,9 @@ drawn one (`render::damage`):
   contributes its old and/or new bounds. Bounds are the quad plus padding
   (shadow blur + 1px, or 1px AA for glyphs), clipped to the instance's clip
   rect.
-- The union, plus a 2px margin rounded out to physical pixels, becomes the
-  scissor. An empty diff skips the frame entirely (see below).
+- The union is clipped to the window (content can be laid out past its
+  edge), then a 2px margin rounded out to physical pixels becomes the
+  scissor. An empty result skips the frame entirely (see below).
 - Full redraws happen only when the canvas is fresh (first frame, resume,
   resize). Events, rebuilds and relayouts all go through the diff, so a
   hover damages one button and typing damages one field.
