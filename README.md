@@ -22,6 +22,7 @@ fn main() { dfui::run(Counter); }
 
 - `src/` — the framework crate (`dfui`)
 - `demo/` — demo app, desktop binary and Android `cdylib`
+- `site/` — docs site published to GitHub Pages: guide pages and a live example per widget
 - `docs/architecture.md` — how it fits together
 - `docs/rendering.md` — renderer details and design decisions
 - `docs/tree.md` — the flattened node list and its id cache
@@ -40,6 +41,28 @@ scripts/android-bench.sh gpu       # same benches on the connected phone (or cpu
 ```
 
 `DFUI_SHOW_DAMAGE=1` tints the area redrawn each frame (desktop debugging).
+
+## Web
+
+The framework builds for `wasm32-unknown-unknown` and draws with WebGPU
+(WebGL2 lacks the fragment-stage storage buffers the text shader reads).
+
+The docs site in `site/` is static HTML, deployed to GitHub Pages by
+`.github/workflows/pages.yml` on every push to `main`:
+
+- `site/pages/*.md`: hand-written pages (introduction, getting started,
+  concepts); `docs/architecture.md` is published as is.
+- `site/examples/*.rs`: one standalone program per widget, built to its own
+  wasm. Its `//!` header is the widget page's text; its code is shown below
+  the live frame. New examples are added to `WIDGETS` in `site/src/main.rs`.
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.129   # must match Cargo.lock
+scripts/site.sh                                    # writes site/dist
+python3 -m http.server -d site/dist                # open http://localhost:8000
+cargo run -p dfui-site --example slider           # one example, natively
+```
 
 ## Android
 

@@ -26,7 +26,7 @@ name = "gpu"
 harness = false
 
 [workspace]
-members = ["demo"]
+members = ["demo", "site"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = "30"
@@ -43,6 +43,14 @@ arboard = { version = "3.7", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8"
+
+# Small wasm for the docs site's examples.
+[profile.web]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]

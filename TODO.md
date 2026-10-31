@@ -25,9 +25,14 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [x] Global state management: messages removed; `provide` injects
       values and services, `stateful` owns UI state, builders read async
       sources (`docs/state-management.md`, "Decision").
-- [ ] Web port: async GPU init over the task user event, `web_time`,
-      clipboard stub, canvas (`docs/async-and-state.md` checklist). The
-      demo's job runner uses OS threads and needs a timer future there.
+- [x] Web port: WebGPU in a canvas, GPU setup polled as a future,
+      `web_time`, in-app clipboard, `dfui::sleep` on event-loop timers. Docs
+      site with a live example per widget, deployed to GitHub Pages
+      (`site/`, `scripts/site.sh`, `.github/workflows/pages.yml`).
+- [ ] Web follow-ups: each example is ~2.2 MB of wasm before `wasm-opt`
+      (CI doesn't run it yet); the demo's job runner uses OS threads, so the
+      demo itself isn't on the web; system clipboard and IME on the web;
+      write the site's introduction and concepts pages.
 - [x] Partial repaint (GPU): scissored retained canvas, per-node damage
       from a scene diff, idle frames skipped (`docs/rendering.md`). Still to
       measure on the phone against the Bench baseline.

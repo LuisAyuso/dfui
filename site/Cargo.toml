@@ -1,0 +1,21 @@
+[package]
+name = "dfui-site"
+version = "0.1.0"
+edition = "2024"
+license = "WTFPL"
+
+# Each file in examples/ is a standalone program, built to its own wasm and
+# embedded in its widget's page; `src/main.rs` generates the pages.
+
+[dependencies]
+dfui = { path = ".." }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+wasm-bindgen = "0.2"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+
+[dev-dependencies]
+futures-util = { version = "0.3", default-features = false }

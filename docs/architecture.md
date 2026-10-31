@@ -104,6 +104,9 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
   timed async work needs no threads or runtime.
 - Time is `web_time::Instant` throughout (std's clock panics on wasm32);
   natively it is std's type. The clipboard is in-app on the web.
+- `site/` builds each example as its own wasm; `run.html?example=NAME`
+  hosts one, embedded by its widget page in an iframe so its canvas and
+  event loop don't take over the docs page.
 
 ## Layout
 
