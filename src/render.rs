@@ -280,6 +280,9 @@ pub(crate) struct Gpu {
     outline_group: wgpu::BindGroup,
     curves: wgpu::Buffer,
     bands: wgpu::Buffer,
+    /// `curves`/`bands` hold nothing yet; `Outlines::dirty` only tracks
+    /// uploads to whichever device came before, e.g. across an Android resume.
+    empty: bool,
     timer: Option<GpuTimer>,
 }
 
@@ -472,6 +475,7 @@ impl Gpu {
             outline_group,
             curves,
             bands,
+            empty: true,
             timer,
         }
     }
@@ -503,7 +507,7 @@ impl Gpu {
         scissor: Option<[u32; 4]>,
     ) {
         let o = &mut text.outlines;
-        if o.dirty {
+        if o.dirty || self.empty {
             let (cb, bb): (&[u8], &[u8]) = (
                 bytemuck::cast_slice(&o.curves),
                 bytemuck::cast_slice(&o.bands),
@@ -521,7 +525,7 @@ impl Gpu {
             // ponytail: re-uploads all outlines when any glyph is added; append-only writes if fonts get big.
             self.queue.write_buffer(&self.curves, 0, cb);
             self.queue.write_buffer(&self.bands, 0, bb);
-            (o.dirty, o.transient_dirty) = (false, false);
+            (o.dirty, o.transient_dirty, self.empty) = (false, false, false);
         } else if o.transient_dirty {
             let (c, b) = o.transient_data();
             self.queue

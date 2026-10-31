@@ -862,6 +862,19 @@ mod tests {
         assert!(d.w >= 200.0 && d.h >= 200.0, "{d:?}");
     }
 
+    #[test]
+    #[ignore = "needs a GPU"]
+    fn new_device_gets_outlines_already_uploaded_elsewhere() {
+        let mut rt = Runtime::new(Counter(0));
+        rt.viewport = (40.0, 40.0);
+        rt.relayout();
+        let (scene, _) = rt.scene(&mut false);
+        let draw = |text: &mut Text| render_offscreen(&[(&scene, None)], text, (40, 40), 1.0);
+        let first = draw(&mut rt.text);
+        // A second device, as after an Android resume, with the same `Text`.
+        assert_eq!(draw(&mut rt.text), first);
+    }
+
     struct Long;
 
     impl App for Long {
