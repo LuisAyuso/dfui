@@ -11,10 +11,37 @@ type Handler<Msg> = Box<dyn Fn(&mut EventCx<Msg>)>;
 
 const FADE: Duration = Duration::from_millis(120);
 
+/// Press and hover tracking shared by tappable widgets.
+#[derive(Default)]
+pub(crate) struct Tap {
+    pub pressed: bool,
+    pub hovered: bool,
+}
+
+impl Tap {
+    /// Returns whether `ev` completes a tap: pressed and released inside.
+    pub fn event<Msg>(&mut self, ev: &Event, cx: &EventCx<Msg>) -> bool {
+        let hit = match *ev {
+            Event::PointerDown { x, y }
+            | Event::PointerMove { x, y }
+            | Event::PointerUp { x, y } => cx.hit(x, y),
+            _ => false,
+        };
+        match ev {
+            Event::PointerDown { .. } if hit => self.pressed = true,
+            Event::PointerMove { .. } => self.hovered = hit,
+            Event::PointerUp { .. } => return std::mem::take(&mut self.pressed) && hit,
+            Event::Cancel => *self = Tap::default(),
+            Event::Leave => self.hovered = false,
+            _ => {}
+        }
+        false
+    }
+}
+
 #[derive(Default)]
 struct ButtonState {
-    pressed: bool,
-    hovered: bool,
+    tap: Tap,
     /// 0..=1 toward the hovered and pressed looks.
     hover: Animated<f32>,
     press: Animated<f32>,
@@ -93,8 +120,8 @@ impl<Msg> Widget<Msg> for Button<Msg> {
         let now = cx.now;
         let s = cx.state.get::<ButtonState>();
         let flag = |b: bool| if b { 1.0 } else { 0.0 };
-        s.hover.to(flag(s.hovered), now, FADE, ease::out_cubic);
-        s.press.to(flag(s.pressed), now, FADE, ease::out_cubic);
+        s.hover.to(flag(s.tap.hovered), now, FADE, ease::out_cubic);
+        s.press.to(flag(s.tap.pressed), now, FADE, ease::out_cubic);
         let (hover, press) = (s.hover.get(now), s.press.get(now));
         if s.hover.running(now) || s.press.running(now) {
             cx.request_frame();
@@ -118,34 +145,15 @@ impl<Msg> Widget<Msg> for Button<Msg> {
         cx.fill(cx.rect, self.radius, fill);
     }
     fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
-        let hit = match *ev {
-            Event::PointerDown { x, y }
-            | Event::PointerMove { x, y }
-            | Event::PointerUp { x, y } => cx.hit(x, y),
-            _ => false,
-        };
-        let before = (
-            cx.state.get::<ButtonState>().pressed,
-            cx.state.get::<ButtonState>().hovered,
-        );
-        let s = cx.state.get::<ButtonState>();
-        match ev {
-            Event::PointerDown { .. } if hit => s.pressed = true,
-            Event::PointerMove { .. } => s.hovered = hit,
-            Event::PointerUp { .. } => {
-                let fire = s.pressed && hit;
-                s.pressed = false;
-                if fire && let Some(f) = &self.on_click {
-                    f(cx);
-                }
-            }
-            Event::Cancel => (s.pressed, s.hovered) = (false, false),
-            Event::Leave => s.hovered = false,
-            _ => {}
-        }
-        let s = cx.state.get::<ButtonState>();
-        if (s.pressed, s.hovered) != before {
+        let mut tap = std::mem::take(&mut cx.state.get::<ButtonState>().tap);
+        let before = (tap.pressed, tap.hovered);
+        let fire = tap.event(ev, cx);
+        if (tap.pressed, tap.hovered) != before {
             cx.request_redraw();
+        }
+        cx.state.get::<ButtonState>().tap = tap;
+        if fire && let Some(f) = &self.on_click {
+            f(cx);
         }
     }
 }

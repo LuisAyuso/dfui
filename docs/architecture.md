@@ -37,7 +37,7 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 | `lib.rs` | Public API: `App`, `run`, `run_android`, re-exports. |
 | `widget.rs` | `Element`, `Widget` trait, `Event`, `State`, `PaintCx`, `EventCx`. |
 | `widgets/mod.rs` | Widget infrastructure: the `Styled` flex modifiers, re-exports. |
-| `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `text_input`. |
+| `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `text_input`, `toggle`, `slider`, `radio`, `segmented` (`segmented`/`tabs`). |
 | `anim.rs` | `Animated<T>` transitions, `Lerp`, `ease` curves; driven by `PaintCx::now` and `request_frame`. `Morph` between two `Path`s (e.g. glyphs), cutting segments of the shorter contour into as many pieces as needed. |
 | `path.rs` | `Path`: contours of quadratic segments, filled by `PaintCx::path` through the glyph renderer (per-frame shapes use a reserved region of the outline buffers). |
 | `layout.rs` | Flattens the tree to pre-order nodes; `measure` runs taffy, `place` produces absolute rects, clips and scroll offsets. |

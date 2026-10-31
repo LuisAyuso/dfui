@@ -7,18 +7,26 @@
 mod button;
 mod container;
 mod label;
+mod radio;
 mod scroll;
+mod segmented;
+mod slider;
 mod stateful;
 mod text_input;
+mod toggle;
 
 use taffy::{AlignItems, Dimension, FlexWrap, JustifyContent, LengthPercentage, Size, Style};
 
 pub use button::{Button, button};
 pub use container::{Container, column, container, row, spacer};
 pub use label::{Label, text};
+pub use radio::{Radio, radio};
 pub use scroll::{Scroll, scroll};
+pub use segmented::{Segmented, segmented, tabs};
+pub use slider::{Slider, slider};
 pub use stateful::{Stateful, stateful};
 pub use text_input::{TextInput, text_input};
+pub use toggle::{Toggle, toggle};
 
 /// Flex-layout modifiers shared by every widget that owns a `Style`.
 pub trait Styled: Sized {

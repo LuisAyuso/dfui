@@ -692,7 +692,10 @@ impl<A: App> ApplicationHandler for Runtime<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::widgets::{Styled, button, column, scroll, stateful, text, text_input};
+    use crate::widgets::{
+        Styled, button, column, radio, scroll, segmented, slider, stateful, text, text_input,
+        toggle,
+    };
 
     struct Counter(i32);
 
@@ -873,6 +876,105 @@ mod tests {
         let first = draw(&mut rt.text);
         // A second device, as after an Android resume, with the same `Text`.
         assert_eq!(draw(&mut rt.text), first);
+    }
+
+    #[derive(Default)]
+    struct Controls {
+        on: bool,
+        level: f32,
+        picked: bool,
+        seg: usize,
+    }
+
+    #[derive(Clone)]
+    enum Ctl {
+        On(bool),
+        Level(f32),
+        Pick,
+        Seg(usize),
+    }
+
+    impl App for Controls {
+        type Msg = Ctl;
+        fn update(&mut self, m: Ctl) {
+            match m {
+                Ctl::On(b) => self.on = b,
+                Ctl::Level(v) => self.level = v,
+                Ctl::Pick => self.picked = true,
+                Ctl::Seg(i) => self.seg = i,
+            }
+        }
+        fn view(&self) -> Element<Ctl> {
+            column([
+                toggle(self.on)
+                    .on_change(|cx, b| cx.emit(Ctl::On(b)))
+                    .into(),
+                slider(self.level, 0.0..=10.0)
+                    .on_change(|cx, v| cx.emit(Ctl::Level(v)))
+                    .width(122.0)
+                    .into(),
+                radio(self.picked, text("pick"))
+                    .on_select(|cx| cx.emit(Ctl::Pick))
+                    .into(),
+                segmented(["a", "b", "c"], self.seg)
+                    .on_change(|cx, i| cx.emit(Ctl::Seg(i)))
+                    .width(150.0)
+                    .into(),
+            ])
+            .align(taffy::AlignItems::START)
+            .into()
+        }
+    }
+
+    #[test]
+    fn controls_report_taps_and_drags() {
+        let mut rt = Runtime::new(Controls::default());
+        rt.viewport = (300.0, 400.0);
+        rt.relayout();
+        let center = |rt: &Runtime<Controls>, i: usize| {
+            let r = rt.placed[i].rect;
+            (r.x + r.w / 2.0, r.y + r.h / 2.0)
+        };
+        let tap = |rt: &mut Runtime<Controls>, (x, y): (f32, f32)| {
+            rt.dispatch(Event::PointerDown { x, y });
+            rt.dispatch(Event::PointerUp { x, y });
+        };
+        // Pre-order: column, toggle, slider, radio, its label, segmented.
+        let p = center(&rt, 1);
+        tap(&mut rt, p);
+        assert!(rt.app.on);
+        tap(&mut rt, p);
+        assert!(!rt.app.on);
+
+        // 122px wide with a 22px thumb: 100px of travel from x = 11.
+        let (_, y) = center(&rt, 2);
+        rt.dispatch(Event::PointerDown { x: 61.0, y });
+        assert_eq!(rt.app.level, 5.0, "tap jumps to the middle");
+        rt.dispatch(Event::PointerMove {
+            x: 81.0,
+            y: y + 300.0,
+        });
+        assert_eq!(rt.app.level, 7.0, "captured drag follows x only");
+        rt.dispatch(Event::PointerMove { x: 500.0, y });
+        rt.dispatch(Event::PointerUp { x: 500.0, y });
+        assert_eq!(rt.app.level, 10.0, "clamped to the range");
+        rt.dispatch(Event::PointerMove { x: 11.0, y });
+        assert_eq!(rt.app.level, 10.0, "released");
+
+        let p = center(&rt, 4);
+        tap(&mut rt, p);
+        assert!(rt.app.picked, "the label is part of the target");
+
+        let seg = rt.placed[5].rect;
+        let y = seg.y + seg.h / 2.0;
+        tap(&mut rt, (seg.x + seg.w - 5.0, y));
+        assert_eq!(rt.app.seg, 2);
+        rt.dispatch(Event::PointerDown { x: seg.x + 5.0, y });
+        rt.dispatch(Event::PointerUp {
+            x: seg.x + seg.w / 2.0,
+            y,
+        });
+        assert_eq!(rt.app.seg, 2, "released over another option");
     }
 
     struct Long;
