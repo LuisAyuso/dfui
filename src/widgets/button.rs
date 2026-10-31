@@ -53,6 +53,7 @@ pub struct Button {
     style: Style,
     color: Color,
     radius: f32,
+    flat: bool,
 }
 
 /// Tappable box around `child`; `on_click` runs on a release inside it.
@@ -73,6 +74,7 @@ pub fn button(child: impl Into<Element>) -> Button {
         },
         color: Color::hex(0x3b6fe0),
         radius: 8.0,
+        flat: false,
     }
 }
 
@@ -88,6 +90,11 @@ impl Button {
     }
     pub fn radius(mut self, r: f32) -> Self {
         self.radius = r;
+        self
+    }
+    /// No drop shadow, e.g. for items in a list.
+    pub fn flat(mut self) -> Self {
+        self.flat = true;
         self
     }
 }
@@ -129,7 +136,7 @@ impl Widget for Button {
             b: c.b * k,
             a: c.a,
         };
-        if press < 1.0 {
+        if press < 1.0 && !self.flat {
             let sh = Shadow {
                 color: Color::BLACK.alpha(0.25 * (1.0 - press)),
                 offset: (0.0, 2.0),

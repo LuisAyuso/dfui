@@ -21,6 +21,7 @@ const WIDGETS: &[&str] = &[
     "radio",
     "segmented",
     "tabs",
+    "overlays",
     "provide",
     "future_builder",
     "stream_builder",

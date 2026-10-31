@@ -8,6 +8,7 @@ mod builder;
 mod button;
 mod container;
 mod label;
+mod overlay;
 mod provide;
 mod radio;
 mod scroll;
@@ -23,6 +24,10 @@ pub use builder::{Builder, Snapshot, future_builder, stream_builder};
 pub use button::{Button, button};
 pub use container::{Container, column, container, row, spacer};
 pub use label::{Label, text};
+pub use overlay::{
+    Dropdown, Overlay, Overlays, Shown, bottom_sheet, dialog, drawer, dropdown, overlay, overlays,
+    popup, snackbar, tooltip,
+};
 pub use provide::{Provide, provide};
 pub use radio::{Radio, radio};
 pub use scroll::{Scroll, scroll};

@@ -39,7 +39,7 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 | `lib.rs` | Public API: `App`, `run`, `run_android`, re-exports. |
 | `widget.rs` | `Element`, `Widget` trait, `Event`, `State`, `PaintCx`, `EventCx`. |
 | `widgets/mod.rs` | Widget infrastructure: the `Styled` flex modifiers, re-exports. |
-| `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `provide`, `builder` (`future_builder`/`stream_builder`), `text_input`, `toggle`, `slider`, `radio`, `segmented` (`segmented`/`tabs`). |
+| `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `provide`, `builder` (`future_builder`/`stream_builder`), `text_input`, `toggle`, `slider`, `radio`, `segmented` (`segmented`/`tabs`), `overlay` (`overlay`/`popup` and the `dialog`, `drawer`, `bottom_sheet`, `snackbar`, `tooltip`, `dropdown` built on them). |
 | `anim.rs` | `Animated<T>` transitions, `Lerp`, `ease` curves; driven by `PaintCx::now` and `request_frame`. `Morph` between two `Path`s (e.g. glyphs), cutting segments of the shorter contour into as many pieces as needed. |
 | `path.rs` | `Path`: contours of quadratic segments, filled by `PaintCx::path` through the glyph renderer (per-frame shapes use a reserved region of the outline buffers). |
 | `layout.rs` | Flattens the tree to pre-order nodes; `measure` runs taffy, `place` produces absolute rects, clips and scroll offsets. |
@@ -127,7 +127,7 @@ per-frame rebuilds of the same strings are cheap.
 
 ## Input
 
-Events are offered in reverse pre-order (deepest / topmost first). A widget can
+Events are offered in reverse paint order (deepest / topmost first). A widget can
 `stop()` propagation or `capture()` the pointer; on capture every other widget
 receives `Event::Cancel` and subsequent pointer events go only to the captor
 until pointer up. Touch is single-pointer.
@@ -148,6 +148,38 @@ clipboard with `cx.copy`. Paste arrives as `Event::Text` with the
 clipboard's contents. On
 Android, focus toggles the soft keyboard via `set_ime_allowed`; NativeActivity
 delivers its input as key events.
+
+## Layers
+
+A widget whose `layer()` returns `Some` floats over the tree instead of
+taking part in its flow: `measure` makes it `position: absolute` over its
+parent (`Layer::Parent`, which is made `relative`) or `position: fixed` over
+the window inside the system bars (`Layer::Window`), using taffy's
+containing blocks. `place` gives its subtree the viewport as clip, so it
+escapes scroll views, and leaves it out of the parent's scrollable content.
+Paint order is pre-order, except that each layer's subtree comes after
+everything it covers (sorted by layer depth, computed once per tree in
+`Runtime::order`); dispatch walks that order in reverse, so layers get input
+first.
+
+`Overlay` is the built-in layer. Its content sits in a `Sink` that stops
+pointer events hitting it, so any press that reaches the overlay landed
+outside: that is `on_dismiss`, and `modal` also stops everything else and
+paints a scrim. Tooltips and snackbars hide themselves (hover, timeout) by
+scrolling their content out of the overlay's clip, so showing and hiding
+needs no rebuild. Dialogs, drawers, sheets and snackbars slide the same way:
+`scroll` eases an `Animated` between closed and open and offsets the content
+by that fraction of the overlay's rect, and the scrim fades with it.
+
+A removed node can't animate out, so `overlays(|ov| ..)` hosts the ones
+opened from handlers. It is a `stateful` holding a builder per entry;
+`ov.show(cx, build)` adds one and `Shown::close` marks it closing, which
+the overlay animates out. Each entry sits in a `future_builder` whose future
+sleeps until the entry's removal time (`dfui::sleep`) and then builds
+nothing, so removal is an ordinary task result and rebuild: the tree's shape
+still only changes in `set_root`. The deps are (key, closing), so closing
+restarts the timer while the overlay below keeps its state. Removed entries
+are pruned from the list on the next `show`.
 
 ## Rendering
 

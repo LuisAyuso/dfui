@@ -13,7 +13,7 @@ use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::App;
-use crate::layout::{Insets, Layout, Measured, Placed, flatten, place, walk};
+use crate::layout::{Insets, Layout, Measured, Placed, flatten, order, place, walk};
 use crate::render::{
     Color, Offscreen, Outcome, Rect, Renderer, Scene, Spans, damage, render_offscreen,
 };
@@ -26,6 +26,8 @@ pub(crate) struct Runtime<A: App> {
     root: Element,
     /// Pre-order ids of `root`, so frames that keep the tree skip `flatten`.
     ids: Vec<u64>,
+    /// Paint order of `ids`' indices; layers last.
+    order: Vec<usize>,
     states: HashMap<u64, State>,
     tasks: Tasks,
     /// Wakes the event loop when a task can progress; a no-op without one.
@@ -105,11 +107,12 @@ impl<A: App> Runtime<A> {
         let root = app.view();
         let mut states = HashMap::new();
         let mut tasks = Tasks::new();
-        let ids = flat_ids(&root, &mut states, &mut tasks);
+        let (ids, order) = flat_ids(&root, &mut states, &mut tasks);
         Runtime {
             app,
             root,
             ids,
+            order,
             states,
             tasks,
             waker: Waker::noop().clone(),
@@ -165,7 +168,7 @@ impl<A: App> Runtime<A> {
     /// The only way `root` changes, so `ids` always matches it.
     fn set_root(&mut self, root: Element) {
         self.root = root;
-        self.ids = flat_ids(&self.root, &mut self.states, &mut self.tasks);
+        (self.ids, self.order) = flat_ids(&self.root, &mut self.states, &mut self.tasks);
     }
 
     /// Rebuilds the tree from `view`, dropping state and tasks of removed nodes.
@@ -270,8 +273,8 @@ impl<A: App> Runtime<A> {
                 .into_iter()
                 .collect(),
             (false, Some(id)) => nodes.iter().position(|n| n.id == id).into_iter().collect(),
-            // Reverse pre-order: descendants and later (topmost) siblings first.
-            (false, None) => (0..nodes.len()).rev().collect(),
+            // Topmost first: layers, then descendants and later siblings.
+            (false, None) => self.order.iter().rev().copied().collect(),
         };
         let mut send = |i: usize, ev: &Event, states: &mut HashMap<u64, State>| {
             let (n, p) = (&nodes[i], self.placed[i]);
@@ -416,7 +419,8 @@ impl<A: App> Runtime<A> {
         );
         self.text.outlines.begin_frame();
         let mut spans = Vec::with_capacity(nodes.len());
-        for (n, p) in nodes.iter().zip(&self.placed) {
+        for &i in &self.order {
+            let (n, p) = (&nodes[i], &self.placed[i]);
             let start = scene.len();
             n.w.paint(&mut PaintCx {
                 now,
@@ -486,8 +490,13 @@ impl Clipboard {
     }
 }
 
-fn flat_ids(root: &Element, states: &mut HashMap<u64, State>, tasks: &mut Tasks) -> Vec<u64> {
-    flatten(root, states, tasks).iter().map(|n| n.id).collect()
+fn flat_ids(
+    root: &Element,
+    states: &mut HashMap<u64, State>,
+    tasks: &mut Tasks,
+) -> (Vec<u64>, Vec<usize>) {
+    let nodes = flatten(root, states, tasks);
+    (nodes.iter().map(|n| n.id).collect(), order(&nodes))
 }
 
 /// CPU side of frames for benchmarks: rebuild, layout, paint and damage diff,
@@ -768,8 +777,8 @@ mod tests {
 
     use crate::widget::Scope;
     use crate::widgets::{
-        Snapshot, Styled, button, column, future_builder, provide, radio, scroll, segmented,
-        slider, stateful, stream_builder, text, text_input, toggle,
+        Snapshot, Styled, button, column, dialog, future_builder, overlays, popup, provide, radio,
+        scroll, segmented, slider, stateful, stream_builder, text, text_input, toggle,
     };
 
     /// State of the root `stateful`.
@@ -1031,6 +1040,128 @@ mod tests {
             2,
             "released over another option"
         );
+    }
+
+    #[derive(Default)]
+    struct Layers {
+        taps: u32,
+        ok: u32,
+        dismissed: u32,
+    }
+
+    struct LayersApp;
+
+    impl App for LayersApp {
+        fn view(&self) -> Element {
+            stateful(|_: &Layers, h| {
+                let ok =
+                    button(text("ok")).on_click(move |cx| cx.update(h, |s: &mut Layers| s.ok += 1));
+                let anchored = column([
+                    button(text("+"))
+                        .on_click(move |cx| cx.update(h, |s: &mut Layers| s.taps += 1))
+                        .height(40.0)
+                        .into(),
+                    popup(column([]).width(50.0).height(10.0)).into(),
+                ]);
+                column([
+                    dialog(ok)
+                        .on_dismiss(move |cx| cx.update(h, |s: &mut Layers| s.dismissed += 1))
+                        .into(),
+                    scroll(anchored).height(60.0).into(),
+                ])
+                .padding(10.0)
+            })
+            .into()
+        }
+    }
+
+    #[test]
+    fn layers_float_above_and_take_input_first() {
+        let mut rt = Runtime::new(LayersApp);
+        rt.viewport = (200.0, 200.0);
+        rt.insets = [20.0, 0.0, 10.0, 0.0];
+        let t = Instant::now();
+        rt.clock = Some(t);
+        rt.relayout();
+        // Past the dialog's slide in.
+        rt.clock = Some(t + Duration::from_secs(1));
+        rt.reposition();
+        // Pre-order: stateful, column, dialog, sink, card, ok, its text,
+        // scroll, anchor column, +, its text, popup, sink, popup content.
+        assert_eq!(rt.order, [0, 1, 7, 8, 9, 10, 2, 3, 4, 5, 6, 11, 12, 13]);
+        let full = Rect::new(0.0, 0.0, 200.0, 200.0);
+        assert_eq!(
+            rt.placed[2].rect,
+            Rect::new(0.0, 20.0, 200.0, 170.0),
+            "window minus bars"
+        );
+        let anchor = rt.placed[8].rect;
+        assert_eq!(rt.placed[11].rect, anchor, "popup covers its parent");
+        assert_eq!(rt.placed[12].rect.y, anchor.y + anchor.h + 4.0);
+        assert_eq!(rt.placed[12].rect.w, anchor.w, "at least as wide");
+        assert_eq!(rt.placed[13].clip, full, "escapes the scroll clip");
+        assert_eq!(rt.placed[7].content.height, 40.0, "not scrollable content");
+
+        let tap = |rt: &mut Runtime<LayersApp>, r: Rect, dx: f32, dy: f32| {
+            let (x, y) = (r.x + dx, r.y + dy);
+            rt.dispatch(Event::PointerDown { x, y });
+            rt.dispatch(Event::PointerUp { x, y });
+        };
+        let (plus, card, ok) = (rt.placed[9].rect, rt.placed[4].rect, rt.placed[5].rect);
+        tap(&mut rt, plus, 5.0, 5.0);
+        assert_eq!(root::<Layers, _>(&mut rt).taps, 0, "blocked by the modal");
+        assert_eq!(root::<Layers, _>(&mut rt).dismissed, 1);
+        tap(&mut rt, card, 5.0, 5.0);
+        assert_eq!(root::<Layers, _>(&mut rt).dismissed, 1, "inside the card");
+        tap(&mut rt, ok, 5.0, 5.0);
+        assert_eq!(root::<Layers, _>(&mut rt).ok, 1);
+    }
+
+    struct Host;
+
+    impl App for Host {
+        fn view(&self) -> Element {
+            overlays(|ov| {
+                button(text("open")).height(40.0).on_click(move |cx| {
+                    ov.show(cx, |me| {
+                        dialog(button(text("x")).on_click(move |cx| me.close(cx)))
+                    })
+                })
+            })
+            .into()
+        }
+    }
+
+    #[test]
+    fn controller_animates_overlays_out_then_removes_them() {
+        let mut rt = Runtime::new(Host);
+        rt.viewport = (200.0, 200.0);
+        let t = Instant::now();
+        rt.clock = Some(t);
+        rt.relayout();
+        let tap = |rt: &mut Runtime<Host>, x: f32, y: f32| {
+            rt.dispatch(Event::PointerDown { x, y });
+            rt.dispatch(Event::PointerUp { x, y });
+        };
+        tap(&mut rt, 5.0, 5.0);
+        // Pre-order: host, column, open, its text, then per entry: timer,
+        // dialog, sink, card, x, its text.
+        assert_eq!(rt.ids.len(), 10);
+        assert!(rt.placed[7].rect.y >= 200.0, "starts below the window");
+        rt.clock = Some(t + Duration::from_secs(1));
+        rt.reposition();
+        assert!(rt.placed[7].rect.y < 200.0, "slid in");
+
+        tap(&mut rt, 5.0, 5.0);
+        assert_eq!(rt.ids.len(), 10, "dismissed, still animating out");
+        tap(&mut rt, 5.0, 5.0);
+        assert_eq!(rt.ids.len(), 16, "a closing overlay lets input through");
+
+        let due = task::fire_timers(Instant::now()).expect("removal timer");
+        std::thread::sleep(due.saturating_duration_since(Instant::now()));
+        task::fire_timers(Instant::now());
+        assert!(rt.drive());
+        assert_eq!(rt.ids.len(), 4 + 2 + 6, "the first builds nothing");
     }
 
     struct Long;

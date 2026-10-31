@@ -4,6 +4,7 @@ use taffy::{Display, Overflow, Point, Style};
 use web_time::Instant;
 
 use super::Styled;
+use crate::render::Rect;
 use crate::widget::{Element, Event, EventCx, PaintCx, State, Widget};
 
 const DRAG_SLOP: f32 = 6.0;
@@ -104,7 +105,7 @@ impl Widget for Scroll {
     fn children(&self) -> &[Element] {
         &self.child
     }
-    fn scroll(&self, state: &mut State, now: Instant) -> Option<(f32, f32)> {
+    fn scroll(&self, state: &mut State, _: Rect, now: Instant) -> Option<(f32, f32)> {
         let s = state.get::<ScrollState>();
         if let Some(f) = s.fling {
             let (offset, moving) = f.at(now);

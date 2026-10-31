@@ -5,13 +5,14 @@ use web_time::Instant;
 
 use taffy::util::ResolveOrZero;
 use taffy::{
-    AvailableSpace, Dimension, LengthPercentage, NodeId, Size, TaffyTree, compute_leaf_layout,
+    AvailableSpace, Dimension, LengthPercentage, LengthPercentageAuto, NodeId, Position, Size,
+    TaffyTree, compute_leaf_layout,
 };
 
 use crate::render::Rect;
 use crate::task::Tasks;
 use crate::text::Text;
-use crate::widget::{BuildCx, Element, Scope, State, Widget};
+use crate::widget::{BuildCx, Element, Layer, Scope, State, Widget};
 
 pub(crate) struct Node<'a> {
     pub w: &'a dyn Widget,
@@ -109,6 +110,18 @@ pub(crate) fn walk<'a>(root: &'a Element, ids: &[u64]) -> Vec<Node<'a>> {
     out
 }
 
+/// Paint order: pre-order, with each layer's subtree after everything it
+/// covers. Input goes in reverse.
+pub(crate) fn order(nodes: &[Node<'_>]) -> Vec<usize> {
+    let mut z = vec![0u32; nodes.len()];
+    for i in 1..nodes.len() {
+        z[i] = z[nodes[i].parent.unwrap()] + nodes[i].w.layer().is_some() as u32;
+    }
+    let mut o: Vec<usize> = (0..nodes.len()).collect();
+    o.sort_by_key(|&i| z[i]);
+    o
+}
+
 pub(crate) fn children(nodes: &[Node<'_>], i: usize) -> impl Iterator<Item = usize> {
     let end = nodes[i].end;
     let mut j = i + 1;
@@ -193,6 +206,28 @@ impl Layout {
                     left: add(p.left, insets[3]),
                 };
             }
+            if let (Some(l), true) = (nodes[i].w.layer(), i > 0) {
+                let at = match l {
+                    Layer::Parent => [0.0; 4],
+                    Layer::Window => insets,
+                };
+                style.position = match l {
+                    Layer::Parent => Position::Absolute,
+                    Layer::Window => Position::Fixed,
+                };
+                style.inset = taffy::Rect {
+                    top: LengthPercentageAuto::length(at[0]),
+                    right: LengthPercentageAuto::length(at[1]),
+                    bottom: LengthPercentageAuto::length(at[2]),
+                    left: LengthPercentageAuto::length(at[3]),
+                };
+            }
+            // Parent layers are absolute, so their parent must be positioned.
+            if style.position == Position::Static
+                && children(nodes, i).any(|c| nodes[c].w.layer() == Some(Layer::Parent))
+            {
+                style.position = Position::Relative;
+            }
             let kids: Vec<NodeId> = children(nodes, i).map(|c| ids[c]).collect();
             let (id, key) = (nodes[i].id, nodes[i].w.measure_key());
             ids[i] = match self.entries.get_mut(&id) {
@@ -258,13 +293,15 @@ impl Layout {
                 let l = tree.layout(ids[i]).unwrap();
                 Measured {
                     rect: Rect::new(l.location.x, l.location.y, l.size.width, l.size.height),
-                    content: children(nodes, i).fold(Size::ZERO, |s, c| {
-                        let cl = tree.layout(ids[c]).unwrap();
-                        Size {
-                            width: s.width.max(cl.location.x + cl.size.width),
-                            height: s.height.max(cl.location.y + cl.size.height),
-                        }
-                    }),
+                    content: children(nodes, i)
+                        .filter(|&c| nodes[c].w.layer().is_none())
+                        .fold(Size::ZERO, |s, c| {
+                            let cl = tree.layout(ids[c]).unwrap();
+                            Size {
+                                width: s.width.max(cl.location.x + cl.size.width),
+                                height: s.height.max(cl.location.y + cl.size.height),
+                            }
+                        }),
                 }
             })
             .collect()
@@ -289,9 +326,17 @@ pub(crate) fn place(
     let mut offsets = vec![None; nodes.len()];
     for i in 0..nodes.len() {
         let m = measured[i];
-        let (origin, clip) = match nodes[i].parent {
-            None => ((0.0, 0.0), full),
-            Some(p) => {
+        let (origin, clip) = match (nodes[i].parent, nodes[i].w.layer()) {
+            (None, _) => ((0.0, 0.0), full),
+            // Taffy places layers relative to their containing block.
+            (Some(p), Some(l)) => {
+                let cb = match l {
+                    Layer::Parent => placed[p].rect,
+                    Layer::Window => placed[0].rect,
+                };
+                ((cb.x, cb.y), placed[0].rect)
+            }
+            (Some(p), None) => {
                 let pr = placed[p].rect;
                 let (dx, dy) = offsets[p].unwrap_or((0.0, 0.0));
                 let clip = if offsets[p].is_some() {
@@ -309,7 +354,7 @@ pub(crate) fn place(
         };
         offsets[i] = nodes[i]
             .w
-            .scroll(states.entry(nodes[i].id).or_default(), now);
+            .scroll(states.entry(nodes[i].id).or_default(), placed[i].rect, now);
     }
     placed
 }

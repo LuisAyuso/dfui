@@ -74,6 +74,15 @@ impl Element {
     }
 }
 
+/// What a layer widget is laid out over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Layer {
+    /// Its parent's box, e.g. a dropdown menu or tooltip.
+    Parent,
+    /// The window, inside the system bars, e.g. a dialog or drawer.
+    Window,
+}
+
 /// Primitive building block. Composite widgets are plain functions returning
 /// `Element`; implement this only for new layout/paint/input behavior.
 pub trait Widget {
@@ -88,6 +97,13 @@ pub trait Widget {
     /// Runs before `children` with this node's id, state slot and providers;
     /// lets a widget build its subtree from framework-owned state.
     fn expand(&self, _cx: &mut BuildCx) {}
+
+    /// Takes this subtree out of the layout flow: it covers `Layer`'s box,
+    /// isn't clipped by ancestors, paints above and gets input before the
+    /// rest of the tree.
+    fn layer(&self) -> Option<Layer> {
+        None
+    }
 
     /// Value made available to descendants through `Scope::get`.
     fn provide(&self) -> Option<&dyn Any> {
@@ -111,9 +127,9 @@ pub trait Widget {
         0
     }
 
-    /// Children are clipped to this widget's rect and shifted by the returned
-    /// offset, as of frame time `now`.
-    fn scroll(&self, _state: &mut State, _now: Instant) -> Option<(f32, f32)> {
+    /// Children are clipped to this widget's `rect` and shifted by the
+    /// returned offset, as of frame time `now`.
+    fn scroll(&self, _state: &mut State, _rect: Rect, _now: Instant) -> Option<(f32, f32)> {
         None
     }
 

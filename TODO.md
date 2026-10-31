@@ -69,6 +69,15 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [ ] Horizontal scroll; overscroll bounce/glow; a press that catches a
       fling still reaches the widget under it.
 - [ ] Widget library: checkbox, switch, slider, list, tabs.
+- [x] Layers: widgets that float above the tree outside its layout
+      (`Widget::layer`); `dialog`, `drawer`, `bottom_sheet`, `snackbar`,
+      `tooltip`, `dropdown`.
+- [x] Overlay host (`overlays`, `Handle<Overlays>::show`, `Shown::close`):
+      slide in and out, removal after the exit animation on a `sleep` timer.
+- [ ] Layer follow-ups: animate the dropdown's menu (keep it in the tree,
+      hidden, like the tooltip), snackbar queue (one at a time), Escape to dismiss,
+      flipping popups that would leave the window, tooltips on touch (long
+      press), anchored popups still show when their anchor is scrolled away.
 
 ## Text
 
