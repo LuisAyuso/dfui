@@ -5,7 +5,7 @@ use web_time::Instant;
 use taffy::{AvailableSpace, Size, Style};
 
 use crate::path::Path;
-use crate::render::{Color, Rect, Scene, Shadow};
+use crate::render::{Bitmap, Color, Rect, Scene, Shadow};
 use crate::task::Tasks;
 use crate::text::{Font, Text};
 
@@ -280,6 +280,11 @@ impl PaintCx<'_> {
 
     pub fn shadow(&mut self, r: Rect, radius: f32, s: Shadow) {
         self.scene.shadow(r, radius, s, self.clip);
+    }
+
+    /// `bitmap` stretched over `r`, multiplied by `tint` (`Color::WHITE` keeps it as is).
+    pub fn image(&mut self, r: Rect, bitmap: &Bitmap, radius: f32, tint: Color) {
+        self.scene.image(r, bitmap, radius, tint, self.clip);
     }
 
     pub fn text(

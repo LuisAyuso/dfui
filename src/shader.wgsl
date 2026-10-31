@@ -13,6 +13,10 @@ struct Globals {
 // Per glyph: [start, count] per horizontal band, then per vertical band; then curve indices.
 @group(1) @binding(1) var<storage, read> bands: array<u32>;
 
+// Bitmap sampled by image instances (premultiplied); a 1x1 dummy otherwise.
+@group(2) @binding(0) var image: texture_2d<f32>;
+@group(2) @binding(1) var image_sampler: sampler;
+
 struct Instance {
     @location(0) rect: vec4<f32>,
     @location(1) uv: vec4<f32>,
@@ -20,7 +24,9 @@ struct Instance {
     @location(3) border_color: vec4<f32>,
     // shape: radius, border width, blur, kind 0
     // glyph: band header, horizontal bands, vertical bands, kind 1
-    // uv: glyph em-space quad corners; shadow: hole (x0, y0, x1, y1) left undrawn
+    // image: radius, _, _, kind 2
+    // uv: glyph em-space quad corners; shadow: hole (x0, y0, x1, y1) left undrawn;
+    // image: texture coordinates of the rect's corners
     @location(4) params: vec4<f32>,
     @location(5) clip: vec4<f32>,
 }
@@ -148,6 +154,15 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
 
+    if in.params.w > 1.5 {
+        // Explicit level: no mips, and sampling isn't in uniform control flow.
+        let s = textureSampleLevel(image, image_sampler, in.uv, 0.0);
+        let radius = min(in.params.x, min(in.rect.z, in.rect.w) * 0.5);
+        let d = sd_round_box(in.local, in.rect.zw * 0.5, radius);
+        let aa = max(length(vec2(dpdx(d), dpdy(d))), 1e-4);
+        let coverage = clamp(0.5 - d / aa, 0.0, 1.0);
+        return s * vec4(in.color.rgb * in.color.a, in.color.a) * coverage;
+    }
     var color: vec4<f32>;
     if in.params.w > 0.5 {
         let header = u32(in.params.x);

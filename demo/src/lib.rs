@@ -3,14 +3,14 @@ use std::time::{Duration, Instant};
 use dfui::anim::{Lerp, Morph, ease};
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
-    Snapshot, Styled, button, column, container, provide, radio, row, scroll, segmented, slider,
-    spacer, stateful, stream_builder, tabs, text, text_input, toggle,
+    Snapshot, Styled, button, column, container, future_builder, image, provide, radio, row,
+    scroll, segmented, slider, spacer, stateful, stream_builder, tabs, text, text_input, toggle,
 };
 use dfui::{
-    Animated, App, Color, Element, EventCx, Font, Handle, PaintCx, Path, Rect, Scope, Shadow,
-    Widget,
+    Animated, App, Bitmap, Color, Element, EventCx, Font, Handle, PaintCx, Path, Rect, Scope,
+    Shadow, Widget,
 };
-use futures_channel::mpsc;
+use futures_channel::{mpsc, oneshot};
 
 static BOLD: Font = Font(include_bytes!("../../assets/DejaVuSans-Bold.ttf"));
 
@@ -62,7 +62,7 @@ fn on<S: Default + 'static>(
     move |cx| cx.update(h, f)
 }
 
-const PAGES: [&str; 5] = ["Basics", "Controls", "Motion", "Cards", "Async"];
+const PAGES: [&str; 6] = ["Basics", "Controls", "Motion", "Cards", "Async", "Images"];
 
 impl Screen {
     fn view(&self, h: Handle<Screen>) -> Element {
@@ -85,7 +85,8 @@ impl Screen {
             1 => controls(),
             2 => self.motion(h),
             3 => self.cards(h),
-            _ => jobs(),
+            4 => jobs(),
+            _ => gallery(),
         };
         let mut body = scroll(container(page).padding(4.0)).grow(1.0);
         // Zero basis, so the page's height doesn't push the screen past the window.
@@ -308,6 +309,62 @@ fn jobs() -> Element {
         column([section("Background job", start.into()), log]).gap(16.0)
     })
     .into()
+}
+
+/// Downloads and decodes a PNG on its own thread; the UI only sees the `Bitmap`.
+// ponytail: a thread per image; a small pool if pages ever load hundreds.
+fn fetch(url: String) -> oneshot::Receiver<Result<Bitmap, String>> {
+    let (tx, rx) = oneshot::channel();
+    std::thread::spawn(move || {
+        let load = || -> Result<Bitmap, Box<dyn std::error::Error>> {
+            let png = ureq::get(&url).call()?.body_mut().read_to_vec()?;
+            let img = image::load_from_memory_with_format(&png, image::ImageFormat::Png)?;
+            let img = img.to_rgba8();
+            Ok(Bitmap::from_rgba8(
+                img.width(),
+                img.height(),
+                img.into_raw(),
+            ))
+        };
+        // Fails once the tile is gone; nothing to do then.
+        let _ = tx.send(load().map_err(|e| e.to_string()));
+    });
+    rx
+}
+
+/// Placeholder images from placehold.co, each downloaded in the background
+/// and shown once decoded.
+fn gallery() -> Element {
+    let tiles = (1..=24u32).map(|n| {
+        let [bg, fg] = [CHIPS[n as usize % CHIPS.len()], 0xffffff];
+        let url = format!("https://placehold.co/600x400/{bg:06x}/{fg:06x}/png?text=Poster+{n}");
+        future_builder(
+            n,
+            move |_| async move { fetch(url).await.unwrap_or_else(|e| Err(e.to_string())) },
+            |snap: &Snapshot<Option<Result<Bitmap, String>>>| -> Element {
+                match &snap.data {
+                    Some(Ok(b)) => image(b.clone()).fill_width().radius(12.0).into(),
+                    other => {
+                        let msg = match other {
+                            Some(Err(e)) => e.as_str(),
+                            _ => "Loading…",
+                        };
+                        let mut tile = container(text(msg).size(14.0).color(MUTED))
+                            .bg(Color::hex(0xe8e9ef))
+                            .radius(12.0)
+                            .fill_width()
+                            .align(AlignItems::CENTER)
+                            .justify(JustifyContent::CENTER);
+                        tile.style_mut().aspect_ratio = Some(1.5);
+                        tile.into()
+                    }
+                }
+            },
+        )
+        .width(300.0)
+        .into()
+    });
+    row(tiles).wrap().gap(12.0).into()
 }
 
 /// A titled group: muted heading over `body`.

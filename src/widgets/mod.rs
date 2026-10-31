@@ -7,6 +7,7 @@
 mod builder;
 mod button;
 mod container;
+mod image;
 mod label;
 mod overlay;
 mod provide;
@@ -23,6 +24,7 @@ use taffy::{AlignItems, Dimension, FlexWrap, JustifyContent, LengthPercentage, S
 pub use builder::{Builder, Snapshot, future_builder, stream_builder};
 pub use button::{Button, button};
 pub use container::{Container, column, container, row, spacer};
+pub use image::{Image, image};
 pub use label::{Label, text};
 pub use overlay::{
     Dropdown, Overlay, Overlays, Shown, bottom_sheet, dialog, drawer, dropdown, overlay, overlays,

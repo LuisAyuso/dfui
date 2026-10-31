@@ -5,20 +5,23 @@ work in progress. For how the scene is produced, see `architecture.md`.
 
 ## Pipeline
 
-One render pass, one pipeline, one instanced draw per frame:
+One render pass and one pipeline per frame; one instanced draw unless the
+scene has images (see Images):
 
 - Widgets paint into a `Scene`: a flat `Vec<Instance>` in painter's order
   (logical px). Each instance is a rect + params: rounded box (radius,
-  border, colors), shadow (box with blur), or glyph (band header, em-space
-  quad).
-- The whole list is uploaded each frame and drawn as `draw(0..24, 0..n)`. The
+  border, colors), shadow (box with blur), glyph (band header, em-space
+  quad), or image (radius, tint).
+- The whole list is uploaded each frame. Without images it's drawn as
+  `draw(0..24, 0..n)`; images split it into runs, each its own draw. The
   vertex shader expands each instance to a quad, padded by blur + 1px so AA
   and shadows aren't cut off. Only shadows with a hole use all 24 vertices
   (see Shapes); other instances collapse the extra 18 to nothing.
 - The fragment shader branches on kind and applies the instance's clip rect
   (scroll views) by discarding.
-- Output is premultiplied alpha, blended in painter's order. No depth buffer,
-  no batching by material: there is only one material.
+- Output is premultiplied alpha, blended in painter's order. No depth buffer
+  and no sorting by material: the only per-draw state is the bitmap bound
+  in group 2.
 
 ## Shapes
 
@@ -57,6 +60,28 @@ Glyphs are drawn directly from their outlines, with no atlas
   left a half-amplitude stair-step on every curve. This was visible at 1×,
   and hidden by 3× density on phones.
 - Requires fragment-stage storage buffers (Vulkan / GLES 3.1+).
+
+## Images
+
+A `Bitmap` is immutable premultiplied RGBA8 behind an `Arc`, built by the
+app on any thread (decoding and downloading are the app's job). Each bitmap
+gets its own texture, bound in group 2 with a linear clamp sampler; every
+other instance binds a 1×1 dummy there. The scene records which instances
+are images, and the pass splits the instance list into runs in painter's
+order: one draw per image, one per stretch of other instances between them.
+Same pipeline and shader: the image branch samples, then applies the rounded
+box coverage, tint and clip like any shape.
+
+An atlas was rejected: it caps total image size (a 2048² atlas holds 16 MiB
+of pixels), needs packing, gutters and eviction, and rules out per-image
+samplers or mips. Draw calls stay cheap next to glyph shading.
+
+- Textures are uploaded on first draw and kept by bitmap id with a `Weak`
+  back-reference; dropping the last `Bitmap` frees the texture next frame.
+  A new device (Android resume) starts empty and re-uploads from the CPU copy.
+- The bitmap id is in the instance bytes, so swapping images damages the node.
+- Bitmaps larger than the device's texture limit are skipped with a warning.
+- No mipmaps: decode at roughly the display size, or minified images alias.
 
 ## Color and blending
 
@@ -118,7 +143,7 @@ phone.
 
 GPU time is dominated by fragment shading, mostly glyph ray casting. Vertex
 work is 6 vertices per instance and trivial. So keep the full instance list
-and the single instanced draw, but set a scissor rect to the damaged area.
+and its draws, but set a scissor rect to the damaged area.
 The rasterizer drops fragments outside it before shading, and painter's order
 inside the damage stays correct because every instance is still submitted.
 

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::FRAC_1_SQRT_2;
 use std::ops::Range;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Weak};
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
@@ -91,6 +91,47 @@ impl Rect {
     }
 }
 
+/// Immutable RGBA8 pixels, cheap to clone and safe to build on any thread.
+/// Decoding is up to the app; the GPU copy lives until the last clone drops.
+#[derive(Clone)]
+pub struct Bitmap(Arc<BitmapData>);
+
+struct BitmapData {
+    id: u32,
+    width: u32,
+    height: u32,
+    /// Premultiplied sRGB.
+    rgba: Box<[u8]>,
+}
+
+impl Bitmap {
+    /// Straight-alpha sRGB RGBA8, row-major, as image decoders produce it.
+    pub fn from_rgba8(width: u32, height: u32, mut rgba: Vec<u8>) -> Bitmap {
+        static NEXT: AtomicU32 = AtomicU32::new(1);
+        assert_eq!(rgba.len(), (width * height * 4) as usize, "rgba size");
+        for p in rgba.as_chunks_mut::<4>().0 {
+            let a = p[3] as u32;
+            for c in &mut p[..3] {
+                *c = ((*c as u32 * a + 127) / 255) as u8;
+            }
+        }
+        Bitmap(Arc::new(BitmapData {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            width,
+            height,
+            rgba: rgba.into(),
+        }))
+    }
+
+    pub fn width(&self) -> u32 {
+        self.0.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.0.height
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Shadow {
     pub color: Color,
@@ -113,6 +154,8 @@ pub(crate) struct Instance {
 #[derive(Default)]
 pub struct Scene {
     pub(crate) instances: Vec<Instance>,
+    /// Instance index of each image, in order, with the bitmap it samples.
+    bitmaps: Vec<(usize, Bitmap)>,
 }
 
 pub(crate) enum Outcome {
@@ -213,6 +256,20 @@ impl Scene {
             clip: [clip.x, clip.y, clip.w, clip.h],
         });
     }
+
+    /// `bitmap` stretched over `r`, with rounded corners, multiplied by `tint`.
+    pub fn image(&mut self, r: Rect, bitmap: &Bitmap, radius: f32, tint: Color, clip: Rect) {
+        self.bitmaps.push((self.instances.len(), bitmap.clone()));
+        self.instances.push(Instance {
+            rect: [r.x, r.y, r.w, r.h],
+            uv: [0.0, 0.0, 1.0, 1.0],
+            color: tint.rgba(),
+            // Only for the damage diff: a different bitmap means different bytes.
+            border_color: [f32::from_bits(bitmap.0.id), 0.0, 0.0, 0.0],
+            params: [radius, 0.0, 0.0, 2.0],
+            clip: [clip.x, clip.y, clip.w, clip.h],
+        });
+    }
 }
 
 /// Area that differs between two painted frames, or `None` if nothing does.
@@ -280,6 +337,12 @@ pub(crate) struct Gpu {
     outline_group: wgpu::BindGroup,
     curves: wgpu::Buffer,
     bands: wgpu::Buffer,
+    image_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    /// Bound for instances that sample no bitmap.
+    no_image: wgpu::BindGroup,
+    /// Uploaded bitmaps by id; an entry goes once its bitmap is dropped.
+    textures: HashMap<u32, (Weak<BitmapData>, wgpu::BindGroup)>,
     /// `curves`/`bands` hold nothing yet; `Outlines::dirty` only tracks
     /// uploads to whichever device came before, e.g. across an Android resume.
     empty: bool,
@@ -358,6 +421,52 @@ fn outline_group(
     })
 }
 
+/// Uploads `rgba` (premultiplied) as a texture and binds it with `sampler`.
+fn image_group(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    (width, height): (u32, u32),
+    rgba: &[u8],
+) -> wgpu::BindGroup {
+    let texture = device.create_texture_with_data(
+        queue,
+        &wgpu::TextureDescriptor {
+            label: Some("bitmap"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            // Not sRGB: samples blend in gamma space like every other color.
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        },
+        wgpu::util::TextureDataOrder::LayerMajor,
+        rgba,
+    );
+    let view = texture.create_view(&Default::default());
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("bitmap"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
+}
+
 impl Gpu {
     async fn new(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> Gpu {
         let (device, queue) = adapter
@@ -418,10 +527,40 @@ impl Gpu {
         let bands = storage(&device, "bands", 0);
         let outline_group = outline_group(&device, &outline_layout, &curves, &bands);
 
+        let image_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bitmap"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        // ponytail: no mipmaps, so bitmaps drawn far below their size alias; decode at display size.
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("bitmap"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let no_image = image_group(&device, &queue, &image_layout, &sampler, (1, 1), &[0; 4]);
+
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[Some(&bgl), Some(&outline_layout)],
+            bind_group_layouts: &[Some(&bgl), Some(&outline_layout), Some(&image_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -478,6 +617,10 @@ impl Gpu {
             outline_group,
             curves,
             bands,
+            image_layout,
+            sampler,
+            no_image,
+            textures: HashMap::new(),
             empty: true,
             timer,
         }
@@ -556,6 +699,28 @@ impl Gpu {
         }
         self.queue.write_buffer(&self.instances, 0, bytes);
 
+        self.textures.retain(|_, (b, _)| b.strong_count() > 0);
+        let max = self.device.limits().max_texture_dimension_2d;
+        for (_, b) in &scene.bitmaps {
+            let d = &b.0;
+            self.textures.entry(d.id).or_insert_with(|| {
+                let group = if d.width.max(d.height) > max || d.width == 0 || d.height == 0 {
+                    log::warn!("bitmap {}x{} exceeds {max}px, not drawn", d.width, d.height);
+                    self.no_image.clone()
+                } else {
+                    image_group(
+                        &self.device,
+                        &self.queue,
+                        &self.image_layout,
+                        &self.sampler,
+                        (d.width, d.height),
+                        &d.rgba,
+                    )
+                };
+                (Arc::downgrade(&b.0), group)
+            });
+        }
+
         self.collect_timer();
         let timing = self.timer.as_ref().filter(|t| !t.busy);
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -587,7 +752,24 @@ impl Gpu {
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &self.outline_group, &[]);
             pass.set_vertex_buffer(0, self.instances.slice(..));
-            pass.draw(0..24, 0..scene.instances.len() as u32);
+            // One draw per image, and one for each run of other instances
+            // between them, so painter's order holds.
+            let mut next = 0;
+            for (i, b) in &scene.bitmaps {
+                let i = *i as u32;
+                if i > next {
+                    pass.set_bind_group(2, &self.no_image, &[]);
+                    pass.draw(0..24, next..i);
+                }
+                pass.set_bind_group(2, &self.textures[&b.0.id].1, &[]);
+                pass.draw(0..24, i..i + 1);
+                next = i + 1;
+            }
+            let n = scene.instances.len() as u32;
+            if n > next {
+                pass.set_bind_group(2, &self.no_image, &[]);
+                pass.draw(0..24, next..n);
+            }
         }
         if let Some(t) = timing {
             enc.resolve_query_set(&t.set, 0..2, &t.resolve, 0);
@@ -981,6 +1163,59 @@ mod tests {
         assert_eq!(img.get_pixel(5, 5).0, [255, 0, 0, 255]);
         assert_eq!(img.get_pixel(15, 15).0, [0, 0, 255, 255]);
         assert_eq!(img.get_pixel(35, 35).0, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    #[ignore = "needs a GPU"]
+    fn image_draws_in_painter_order_between_shapes() {
+        // Left half red, right half half-transparent blue.
+        let bitmap = Bitmap::from_rgba8(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 128]);
+        let all = Rect::new(0.0, 0.0, 40.0, 40.0);
+        let mut s = solid(Color::WHITE);
+        s.image(
+            Rect::new(0.0, 0.0, 40.0, 20.0),
+            &bitmap,
+            0.0,
+            Color::WHITE,
+            all,
+        );
+        s.shape(
+            Rect::new(0.0, 15.0, 40.0, 5.0),
+            0.0,
+            Color::BLACK,
+            0.0,
+            Color::TRANSPARENT,
+            all,
+        );
+        let img = render_offscreen(&[(&s, None)], &mut Text::default(), (40, 40), 1.0);
+        assert_eq!(img.get_pixel(2, 5).0, [255, 0, 0, 255]);
+        let [r, g, b, _] = img.get_pixel(37, 5).0;
+        assert!(
+            r.abs_diff(127) <= 2 && g.abs_diff(127) <= 2 && b == 255,
+            "blended over white"
+        );
+        assert_eq!(
+            img.get_pixel(20, 17).0,
+            [0, 0, 0, 255],
+            "shape after image covers it"
+        );
+        assert_eq!(img.get_pixel(20, 30).0, [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn swapping_bitmaps_damages_the_image() {
+        let (a, b) = (
+            Bitmap::from_rgba8(1, 1, vec![0; 4]),
+            Bitmap::from_rgba8(1, 1, vec![0; 4]),
+        );
+        let scene = |bm: &Bitmap| {
+            let mut s = Scene::default();
+            s.image(Rect::new(0.0, 0.0, 10.0, 10.0), bm, 0.0, Color::WHITE, ALL);
+            (s, vec![(1, 0..1)])
+        };
+        let ((sa, na), (sb, nb), (sa2, na2)) = (scene(&a), scene(&b), scene(&a));
+        assert!(damage(&sa, &na, &sa2, &na2).is_none());
+        assert!(damage(&sa, &na, &sb, &nb).is_some());
     }
 
     #[test]

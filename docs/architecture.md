@@ -5,9 +5,10 @@
 - Declarative API: `view() -> Element` rebuilt from state owned by
   `stateful` widgets, provided values and async sources. No messages, no
   signals, no retained widget objects owned by the user.
-- One rendering primitive: every pixel comes from one instanced draw whose
-  fragment shader evaluates either a rounded-rect distance field or glyph
-  coverage from Bézier outlines. No texture atlases, no tessellation.
+- One rendering primitive: every pixel comes from one pipeline whose
+  fragment shader evaluates a rounded-rect distance field, glyph coverage
+  from Bézier outlines, or an app-provided bitmap. No texture atlases, no
+  tessellation.
 - Mobile first: Android via `android-activity`, edge-to-edge with system bar
   insets, 60 fps on a mid-range Mali GPU (baseline numbers in `TODO.md`).
 - Small: few dependencies (wgpu, winit, taffy, read-fonts, harfrust), little code.
@@ -186,9 +187,14 @@ are pruned from the list on the next `show`.
 Details and design decisions, including partial redraws: `rendering.md`.
 
 - Painting appends instances to a `Scene`: shapes (rect, radius, border,
-  colors), shadows (shapes with blur), and glyph quads. Each carries a clip
-  rect evaluated in the fragment shader.
-- All instances go into one vertex buffer and one draw call per frame.
+  colors), shadows (shapes with blur), glyph quads and images. Each carries
+  a clip rect evaluated in the fragment shader.
+- All instances go into one vertex buffer, drawn with one pipeline. Without
+  images that's one draw call per frame; each image adds a draw with its own
+  texture bound, splitting the list into runs in painter's order.
+- Images: the app decodes into a `Bitmap` (premultiplied RGBA8, any
+  thread); the renderer uploads one texture per bitmap on first draw and
+  frees it once the bitmap is dropped.
 - Shapes: rounded-box signed distance → antialiased fill, border and blurred
   shadow.
 - Text: glyph outlines are stored in two storage buffers (curves, bands).

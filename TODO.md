@@ -57,7 +57,10 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [x] Timed wakeups (`PaintCx::request_frame_at`): the caret blink sleeps
       between toggles instead of painting every frame.
 - [ ] Theming: shared colors/sizes instead of per-widget constants.
-- [ ] Images.
+- [x] Images: app-decoded `Bitmap`s, a texture and draw each; demo
+      gallery downloads from placehold.co.
+- [ ] Image follow-ups: mipmaps, fit modes (contain/cover), a decode
+      thread pool.
 - [x] Async: `future_builder`/`stream_builder` polled on the UI thread,
       woken through the event loop, cancelled with their node.
 - [ ] Async follow-ups: task modifier on `stateful` (results into its own
