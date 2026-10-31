@@ -3,7 +3,8 @@ use std::time::{Duration, Instant};
 use dfui::anim::{Lerp, Morph, ease};
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
-    Styled, button, column, container, row, scroll, spacer, stateful, text, text_input,
+    Styled, button, column, container, radio, row, scroll, segmented, slider, spacer, stateful,
+    tabs, text, text_input, toggle,
 };
 use dfui::{Animated, App, Color, Element, Font, PaintCx, Path, Rect, Shadow, Widget};
 
@@ -20,6 +21,7 @@ pub struct Demo {
     items: Vec<u32>,
     bench: bool,
     playing: bool,
+    tab: usize,
 }
 
 impl Default for Demo {
@@ -29,6 +31,7 @@ impl Default for Demo {
             items: (1..=12).collect(),
             bench: false,
             playing: true,
+            tab: 0,
         }
     }
 }
@@ -41,6 +44,7 @@ pub enum Msg {
     Remove(u32),
     Bench,
     Play,
+    Tab(usize),
 }
 
 impl App for Demo {
@@ -54,6 +58,7 @@ impl App for Demo {
             Msg::Remove(n) => self.items.retain(|&i| i != n),
             Msg::Bench => self.bench = !self.bench,
             Msg::Play => self.playing = !self.playing,
+            Msg::Tab(i) => self.tab = i,
         }
     }
 
@@ -64,10 +69,6 @@ impl App for Demo {
         let header = row([
             text("dfui").font(BOLD).size(28.0).color(INK).into(),
             spacer().grow(1.0).into(),
-            text(format!("count {}", self.count))
-                .size(18.0)
-                .color(MUTED)
-                .into(),
             button(text("Bench").color(INK))
                 .on_press(Msg::Bench)
                 .color(Color::hex(0xe8e9ef))
@@ -76,24 +77,91 @@ impl App for Demo {
         .align(AlignItems::CENTER)
         .gap(12.0);
 
+        let page = match self.tab {
+            0 => self.basics(),
+            1 => controls(),
+            2 => self.motion(),
+            _ => self.cards(),
+        };
+        column([
+            header.into(),
+            tabs(PAGES, self.tab)
+                .accent(ACCENT)
+                .on_change(|cx, i| cx.emit(Msg::Tab(i)))
+                .into(),
+            // Keyed per page so each keeps its own scroll offset.
+            Element::from(scroll(container(page).padding(4.0)).grow(1.0)).key(self.tab as u64),
+        ])
+        .padding(20.0)
+        .gap(16.0)
+        .bg(BG)
+        .into()
+    }
+}
+
+const PAGES: [&str; 4] = ["Basics", "Controls", "Motion", "Cards"];
+
+impl Demo {
+    fn basics(&self) -> Element<Msg> {
+        let greeting = stateful(|name: &String, h| {
+            let hi = if name.is_empty() {
+                "Hi!".into()
+            } else {
+                format!("Hi, {name}!")
+            };
+            row([
+                text_input(name.clone())
+                    .placeholder("Your name")
+                    .color(INK)
+                    .accent(ACCENT)
+                    .on_change(move |cx, v| cx.update(h, |n: &mut String| *n = v))
+                    .grow(1.0)
+                    .into(),
+                text(hi).size(18.0).color(INK).into(),
+            ])
+            .align(AlignItems::CENTER)
+            .gap(12.0)
+        });
+
         let counter = row([
             button(text("−").size(22.0).color(Color::WHITE))
                 .on_press(Msg::Dec)
                 .width(64.0)
                 .into(),
+            text(self.count.to_string()).size(22.0).color(INK).into(),
             button(text("+").size(22.0).color(Color::WHITE))
                 .on_press(Msg::Inc)
                 .width(64.0)
                 .into(),
-            spacer().grow(1.0).into(),
-            button(text("Add card").color(Color::WHITE))
-                .on_press(Msg::Add)
-                .color(Color::hex(0x2f9e6a))
+        ])
+        .align(AlignItems::CENTER)
+        .gap(16.0);
+
+        let chips = row(CHIPS.iter().enumerate().map(|(i, &c)| {
+            container(text(format!("chip {i}")).size(14.0).color(Color::WHITE))
+                .bg(Color::hex(c))
+                .radius(999.0)
+                .padding_xy(12.0, 6.0)
+                .into()
+        }))
+        .wrap()
+        .gap(8.0);
+
+        column([
+            section("Text input", greeting.into()),
+            section("Buttons", counter.into()),
+            section("Wrapping row", chips.into()),
+            text("Shapes are distance fields and glyphs are evaluated from their outlines, so both stay crisp at any size. Resize the window to watch the flex layout reflow.")
+                .size(15.0)
+                .color(MUTED)
                 .into(),
         ])
-        .gap(12.0);
+        .gap(16.0)
+        .into()
+    }
 
-        let pulse = row([
+    fn motion(&self) -> Element<Msg> {
+        let shapes = row([
             MorphShape {
                 playing: self.playing,
                 shapes: rect_hexagon,
@@ -117,57 +185,47 @@ impl App for Demo {
         .align(AlignItems::CENTER)
         .gap(12.0);
 
-        let chips = row(CHIPS.iter().enumerate().map(|(i, &c)| {
-            container(text(format!("chip {i}")).size(14.0).color(Color::WHITE))
-                .bg(Color::hex(c))
-                .radius(999.0)
-                .padding_xy(12.0, 6.0)
-                .into()
-        }))
-        .wrap()
-        .gap(8.0);
-
-        let cards = column(self.items.iter().map(|&n| card(n).key(n as u64)))
-            .gap(12.0)
-            .padding(4.0);
-
-        let greeting = stateful(|name: &String, h| {
-            let hi = if name.is_empty() {
-                "Hi!".into()
-            } else {
-                format!("Hi, {name}!")
-            };
-            row([
-                text_input(name.clone())
-                    .placeholder("Your name")
+        let playing = self.playing;
+        let zoom = stateful(move |typed: &String, h| {
+            column([
+                text_input(typed.clone())
+                    .placeholder("Type a character")
                     .color(INK)
                     .accent(ACCENT)
-                    .on_change(move |cx, v| cx.update(h, |n: &mut String| *n = v))
-                    .grow(1.0)
+                    .on_change(move |cx, v| cx.update(h, |t: &mut String| *t = v))
                     .into(),
-                text(hi).size(18.0).color(INK).into(),
+                Zoom {
+                    // The latest typed character.
+                    ch: typed.chars().last().unwrap_or('g'),
+                    playing,
+                }
+                .into(),
             ])
-            .align(AlignItems::CENTER)
             .gap(12.0)
         });
 
-        column([
-            header.into(),
-            greeting.into(),
-            counter.into(),
-            pulse.into(),
-            chips.into(),
-            text("Shapes are distance fields and glyphs are evaluated from their outlines, so both stay crisp at any size. Resize the window to watch the flex layout reflow.")
-                .size(15.0)
-                .color(MUTED)
-                .into(),
-            scroll(cards).grow(1.0).into(),
-        ])
-        .padding(20.0)
-        .gap(16.0)
-        .bg(BG)
-        .into()
+        column([section("Morphs and easing", shapes.into()), zoom.into()])
+            .gap(16.0)
+            .into()
     }
+
+    fn cards(&self) -> Element<Msg> {
+        let add = button(text("Add card").color(Color::WHITE))
+            .on_press(Msg::Add)
+            .color(Color::hex(0x2f9e6a));
+        column(std::iter::once(add.into()).chain(self.items.iter().map(|&n| card(n).key(n as u64))))
+            .align(AlignItems::STRETCH)
+            .gap(12.0)
+            .into()
+    }
+}
+
+/// A titled group: muted heading over `body`.
+fn section(title: &str, body: Element<Msg>) -> Element<Msg> {
+    column([text(title).size(14.0).color(MUTED).into(), body])
+        .gap(8.0)
+        .fill_width()
+        .into()
 }
 
 /// Worst case for outline text: the screen filled with large glyphs, redrawn every frame.
@@ -236,6 +294,8 @@ impl<M: 'static> From<FpsMeter> for Element<M> {
 
 /// Seconds for one sweep of the dot across the track.
 const SWEEP: f32 = 1.2;
+/// Seconds for the zoom to grow or shrink once.
+const ZOOM_SWEEP: f32 = 3.0;
 
 #[derive(Default)]
 struct PulseState {
@@ -247,15 +307,15 @@ struct PulseState {
 }
 
 impl PulseState {
-    /// Advances to `now`; returns the dot's position in 0..=1 and whether it
-    /// still moves (and so needs another frame).
-    fn advance(&mut self, playing: bool, now: Instant) -> (f32, bool) {
+    /// Advances to `now` at one sweep per `sweep` seconds; returns the dot's
+    /// position in 0..=1 and whether it still moves (and so needs another frame).
+    fn advance(&mut self, playing: bool, now: Instant, sweep: f32) -> (f32, bool) {
         let target = if playing { 1.0 } else { 0.0 };
         self.speed
             .to(target, now, Duration::from_millis(600), ease::in_out_cubic);
         let speed = self.speed.get(now);
         if let Some(last) = self.last {
-            self.phase += (now - last).as_secs_f32() * speed / SWEEP;
+            self.phase += (now - last).as_secs_f32() * speed / sweep;
         }
         // Speed eases up from 0 on resume, so a long pause adds nothing.
         self.last = Some(now);
@@ -287,7 +347,10 @@ impl<M> Widget<M> for Pulse {
 
     fn paint(&self, cx: &mut PaintCx) {
         let now = cx.now;
-        let (t, moving) = cx.state.get::<PulseState>().advance(self.playing, now);
+        let (t, moving) = cx
+            .state
+            .get::<PulseState>()
+            .advance(self.playing, now, SWEEP);
         if moving {
             cx.request_frame();
         }
@@ -347,7 +410,7 @@ impl<M> Widget<M> for MorphShape {
             cx.state.get::<MorphState>().morph = Some((size, Morph::new(&a, &b)));
         }
         let s = cx.state.get::<MorphState>();
-        let (t, moving) = s.pulse.advance(self.playing, now);
+        let (t, moving) = s.pulse.advance(self.playing, now, SWEEP);
         let path = s.morph.as_ref().unwrap().1.at(t).offset(r.x, r.y);
         if moving {
             cx.request_frame();
@@ -391,14 +454,145 @@ fn d_to_o(cx: &PaintCx, w: f32, h: f32) -> (Path, Path) {
     (glyph('D'), glyph('O'))
 }
 
-/// `p` moved so its bounding box is centred in a `w`×`h` box at the origin.
-fn centered(p: Path, w: f32, h: f32) -> Path {
+/// Bounding box of `p` as (min, max) corners.
+fn bounds(p: &Path) -> ([f32; 2], [f32; 2]) {
     let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
     for q in p.contours.iter().flatten().flatten() {
         lo = [lo[0].min(q[0]), lo[1].min(q[1])];
         hi = [hi[0].max(q[0]), hi[1].max(q[1])];
     }
+    (lo, hi)
+}
+
+/// `p` moved so its bounding box is centred in a `w`×`h` box at the origin.
+fn centered(p: Path, w: f32, h: f32) -> Path {
+    let (lo, hi) = bounds(&p);
     p.offset((w - lo[0] - hi[0]) / 2.0, (h - lo[1] - hi[1]) / 2.0)
+}
+
+/// Smallest zoom, as a fraction of the size that fills the box.
+const ZOOM_MIN: f32 = 0.01;
+
+/// One glyph growing from a speck until it fills a square as wide as its
+/// parent, and back; paused along with the pulse.
+struct Zoom {
+    ch: char,
+    playing: bool,
+}
+
+impl<M> Widget<M> for Zoom {
+    fn style(&self) -> Style {
+        Style {
+            size: Size {
+                width: Dimension::percent(1.0),
+                height: Dimension::auto(),
+            },
+            aspect_ratio: Some(1.0),
+            ..Style::default()
+        }
+    }
+
+    fn paint(&self, cx: &mut PaintCx) {
+        let (now, r) = (cx.now, cx.rect);
+        let (t, moving) = cx
+            .state
+            .get::<PulseState>()
+            .advance(self.playing, now, ZOOM_SWEEP);
+        if moving {
+            cx.request_frame();
+        }
+        cx.fill(r, 14.0, Color::WHITE);
+        let Some(unit) = cx.glyph_path(Font::DEFAULT, self.ch, 1.0) else {
+            return;
+        };
+        let (lo, hi) = bounds(&unit);
+        let (w, h) = (hi[0] - lo[0], hi[1] - lo[1]);
+        if !(w > 0.0 && h > 0.0) {
+            return;
+        }
+        // Geometric, so each step looks like the same amount of growth.
+        let fit = 0.9 * (r.w / w).min(r.h / h);
+        let size = fit * ZOOM_MIN.powf(1.0 - t);
+        let Some(p) = cx.glyph_path(Font::DEFAULT, self.ch, size) else {
+            return;
+        };
+        let p = centered(p, r.w, r.h).offset(r.x, r.y);
+        cx.path(&p, ACCENT.lerp(Color::hex(CHIPS[4]), t));
+    }
+}
+
+impl<M: 'static> From<Zoom> for Element<M> {
+    fn from(w: Zoom) -> Self {
+        Element::new(w)
+    }
+}
+
+#[derive(Default)]
+struct Settings {
+    wifi: bool,
+    volume: f32,
+    size: usize,
+    range: usize,
+}
+
+/// The simple controls; their values are local UI state.
+fn controls() -> Element<Msg> {
+    stateful(|s: &Settings, h| {
+        let label = |l: String| text(l).size(16.0).color(INK);
+        let switches = column([
+            row([
+                label("Wi-Fi".into()).into(),
+                spacer().grow(1.0).into(),
+                toggle(s.wifi)
+                    .accent(ACCENT)
+                    .on_change(move |cx, on| cx.update(h, move |s: &mut Settings| s.wifi = on))
+                    .into(),
+            ])
+            .align(AlignItems::CENTER)
+            .into(),
+            row([
+                label(format!("Volume {:.0}", s.volume)).width(100.0).into(),
+                slider(s.volume, 0.0..=100.0)
+                    .accent(ACCENT)
+                    .on_change(move |cx, v| cx.update(h, move |s: &mut Settings| s.volume = v))
+                    .grow(1.0)
+                    .into(),
+            ])
+            .align(AlignItems::CENTER)
+            .into(),
+        ])
+        .gap(12.0);
+        let sizes = column(
+            ["Small", "Medium", "Large"]
+                .into_iter()
+                .enumerate()
+                .map(|(i, l)| {
+                    radio(s.size == i, label(l.into()))
+                        .accent(ACCENT)
+                        .on_select(move |cx| cx.update(h, move |s: &mut Settings| s.size = i))
+                        .into()
+                }),
+        );
+        let range = segmented(["Day", "Week", "Month"], s.range)
+            .on_change(move |cx, i| cx.update(h, move |s: &mut Settings| s.range = i));
+        column([
+            section("Toggle and slider", panel(switches.into())),
+            section("Radio buttons", panel(sizes.into())),
+            section("Segmented button", range.into()),
+        ])
+        .gap(16.0)
+    })
+    .into()
+}
+
+/// White rounded panel, like the cards.
+fn panel(body: Element<Msg>) -> Element<Msg> {
+    container(body)
+        .padding(14.0)
+        .bg(Color::WHITE)
+        .radius(14.0)
+        .border(1.0, Color::hex(0xdfe1e8))
+        .into()
 }
 
 /// Expanded/collapsed is ephemeral UI state, so it stays local to the card.
@@ -466,21 +660,21 @@ mod tests {
         let t0 = Instant::now();
         let at = |ms: u64| t0 + Duration::from_millis(ms);
         let mut s = PulseState::default();
-        s.advance(true, at(0));
-        let (_, moving) = s.advance(true, at(300));
+        s.advance(true, at(0), SWEEP);
+        let (_, moving) = s.advance(true, at(300), SWEEP);
         assert!(moving);
         let before = s.phase;
         // Pausing glides on for a moment before stopping.
-        s.advance(false, at(316));
-        let (_, gliding) = s.advance(false, at(332));
+        s.advance(false, at(316), SWEEP);
+        let (_, gliding) = s.advance(false, at(332), SWEEP);
         assert!(gliding && s.phase > before);
-        let (_, moving) = s.advance(false, at(1000));
+        let (_, moving) = s.advance(false, at(1000), SWEEP);
         assert!(!moving, "stopped once eased to zero");
         let stopped = s.phase;
         // A long pause adds nothing; resuming starts from rest.
-        s.advance(true, at(9000));
+        s.advance(true, at(9000), SWEEP);
         assert_eq!(s.phase, stopped);
-        s.advance(true, at(9016));
+        s.advance(true, at(9016), SWEEP);
         assert!(s.phase - stopped < 0.001, "eases back in");
     }
 
