@@ -6,6 +6,7 @@ use taffy::{AvailableSpace, Size, Style};
 
 use crate::path::Path;
 use crate::render::{Color, Rect, Scene, Shadow};
+use crate::task::Tasks;
 use crate::text::{Font, Text};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -53,13 +54,13 @@ pub enum Key {
 
 /// A retained node description. `view` rebuilds the tree; framework-owned
 /// per-widget state survives rebuilds, keyed by tree position or `key`.
-pub struct Element<Msg> {
-    pub(crate) widget: Box<dyn Widget<Msg>>,
+pub struct Element {
+    pub(crate) widget: Box<dyn Widget>,
     pub(crate) key: Option<u64>,
 }
 
-impl<Msg> Element<Msg> {
-    pub fn new(w: impl Widget<Msg> + 'static) -> Self {
+impl Element {
+    pub fn new(w: impl Widget + 'static) -> Self {
         Element {
             widget: Box::new(w),
             key: None,
@@ -75,18 +76,23 @@ impl<Msg> Element<Msg> {
 
 /// Primitive building block. Composite widgets are plain functions returning
 /// `Element`; implement this only for new layout/paint/input behavior.
-pub trait Widget<Msg> {
+pub trait Widget {
     fn style(&self) -> Style {
         Style::default()
     }
 
-    fn children(&self) -> &[Element<Msg>] {
+    fn children(&self) -> &[Element] {
         &[]
     }
 
-    /// Runs before `children` with this node's id and state slot; lets a widget
-    /// build its subtree from framework-owned state.
-    fn expand(&self, _id: u64, _state: &mut State) {}
+    /// Runs before `children` with this node's id, state slot and providers;
+    /// lets a widget build its subtree from framework-owned state.
+    fn expand(&self, _cx: &mut BuildCx) {}
+
+    /// Value made available to descendants through `Scope::get`.
+    fn provide(&self) -> Option<&dyn Any> {
+        None
+    }
 
     /// Intrinsic size of a leaf (children-less) widget.
     fn measure(
@@ -113,7 +119,7 @@ pub trait Widget<Msg> {
 
     fn paint(&self, _cx: &mut PaintCx) {}
 
-    fn event(&self, _ev: &Event, _cx: &mut EventCx<Msg>) {}
+    fn event(&self, _ev: &Event, _cx: &mut EventCx) {}
 }
 
 /// Framework-owned per-widget state slot.
@@ -153,6 +159,24 @@ impl<S> Clone for Handle<S> {
 impl<S> Copy for Handle<S> {}
 
 pub(crate) type Update = (u64, Box<dyn FnOnce(&mut State)>);
+
+/// Values provided by ancestors (`provide`), innermost last.
+#[derive(Clone, Copy)]
+pub struct Scope<'a>(pub(crate) &'a [&'a dyn Any]);
+
+impl<'a> Scope<'a> {
+    /// The nearest ancestor-provided `T`.
+    pub fn get<T: 'static>(&self) -> Option<&'a T> {
+        self.0.iter().rev().find_map(|v| v.downcast_ref())
+    }
+}
+
+pub struct BuildCx<'a> {
+    pub id: u64,
+    pub state: &'a mut State,
+    pub scope: Scope<'a>,
+    pub(crate) tasks: &'a mut Tasks,
+}
 
 pub struct PaintCx<'a> {
     /// Frame time, shared by every widget painted this frame.
@@ -257,7 +281,7 @@ impl PaintCx<'_> {
     }
 }
 
-pub struct EventCx<'a, Msg> {
+pub struct EventCx<'a> {
     /// When the event was dispatched.
     pub now: Instant,
     pub rect: Rect,
@@ -269,7 +293,6 @@ pub struct EventCx<'a, Msg> {
     pub shift: bool,
     pub state: &'a mut State,
     pub(crate) text: &'a Text,
-    pub(crate) msgs: &'a mut Vec<Msg>,
     pub(crate) updates: &'a mut Vec<Update>,
     pub(crate) copied: &'a mut Option<String>,
     pub(crate) capture: bool,
@@ -278,13 +301,9 @@ pub struct EventCx<'a, Msg> {
     pub(crate) redraw: bool,
 }
 
-impl<Msg> EventCx<'_, Msg> {
+impl EventCx<'_> {
     pub fn hit(&self, x: f32, y: f32) -> bool {
         self.rect.contains(x, y) && self.clip.contains(x, y)
-    }
-
-    pub fn emit(&mut self, msg: Msg) {
-        self.msgs.push(msg);
     }
 
     /// Modify a stateful widget's state after this event; its subtree is rebuilt.

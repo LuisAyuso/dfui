@@ -1,20 +1,21 @@
 # dfui
 
-A small declarative (Elm-style) UI framework in Rust that renders everything —
+A small declarative UI framework in Rust that renders everything —
 shapes, shadows and text — as distance fields / analytic coverage in a single
 wgpu shader. Primary target is Android (NativeActivity, Vulkan); desktop runs
 through the same winit event loop.
 
 ```rust
 impl App for Counter {
-    type Msg = i32;
-    fn update(&mut self, d: i32) { self.0 += d; }
-    fn view(&self) -> Element<i32> {
-        column([button(text("+")).on_press(1).into()]).into()
+    fn view(&self) -> Element {
+        stateful(|n: &i32, h| {
+            button(text(format!("+ {n}"))).on_click(move |cx| cx.update(h, |n: &mut i32| *n += 1))
+        })
+        .into()
     }
 }
 
-fn main() { dfui::run(Counter(0)); }
+fn main() { dfui::run(Counter); }
 ```
 
 ## Layout
@@ -24,6 +25,8 @@ fn main() { dfui::run(Counter(0)); }
 - `docs/architecture.md` — how it fits together
 - `docs/rendering.md` — renderer details and design decisions
 - `docs/tree.md` — the flattened node list and its id cache
+- `docs/async-and-state.md` — study: external/async state and the web port
+- `docs/state-management.md` — study: state architectures across UI frameworks
 - `TODO.md` — roadmap and current performance baseline
 
 ## Running

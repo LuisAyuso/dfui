@@ -40,7 +40,7 @@ impl Label {
     }
 }
 
-impl<Msg: 'static> From<Label> for Element<Msg> {
+impl From<Label> for Element {
     fn from(w: Label) -> Self {
         Element::new(w)
     }
@@ -52,7 +52,7 @@ impl Styled for Label {
     }
 }
 
-impl<Msg> Widget<Msg> for Label {
+impl Widget for Label {
     fn style(&self) -> Style {
         self.style.clone()
     }

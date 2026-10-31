@@ -7,22 +7,22 @@ use crate::render::{Color, Rect, Shadow};
 use crate::text::Text;
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
-type OnChange<Msg> = Box<dyn Fn(&mut EventCx<Msg>, f32)>;
+type OnChange = Box<dyn Fn(&mut EventCx, f32)>;
 
 const THUMB: f32 = 22.0;
 const TRACK: Color = Color::hex(0xd5d8e0);
 
 /// Controlled horizontal slider over `range`: shows `value`, reports drags
 /// via `on_change`. Tapping the track jumps there.
-pub struct Slider<Msg> {
+pub struct Slider {
     value: f32,
     range: RangeInclusive<f32>,
     accent: Color,
-    on_change: Option<OnChange<Msg>>,
+    on_change: Option<OnChange>,
     style: Style,
 }
 
-pub fn slider<Msg>(value: f32, range: RangeInclusive<f32>) -> Slider<Msg> {
+pub fn slider(value: f32, range: RangeInclusive<f32>) -> Slider {
     Slider {
         value,
         range,
@@ -32,9 +32,9 @@ pub fn slider<Msg>(value: f32, range: RangeInclusive<f32>) -> Slider<Msg> {
     }
 }
 
-impl<Msg> Slider<Msg> {
+impl Slider {
     /// Called with each new value while dragging, within `range`.
-    pub fn on_change(mut self, f: impl Fn(&mut EventCx<Msg>, f32) + 'static) -> Self {
+    pub fn on_change(mut self, f: impl Fn(&mut EventCx, f32) + 'static) -> Self {
         self.on_change = Some(Box::new(f));
         self
     }
@@ -58,19 +58,19 @@ impl<Msg> Slider<Msg> {
     }
 }
 
-impl<Msg: 'static> From<Slider<Msg>> for Element<Msg> {
-    fn from(w: Slider<Msg>) -> Self {
+impl From<Slider> for Element {
+    fn from(w: Slider) -> Self {
         Element::new(w)
     }
 }
 
-impl<Msg> Styled for Slider<Msg> {
+impl Styled for Slider {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
     }
 }
 
-impl<Msg> Widget<Msg> for Slider<Msg> {
+impl Widget for Slider {
     fn style(&self) -> Style {
         self.style.clone()
     }
@@ -96,7 +96,7 @@ impl<Msg> Widget<Msg> for Slider<Msg> {
         cx.shadow(thumb, THUMB / 2.0, sh);
         cx.fill_bordered(thumb, THUMB / 2.0, Color::WHITE, 1.0, TRACK);
     }
-    fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
         let dragging = *cx.state.get::<bool>();
         let x = match *ev {
             Event::PointerDown { x, y } if cx.hit(x, y) => {

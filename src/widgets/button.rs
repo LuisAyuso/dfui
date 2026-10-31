@@ -7,7 +7,7 @@ use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Shadow};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
-type Handler<Msg> = Box<dyn Fn(&mut EventCx<Msg>)>;
+type Handler = Box<dyn Fn(&mut EventCx)>;
 
 const FADE: Duration = Duration::from_millis(120);
 
@@ -20,7 +20,7 @@ pub(crate) struct Tap {
 
 impl Tap {
     /// Returns whether `ev` completes a tap: pressed and released inside.
-    pub fn event<Msg>(&mut self, ev: &Event, cx: &EventCx<Msg>) -> bool {
+    pub fn event(&mut self, ev: &Event, cx: &EventCx) -> bool {
         let hit = match *ev {
             Event::PointerDown { x, y }
             | Event::PointerMove { x, y }
@@ -47,15 +47,15 @@ struct ButtonState {
     press: Animated<f32>,
 }
 
-pub struct Button<Msg> {
-    child: [Element<Msg>; 1],
-    on_click: Option<Handler<Msg>>,
+pub struct Button {
+    child: [Element; 1],
+    on_click: Option<Handler>,
     style: Style,
     color: Color,
     radius: f32,
 }
 
-pub fn button<Msg>(child: impl Into<Element<Msg>>) -> Button<Msg> {
+pub fn button(child: impl Into<Element>) -> Button {
     Button {
         child: [child.into()],
         on_click: None,
@@ -75,17 +75,11 @@ pub fn button<Msg>(child: impl Into<Element<Msg>>) -> Button<Msg> {
     }
 }
 
-impl<Msg> Button<Msg> {
-    /// Runs on release inside the button; can `emit` messages or `update` local state.
-    pub fn on_click(mut self, f: impl Fn(&mut EventCx<Msg>) + 'static) -> Self {
+impl Button {
+    /// Runs on release inside the button, e.g. to `update` local state.
+    pub fn on_click(mut self, f: impl Fn(&mut EventCx) + 'static) -> Self {
         self.on_click = Some(Box::new(f));
         self
-    }
-    pub fn on_press(self, msg: Msg) -> Self
-    where
-        Msg: Clone + 'static,
-    {
-        self.on_click(move |cx| cx.emit(msg.clone()))
     }
     pub fn color(mut self, c: Color) -> Self {
         self.color = c;
@@ -97,23 +91,23 @@ impl<Msg> Button<Msg> {
     }
 }
 
-impl<Msg: 'static> From<Button<Msg>> for Element<Msg> {
-    fn from(w: Button<Msg>) -> Self {
+impl From<Button> for Element {
+    fn from(w: Button) -> Self {
         Element::new(w)
     }
 }
 
-impl<Msg> Styled for Button<Msg> {
+impl Styled for Button {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
     }
 }
 
-impl<Msg> Widget<Msg> for Button<Msg> {
+impl Widget for Button {
     fn style(&self) -> Style {
         self.style.clone()
     }
-    fn children(&self) -> &[Element<Msg>] {
+    fn children(&self) -> &[Element] {
         &self.child
     }
     fn paint(&self, cx: &mut PaintCx) {
@@ -144,7 +138,7 @@ impl<Msg> Widget<Msg> for Button<Msg> {
         }
         cx.fill(cx.rect, self.radius, fill);
     }
-    fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
         let mut tap = std::mem::take(&mut cx.state.get::<ButtonState>().tap);
         let before = (tap.pressed, tap.hovered);
         let fire = tap.event(ev, cx);

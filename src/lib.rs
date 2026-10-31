@@ -8,6 +8,7 @@ mod outline;
 pub mod path;
 mod render;
 mod runtime;
+mod task;
 mod text;
 mod widget;
 pub mod widgets;
@@ -18,12 +19,12 @@ pub use render::{Color, Rect, Shadow};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;
 pub use text::{Font, Text};
-pub use widget::{Element, Event, EventCx, Handle, Key, PaintCx, State, Widget};
+pub use widget::{BuildCx, Element, Event, EventCx, Handle, Key, PaintCx, Scope, State, Widget};
 
+/// Root of the UI. State lives in `stateful` widgets and in external sources
+/// that builders read; `view` runs again whenever any of it changes.
 pub trait App: 'static {
-    type Msg: 'static;
-    fn update(&mut self, msg: Self::Msg);
-    fn view(&self) -> Element<Self::Msg>;
+    fn view(&self) -> Element;
     /// Window background, read every frame.
     fn background(&self) -> Color {
         Color::WHITE

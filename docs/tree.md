@@ -75,8 +75,8 @@ This holds because the tree's shape can only change through `set_root`:
 - `stateful` children are built in `expand` behind a `OnceCell`. That runs
   during the `flatten` in `set_root`, and the cell is never reset for that
   element.
-- State updates and messages always end in `App::view`, which creates new
-  elements with empty cells and goes through `set_root`.
+- State updates and task results always end in `App::view`, which creates
+  new elements with empty cells and goes through `set_root`.
 - Hover, press, scroll and caret change state and positions, never the
   shape.
 

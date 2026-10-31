@@ -5,16 +5,16 @@ use crate::render::{Color, Shadow};
 use crate::widget::{Element, PaintCx, Widget};
 
 /// Flex box with optional rounded, bordered, shadowed background.
-pub struct Container<Msg> {
+pub struct Container {
     style: Style,
-    children: Vec<Element<Msg>>,
+    children: Vec<Element>,
     bg: Color,
     radius: f32,
     border: (f32, Color),
     shadow: Option<Shadow>,
 }
 
-pub fn row<Msg>(children: impl IntoIterator<Item = Element<Msg>>) -> Container<Msg> {
+pub fn row(children: impl IntoIterator<Item = Element>) -> Container {
     Container {
         style: Style {
             flex_direction: FlexDirection::Row,
@@ -28,23 +28,23 @@ pub fn row<Msg>(children: impl IntoIterator<Item = Element<Msg>>) -> Container<M
     }
 }
 
-pub fn column<Msg>(children: impl IntoIterator<Item = Element<Msg>>) -> Container<Msg> {
+pub fn column(children: impl IntoIterator<Item = Element>) -> Container {
     let mut c = row(children);
     c.style.flex_direction = FlexDirection::Column;
     c
 }
 
-pub fn container<Msg>(child: impl Into<Element<Msg>>) -> Container<Msg> {
+pub fn container(child: impl Into<Element>) -> Container {
     column([child.into()])
 }
 
 /// Flexible empty space; `spacer().grow(1.)` pushes siblings apart.
-pub fn spacer<Msg>() -> Container<Msg> {
+pub fn spacer() -> Container {
     row([])
 }
 
-impl<Msg> Container<Msg> {
-    pub fn child(mut self, c: impl Into<Element<Msg>>) -> Self {
+impl Container {
+    pub fn child(mut self, c: impl Into<Element>) -> Self {
         self.children.push(c.into());
         self
     }
@@ -66,23 +66,23 @@ impl<Msg> Container<Msg> {
     }
 }
 
-impl<Msg: 'static> From<Container<Msg>> for Element<Msg> {
-    fn from(w: Container<Msg>) -> Self {
+impl From<Container> for Element {
+    fn from(w: Container) -> Self {
         Element::new(w)
     }
 }
 
-impl<Msg> Styled for Container<Msg> {
+impl Styled for Container {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
     }
 }
 
-impl<Msg> Widget<Msg> for Container<Msg> {
+impl Widget for Container {
     fn style(&self) -> Style {
         self.style.clone()
     }
-    fn children(&self) -> &[Element<Msg>] {
+    fn children(&self) -> &[Element] {
         &self.children
     }
     fn paint(&self, cx: &mut PaintCx) {

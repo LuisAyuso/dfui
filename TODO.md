@@ -22,11 +22,12 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 
 ## Design studies (need discussion before code)
 
-- [ ] Global state management: how app-wide state reaches deep widgets
-      without threading it through every `view` call or `Msg`. Open
-      questions: Elm `App` vs context/provider-style injection vs shared
-      stores; how it coexists with `stateful` local state; change
-      notification and which subtrees rebuild.
+- [x] Global state management: messages removed; `provide` injects
+      values and services, `stateful` owns UI state, builders read async
+      sources (`docs/state-management.md`, "Decision").
+- [ ] Web port: async GPU init over the task user event, `web_time`,
+      clipboard stub, canvas (`docs/async-and-state.md` checklist). The
+      demo's job runner uses OS threads and needs a timer future there.
 - [x] Partial repaint (GPU): scissored retained canvas, per-node damage
       from a scene diff, idle frames skipped (`docs/rendering.md`). Still to
       measure on the phone against the Bench baseline.
@@ -52,7 +53,11 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
       between toggles instead of painting every frame.
 - [ ] Theming: shared colors/sizes instead of per-widget constants.
 - [ ] Images.
-- [ ] Async commands/subscriptions (Elm `Cmd`/`Sub`).
+- [x] Async: `future_builder`/`stream_builder` polled on the UI thread,
+      woken through the event loop, cancelled with their node.
+- [ ] Async follow-ups: task modifier on `stateful` (results into its own
+      state), async event handlers (`cx.spawn`), sync provider reads in
+      `stateful` builds, Suspense-style boundaries.
 - [ ] Multi-touch: per-finger dispatch (runtime is single-pointer today).
 - [x] Kinetic scrolling: a released drag flings with exponential friction,
       stopping at the edges; re-placed per frame via `request_placement`.

@@ -63,12 +63,12 @@ fn velocity(samples: &[(Instant, f32)], now: Instant) -> f32 {
 }
 
 /// Vertical scroll view; drag (touch, flings on release) or wheel. Children are clipped.
-pub struct Scroll<Msg> {
-    child: [Element<Msg>; 1],
+pub struct Scroll {
+    child: [Element; 1],
     style: Style,
 }
 
-pub fn scroll<Msg>(child: impl Into<Element<Msg>>) -> Scroll<Msg> {
+pub fn scroll(child: impl Into<Element>) -> Scroll {
     Scroll {
         child: [child.into()],
         style: Style {
@@ -83,23 +83,23 @@ pub fn scroll<Msg>(child: impl Into<Element<Msg>>) -> Scroll<Msg> {
     }
 }
 
-impl<Msg: 'static> From<Scroll<Msg>> for Element<Msg> {
-    fn from(w: Scroll<Msg>) -> Self {
+impl From<Scroll> for Element {
+    fn from(w: Scroll) -> Self {
         Element::new(w)
     }
 }
 
-impl<Msg> Styled for Scroll<Msg> {
+impl Styled for Scroll {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
     }
 }
 
-impl<Msg> Widget<Msg> for Scroll<Msg> {
+impl Widget for Scroll {
     fn style(&self) -> Style {
         self.style.clone()
     }
-    fn children(&self) -> &[Element<Msg>] {
+    fn children(&self) -> &[Element] {
         &self.child
     }
     fn scroll(&self, state: &mut State, now: Instant) -> Option<(f32, f32)> {
@@ -118,7 +118,7 @@ impl<Msg> Widget<Msg> for Scroll<Msg> {
             cx.request_placement();
         }
     }
-    fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
         let max = (cx.content.height - cx.rect.h).max(0.0);
         let hit = |x, y| cx.hit(x, y);
         let now = cx.now;

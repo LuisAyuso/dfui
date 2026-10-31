@@ -3,10 +3,14 @@ use std::time::{Duration, Instant};
 use dfui::anim::{Lerp, Morph, ease};
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
-    Styled, button, column, container, radio, row, scroll, segmented, slider, spacer, stateful,
-    tabs, text, text_input, toggle,
+    Snapshot, Styled, button, column, container, provide, radio, row, scroll, segmented, slider,
+    spacer, stateful, stream_builder, tabs, text, text_input, toggle,
 };
-use dfui::{Animated, App, Color, Element, Font, PaintCx, Path, Rect, Shadow, Widget};
+use dfui::{
+    Animated, App, Color, Element, EventCx, Font, Handle, PaintCx, Path, Rect, Scope, Shadow,
+    Widget,
+};
+use futures_channel::mpsc;
 
 static BOLD: Font = Font(include_bytes!("../../assets/DejaVuSans-Bold.ttf"));
 
@@ -16,7 +20,20 @@ const MUTED: Color = Color::hex(0x6b7080);
 const ACCENT: Color = Color::hex(0x3b6fe0);
 const CHIPS: [u32; 5] = [0xe25c5c, 0xe0a23b, 0x4cae6e, 0x3b9ee0, 0x8a5ce2];
 
+/// The app owns external services and hands them to the UI through providers.
+#[derive(Default)]
 pub struct Demo {
+    jobs: Jobs,
+}
+
+impl App for Demo {
+    fn view(&self) -> Element {
+        provide(self.jobs.clone(), stateful(Screen::view)).into()
+    }
+}
+
+/// App-wide UI state, owned by the root `stateful`.
+struct Screen {
     count: i32,
     items: Vec<u32>,
     bench: bool,
@@ -24,9 +41,9 @@ pub struct Demo {
     tab: usize,
 }
 
-impl Default for Demo {
+impl Default for Screen {
     fn default() -> Self {
-        Demo {
+        Screen {
             count: 0,
             items: (1..=12).collect(),
             bench: false,
@@ -36,41 +53,26 @@ impl Default for Demo {
     }
 }
 
-#[derive(Clone)]
-pub enum Msg {
-    Inc,
-    Dec,
-    Add,
-    Remove(u32),
-    Bench,
-    Play,
-    Tab(usize),
+/// Handler that applies `f` to the state behind `h`.
+fn on<S: Default + 'static>(
+    h: Handle<S>,
+    f: impl Fn(&mut S) + Copy + 'static,
+) -> impl Fn(&mut EventCx) + 'static {
+    move |cx| cx.update(h, f)
 }
 
-impl App for Demo {
-    type Msg = Msg;
+const PAGES: [&str; 5] = ["Basics", "Controls", "Motion", "Cards", "Async"];
 
-    fn update(&mut self, msg: Msg) {
-        match msg {
-            Msg::Inc => self.count += 1,
-            Msg::Dec => self.count -= 1,
-            Msg::Add => self.items.push(self.items.last().map_or(1, |n| n + 1)),
-            Msg::Remove(n) => self.items.retain(|&i| i != n),
-            Msg::Bench => self.bench = !self.bench,
-            Msg::Play => self.playing = !self.playing,
-            Msg::Tab(i) => self.tab = i,
-        }
-    }
-
-    fn view(&self) -> Element<Msg> {
+impl Screen {
+    fn view(&self, h: Handle<Screen>) -> Element {
         if self.bench {
-            return bench();
+            return bench(h);
         }
         let header = row([
             text("dfui").font(BOLD).size(28.0).color(INK).into(),
             spacer().grow(1.0).into(),
             button(text("Bench").color(INK))
-                .on_press(Msg::Bench)
+                .on_click(on(h, |s| s.bench = true))
                 .color(Color::hex(0xe8e9ef))
                 .into(),
         ])
@@ -78,16 +80,17 @@ impl App for Demo {
         .gap(12.0);
 
         let page = match self.tab {
-            0 => self.basics(),
+            0 => self.basics(h),
             1 => controls(),
-            2 => self.motion(),
-            _ => self.cards(),
+            2 => self.motion(h),
+            3 => self.cards(h),
+            _ => jobs(),
         };
         column([
             header.into(),
             tabs(PAGES, self.tab)
                 .accent(ACCENT)
-                .on_change(|cx, i| cx.emit(Msg::Tab(i)))
+                .on_change(move |cx, i| cx.update(h, move |s: &mut Screen| s.tab = i))
                 .into(),
             // Keyed per page so each keeps its own scroll offset.
             Element::from(scroll(container(page).padding(4.0)).grow(1.0)).key(self.tab as u64),
@@ -97,12 +100,8 @@ impl App for Demo {
         .bg(BG)
         .into()
     }
-}
 
-const PAGES: [&str; 4] = ["Basics", "Controls", "Motion", "Cards"];
-
-impl Demo {
-    fn basics(&self) -> Element<Msg> {
+    fn basics(&self, h: Handle<Screen>) -> Element {
         let greeting = stateful(|name: &String, h| {
             let hi = if name.is_empty() {
                 "Hi!".into()
@@ -125,12 +124,12 @@ impl Demo {
 
         let counter = row([
             button(text("−").size(22.0).color(Color::WHITE))
-                .on_press(Msg::Dec)
+                .on_click(on(h, |s| s.count -= 1))
                 .width(64.0)
                 .into(),
             text(self.count.to_string()).size(22.0).color(INK).into(),
             button(text("+").size(22.0).color(Color::WHITE))
-                .on_press(Msg::Inc)
+                .on_click(on(h, |s| s.count += 1))
                 .width(64.0)
                 .into(),
         ])
@@ -160,7 +159,7 @@ impl Demo {
         .into()
     }
 
-    fn motion(&self) -> Element<Msg> {
+    fn motion(&self, h: Handle<Screen>) -> Element {
         let shapes = row([
             MorphShape {
                 playing: self.playing,
@@ -177,7 +176,7 @@ impl Demo {
             }
             .into(),
             button(text(if self.playing { "Pause" } else { "Resume" }).color(INK))
-                .on_press(Msg::Play)
+                .on_click(on(h, |s| s.playing = !s.playing))
                 .color(Color::hex(0xe8e9ef))
                 .width(96.0)
                 .into(),
@@ -209,19 +208,105 @@ impl Demo {
             .into()
     }
 
-    fn cards(&self) -> Element<Msg> {
+    fn cards(&self, h: Handle<Screen>) -> Element {
         let add = button(text("Add card").color(Color::WHITE))
-            .on_press(Msg::Add)
+            .on_click(on(h, |s| s.items.push(s.items.last().map_or(1, |n| n + 1))))
             .color(Color::hex(0x2f9e6a));
-        column(std::iter::once(add.into()).chain(self.items.iter().map(|&n| card(n).key(n as u64))))
-            .align(AlignItems::STRETCH)
-            .gap(12.0)
-            .into()
+        column(
+            std::iter::once(add.into()).chain(self.items.iter().map(|&n| card(n, h).key(n as u64))),
+        )
+        .align(AlignItems::STRETCH)
+        .gap(12.0)
+        .into()
     }
 }
 
+/// External state: a job runner the app owns. Each job runs on its own
+/// thread and reports entries over a channel, consumed as a `Stream`.
+// ponytail: OS threads, so not on wasm; a timer future would serve the web port.
+#[derive(Clone)]
+struct Jobs {
+    every: Duration,
+    entries: u32,
+}
+
+impl Default for Jobs {
+    fn default() -> Self {
+        Jobs {
+            every: Duration::from_millis(300),
+            entries: 20,
+        }
+    }
+}
+
+impl Jobs {
+    fn start(&self, run: u32) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded();
+        let (every, entries) = (self.every, self.entries);
+        std::thread::spawn(move || {
+            let t0 = Instant::now();
+            for i in 1..=entries {
+                std::thread::sleep(every);
+                let entry = format!(
+                    "Job {run} · entry {i} · {:.1} s",
+                    t0.elapsed().as_secs_f32()
+                );
+                // Fails once the list is gone, which ends the job.
+                if tx.unbounded_send(entry).is_err() {
+                    return;
+                }
+            }
+        });
+        rx
+    }
+}
+
+/// A background job streams entries into a list; restarting or leaving the
+/// page drops the stream, which stops the job.
+fn jobs() -> Element {
+    stateful(|&run: &u32, h| {
+        let start =
+            button(text(if run == 0 { "Start job" } else { "Restart job" }).color(Color::WHITE))
+                .on_click(on(h, |run: &mut u32| *run += 1));
+        let log: Element = if run == 0 {
+            text("A background thread sends an entry every 300 ms; a stream builder collects them.")
+                .size(15.0)
+                .color(MUTED)
+                .into()
+        } else {
+            stream_builder(
+                run,
+                move |scope: Scope| scope.get::<Jobs>().expect("Jobs is provided").start(run),
+                |snap: &Snapshot<Vec<String>>| {
+                    let n = snap.data.len();
+                    let status = if snap.done {
+                        format!("Done, {n} entries")
+                    } else {
+                        format!("Running… {n} entries")
+                    };
+                    let rows = snap.data.iter().rev().map(|e| {
+                        container(text(e).size(15.0).color(INK))
+                            .padding_xy(12.0, 8.0)
+                            .bg(Color::WHITE)
+                            .radius(8.0)
+                            .into()
+                    });
+                    column([
+                        text(status).size(14.0).color(MUTED).into(),
+                        scroll(column(rows).gap(6.0)).height(320.0).into(),
+                    ])
+                    .gap(8.0)
+                },
+            )
+            .into()
+        };
+        column([section("Background job", start.into()), log]).gap(16.0)
+    })
+    .into()
+}
+
 /// A titled group: muted heading over `body`.
-fn section(title: &str, body: Element<Msg>) -> Element<Msg> {
+fn section(title: &str, body: Element) -> Element {
     column([text(title).size(14.0).color(MUTED).into(), body])
         .gap(8.0)
         .fill_width()
@@ -229,14 +314,14 @@ fn section(title: &str, body: Element<Msg>) -> Element<Msg> {
 }
 
 /// Worst case for outline text: the screen filled with large glyphs, redrawn every frame.
-fn bench() -> Element<Msg> {
+fn bench(h: Handle<Screen>) -> Element {
     let lines = (0..14).map(|_| text("Rag&@ %g1 WM").size(64.0).color(INK).into());
     column(
         [row([
             FpsMeter.into(),
             spacer().grow(1.0).into(),
             button(text("Back").color(Color::WHITE))
-                .on_press(Msg::Bench)
+                .on_click(on(h, |s| s.bench = false))
                 .into(),
         ])
         .align(AlignItems::CENTER)
@@ -259,7 +344,7 @@ struct Fps {
 /// Live frame-rate readout; keeps the app redrawing while it's on screen.
 struct FpsMeter;
 
-impl<M> Widget<M> for FpsMeter {
+impl Widget for FpsMeter {
     fn style(&self) -> Style {
         Style {
             size: Size {
@@ -286,7 +371,7 @@ impl<M> Widget<M> for FpsMeter {
     }
 }
 
-impl<M: 'static> From<FpsMeter> for Element<M> {
+impl From<FpsMeter> for Element {
     fn from(w: FpsMeter) -> Self {
         Element::new(w)
     }
@@ -333,7 +418,7 @@ struct Pulse {
     playing: bool,
 }
 
-impl<M> Widget<M> for Pulse {
+impl Widget for Pulse {
     fn style(&self) -> Style {
         Style {
             size: Size {
@@ -364,7 +449,7 @@ impl<M> Widget<M> for Pulse {
     }
 }
 
-impl<M: 'static> From<Pulse> for Element<M> {
+impl From<Pulse> for Element {
     fn from(w: Pulse) -> Self {
         Element::new(w)
     }
@@ -386,7 +471,7 @@ struct MorphShape {
     shapes: Shapes,
 }
 
-impl<M> Widget<M> for MorphShape {
+impl Widget for MorphShape {
     fn style(&self) -> Style {
         Style {
             size: Size {
@@ -419,7 +504,7 @@ impl<M> Widget<M> for MorphShape {
     }
 }
 
-impl<M: 'static> From<MorphShape> for Element<M> {
+impl From<MorphShape> for Element {
     fn from(w: MorphShape) -> Self {
         Element::new(w)
     }
@@ -480,7 +565,7 @@ struct Zoom {
     playing: bool,
 }
 
-impl<M> Widget<M> for Zoom {
+impl Widget for Zoom {
     fn style(&self) -> Style {
         Style {
             size: Size {
@@ -521,7 +606,7 @@ impl<M> Widget<M> for Zoom {
     }
 }
 
-impl<M: 'static> From<Zoom> for Element<M> {
+impl From<Zoom> for Element {
     fn from(w: Zoom) -> Self {
         Element::new(w)
     }
@@ -536,7 +621,7 @@ struct Settings {
 }
 
 /// The simple controls; their values are local UI state.
-fn controls() -> Element<Msg> {
+fn controls() -> Element {
     stateful(|s: &Settings, h| {
         let label = |l: String| text(l).size(16.0).color(INK);
         let switches = column([
@@ -586,7 +671,7 @@ fn controls() -> Element<Msg> {
 }
 
 /// White rounded panel, like the cards.
-fn panel(body: Element<Msg>) -> Element<Msg> {
+fn panel(body: Element) -> Element {
     container(body)
         .padding(14.0)
         .bg(Color::WHITE)
@@ -596,7 +681,7 @@ fn panel(body: Element<Msg>) -> Element<Msg> {
 }
 
 /// Expanded/collapsed is ephemeral UI state, so it stays local to the card.
-fn card(n: u32) -> Element<Msg> {
+fn card(n: u32, root: Handle<Screen>) -> Element {
     stateful(move |&open: &bool, h| {
         let mut body = vec![text(format!("Card {n}")).size(18.0).color(INK).into()];
         if open {
@@ -623,7 +708,7 @@ fn card(n: u32) -> Element<Msg> {
                 .color(Color::hex(0xe8e9ef))
                 .into(),
             button(text("×").size(20.0).color(INK))
-                .on_press(Msg::Remove(n))
+                .on_click(on(root, move |s| s.items.retain(|&i| i != n)))
                 .color(Color::hex(0xe8e9ef))
                 .into(),
         ])
@@ -689,9 +774,7 @@ mod tests {
     struct Ladder;
 
     impl dfui::App for Ladder {
-        type Msg = ();
-        fn update(&mut self, _: ()) {}
-        fn view(&self) -> dfui::Element<()> {
+        fn view(&self) -> dfui::Element {
             use dfui::widgets::{Styled, column, text};
 
             column([10.0, 13.0, 18.0, 32.0, 64.0, 240.0].map(|s| text("Rag&@ %g1").size(s).into()))

@@ -8,7 +8,7 @@ use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
-type OnChange<Msg> = Box<dyn Fn(&mut EventCx<Msg>, bool)>;
+type OnChange = Box<dyn Fn(&mut EventCx, bool)>;
 
 const SLIDE: Duration = Duration::from_millis(160);
 const OFF: Color = Color::hex(0xc9ccd6);
@@ -21,14 +21,14 @@ struct ToggleState {
 }
 
 /// Controlled on/off switch: shows `on`, reports taps via `on_change`.
-pub struct Toggle<Msg> {
+pub struct Toggle {
     on: bool,
     accent: Color,
-    on_change: Option<OnChange<Msg>>,
+    on_change: Option<OnChange>,
     style: Style,
 }
 
-pub fn toggle<Msg>(on: bool) -> Toggle<Msg> {
+pub fn toggle(on: bool) -> Toggle {
     Toggle {
         on,
         accent: Color::hex(0x3b6fe0),
@@ -44,9 +44,9 @@ pub fn toggle<Msg>(on: bool) -> Toggle<Msg> {
     }
 }
 
-impl<Msg> Toggle<Msg> {
+impl Toggle {
     /// Called with the flipped value.
-    pub fn on_change(mut self, f: impl Fn(&mut EventCx<Msg>, bool) + 'static) -> Self {
+    pub fn on_change(mut self, f: impl Fn(&mut EventCx, bool) + 'static) -> Self {
         self.on_change = Some(Box::new(f));
         self
     }
@@ -56,19 +56,19 @@ impl<Msg> Toggle<Msg> {
     }
 }
 
-impl<Msg: 'static> From<Toggle<Msg>> for Element<Msg> {
-    fn from(w: Toggle<Msg>) -> Self {
+impl From<Toggle> for Element {
+    fn from(w: Toggle) -> Self {
         Element::new(w)
     }
 }
 
-impl<Msg> Styled for Toggle<Msg> {
+impl Styled for Toggle {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
     }
 }
 
-impl<Msg> Widget<Msg> for Toggle<Msg> {
+impl Widget for Toggle {
     fn style(&self) -> Style {
         self.style.clone()
     }
@@ -92,7 +92,7 @@ impl<Msg> Widget<Msg> for Toggle<Msg> {
         cx.shadow(thumb, d / 2.0, sh);
         cx.fill(thumb, d / 2.0, Color::WHITE);
     }
-    fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
         let mut tap = std::mem::take(&mut cx.state.get::<ToggleState>().tap);
         let fire = tap.event(ev, cx);
         cx.state.get::<ToggleState>().tap = tap;

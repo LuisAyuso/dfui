@@ -7,9 +7,9 @@ use taffy::{AlignItems, Dimension, JustifyContent, LengthPercentage, Style};
 use super::{Styled, container, text};
 use crate::anim::{Animated, ease};
 use crate::render::{Color, Rect, Shadow};
-use crate::widget::{Element, Event, EventCx, PaintCx, State, Widget};
+use crate::widget::{BuildCx, Element, Event, EventCx, PaintCx, Widget};
 
-type OnChange<Msg> = Box<dyn Fn(&mut EventCx<Msg>, usize)>;
+type OnChange = Box<dyn Fn(&mut EventCx, usize)>;
 
 const SLIDE: Duration = Duration::from_millis(200);
 const INK: Color = Color::hex(0x1d2030);
@@ -32,21 +32,21 @@ struct SegState {
 }
 
 /// A row of equal-width options with a sliding indicator under `selected`.
-pub struct Segmented<Msg> {
+pub struct Segmented {
     labels: Vec<String>,
     selected: usize,
     look: Look,
     accent: Color,
-    on_change: Option<OnChange<Msg>>,
-    children: OnceCell<Vec<Element<Msg>>>,
+    on_change: Option<OnChange>,
+    children: OnceCell<Vec<Element>>,
     style: Style,
 }
 
 /// Pill-shaped segmented button.
-pub fn segmented<Msg, S: Into<String>>(
+pub fn segmented<S: Into<String>>(
     labels: impl IntoIterator<Item = S>,
     selected: usize,
-) -> Segmented<Msg> {
+) -> Segmented {
     Segmented {
         labels: labels.into_iter().map(Into::into).collect(),
         selected,
@@ -62,10 +62,7 @@ pub fn segmented<Msg, S: Into<String>>(
 }
 
 /// Tab bar with an underline; the app shows the selected tab's content.
-pub fn tabs<Msg, S: Into<String>>(
-    labels: impl IntoIterator<Item = S>,
-    selected: usize,
-) -> Segmented<Msg> {
+pub fn tabs<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Segmented {
     Segmented {
         look: Look::Tabs,
         style: Style::default(),
@@ -73,9 +70,9 @@ pub fn tabs<Msg, S: Into<String>>(
     }
 }
 
-impl<Msg> Segmented<Msg> {
+impl Segmented {
     /// Called with the tapped option's index when it isn't already selected.
-    pub fn on_change(mut self, f: impl Fn(&mut EventCx<Msg>, usize) + 'static) -> Self {
+    pub fn on_change(mut self, f: impl Fn(&mut EventCx, usize) + 'static) -> Self {
         self.on_change = Some(Box::new(f));
         self
     }
@@ -104,23 +101,23 @@ impl<Msg> Segmented<Msg> {
     }
 }
 
-impl<Msg: 'static> From<Segmented<Msg>> for Element<Msg> {
-    fn from(w: Segmented<Msg>) -> Self {
+impl From<Segmented> for Element {
+    fn from(w: Segmented) -> Self {
         Element::new(w)
     }
 }
 
-impl<Msg> Styled for Segmented<Msg> {
+impl Styled for Segmented {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
     }
 }
 
-impl<Msg: 'static> Widget<Msg> for Segmented<Msg> {
+impl Widget for Segmented {
     fn style(&self) -> Style {
         self.style.clone()
     }
-    fn expand(&self, _id: u64, _state: &mut State) {
+    fn expand(&self, _cx: &mut BuildCx) {
         self.children.get_or_init(|| {
             let pad = if self.look == Look::Tabs { 12.0 } else { 7.0 };
             self.labels
@@ -144,7 +141,7 @@ impl<Msg: 'static> Widget<Msg> for Segmented<Msg> {
                 .collect()
         });
     }
-    fn children(&self) -> &[Element<Msg>] {
+    fn children(&self) -> &[Element] {
         self.children.get().map_or(&[], |c| c.as_slice())
     }
     fn paint(&self, cx: &mut PaintCx) {
@@ -175,7 +172,7 @@ impl<Msg: 'static> Widget<Msg> for Segmented<Msg> {
             }
         }
     }
-    fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
         let r = cx.rect;
         match *ev {
             Event::PointerDown { x, y } if cx.hit(x, y) => {

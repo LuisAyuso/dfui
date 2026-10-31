@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::task::Waker;
 use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
@@ -13,15 +14,20 @@ use crate::layout::{Insets, Layout, Measured, Placed, flatten, place, walk};
 use crate::render::{
     Color, Offscreen, Outcome, Rect, Renderer, Scene, Spans, damage, render_offscreen,
 };
+use crate::task::{self, LoopWaker, Tasks};
 use crate::text::Text;
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
 
 pub(crate) struct Runtime<A: App> {
     app: A,
-    root: Element<A::Msg>,
+    root: Element,
     /// Pre-order ids of `root`, so frames that keep the tree skip `flatten`.
     ids: Vec<u64>,
     states: HashMap<u64, State>,
+    tasks: Tasks,
+    /// Wakes the event loop when a task can progress; a no-op without one.
+    waker: Waker,
+    loop_waker: Option<Arc<LoopWaker>>,
     text: Text,
     layout: Layout,
     /// Taffy's last result; reused until the tree or viewport changes.
@@ -93,12 +99,16 @@ impl<A: App> Runtime<A> {
     pub fn new(app: A) -> Self {
         let root = app.view();
         let mut states = HashMap::new();
-        let ids = flat_ids(&root, &mut states);
+        let mut tasks = Tasks::new();
+        let ids = flat_ids(&root, &mut states, &mut tasks);
         Runtime {
             app,
             root,
             ids,
             states,
+            tasks,
+            waker: Waker::noop().clone(),
+            loop_waker: None,
             text: Text::default(),
             layout: Layout::default(),
             measured: Vec::new(),
@@ -126,6 +136,10 @@ impl<A: App> Runtime<A> {
     }
 
     pub fn run(mut self, event_loop: EventLoop<()>) {
+        let w = LoopWaker::new(event_loop.create_proxy());
+        self.waker = w.clone().into();
+        self.loop_waker = Some(w);
+        self.drive();
         event_loop.run_app(&mut self).expect("event loop");
     }
 
@@ -140,9 +154,32 @@ impl<A: App> Runtime<A> {
     }
 
     /// The only way `root` changes, so `ids` always matches it.
-    fn set_root(&mut self, root: Element<A::Msg>) {
+    fn set_root(&mut self, root: Element) {
         self.root = root;
-        self.ids = flat_ids(&self.root, &mut self.states);
+        self.ids = flat_ids(&self.root, &mut self.states, &mut self.tasks);
+    }
+
+    /// Rebuilds the tree from `view`, dropping state and tasks of removed nodes.
+    // ponytail: any change rebuilds the whole tree; rebuild only dirty subtrees if views get expensive.
+    fn rebuild(&mut self) {
+        self.set_root(self.app.view());
+        let live: std::collections::HashSet<u64> = self.ids.iter().copied().collect();
+        self.states.retain(|id, _| live.contains(id));
+        self.tasks.retain(|id, _| live.contains(id));
+        if self.focused.is_some_and(|id| !live.contains(&id)) {
+            self.set_focus(None);
+        }
+    }
+
+    /// Polls tasks, rebuilding while they change state (new tasks start in a
+    /// rebuild and get polled too). Returns whether anything changed.
+    fn drive(&mut self) -> bool {
+        let mut changed = false;
+        while task::poll(&mut self.tasks, &mut self.states, &self.waker) {
+            self.rebuild();
+            changed = true;
+        }
+        changed
     }
 
     fn relayout(&mut self) {
@@ -196,7 +233,6 @@ impl<A: App> Runtime<A> {
         if nodes.len() != self.placed.len() {
             return;
         }
-        let mut msgs = Vec::new();
         let mut updates = Vec::new();
         let mut copied = None;
         let mut redraw = false;
@@ -223,7 +259,6 @@ impl<A: App> Runtime<A> {
                 shift: self.mods.shift_key(),
                 state: states.entry(n.id).or_default(),
                 text: &self.text,
-                msgs: &mut msgs,
                 updates: &mut updates,
                 copied: &mut copied,
                 capture: false,
@@ -263,21 +298,13 @@ impl<A: App> Runtime<A> {
             redraw |= self.set_focus(focus);
         }
 
-        let rebuild = !msgs.is_empty() || !updates.is_empty();
+        let rebuild = !updates.is_empty();
         if rebuild {
             for (id, f) in updates {
                 f(self.states.entry(id).or_default());
             }
-            for m in msgs {
-                self.app.update(m);
-            }
-            // ponytail: any update rebuilds the whole tree; rebuild only dirty stateful subtrees if views get expensive.
-            self.set_root(self.app.view());
-            let live: std::collections::HashSet<u64> = self.ids.iter().copied().collect();
-            self.states.retain(|id, _| live.contains(id));
-            if self.focused.is_some_and(|id| !live.contains(&id)) {
-                self.set_focus(None);
-            }
+            self.rebuild();
+            self.drive();
         }
         if rebuild {
             self.redraw();
@@ -434,8 +461,8 @@ impl Clipboard {
     }
 }
 
-fn flat_ids<Msg>(root: &Element<Msg>, states: &mut HashMap<u64, State>) -> Vec<u64> {
-    flatten(root, states).iter().map(|n| n.id).collect()
+fn flat_ids(root: &Element, states: &mut HashMap<u64, State>, tasks: &mut Tasks) -> Vec<u64> {
+    flatten(root, states, tasks).iter().map(|n| n.id).collect()
 }
 
 /// CPU side of frames for benchmarks: rebuild, layout, paint and damage diff,
@@ -461,9 +488,9 @@ impl<A: App> Bench<A> {
         self.paint()
     }
 
-    /// Applies `msg`, then one full CPU frame.
-    pub fn update(&mut self, msg: A::Msg) -> usize {
-        self.0.app.update(msg);
+    /// Changes the app, then one full CPU frame.
+    pub fn update(&mut self, f: impl FnOnce(&mut A)) -> usize {
+        f(&mut self.0.app);
         self.frame()
     }
 
@@ -551,6 +578,15 @@ impl<A: App> ApplicationHandler for Runtime<A> {
         self.renderer = Some(Renderer::new(instance, window));
         self.update_insets();
         self.redraw();
+    }
+
+    fn user_event(&mut self, _: &ActiveEventLoop, (): ()) {
+        if let Some(w) = &self.loop_waker {
+            w.clear();
+        }
+        if self.drive() {
+            self.redraw();
+        }
     }
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
@@ -692,23 +728,40 @@ impl<A: App> ApplicationHandler for Runtime<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
+
+    use crate::widget::Scope;
     use crate::widgets::{
-        Styled, button, column, radio, scroll, segmented, slider, stateful, text, text_input,
-        toggle,
+        Snapshot, Styled, button, column, future_builder, provide, radio, scroll, segmented,
+        slider, stateful, stream_builder, text, text_input, toggle,
     };
 
-    struct Counter(i32);
+    /// State of the root `stateful`.
+    fn root<S: Default + 'static, A: App>(rt: &mut Runtime<A>) -> &mut S {
+        let id = rt.ids[0];
+        rt.states.get_mut(&id).unwrap().get::<S>()
+    }
+
+    #[derive(Default)]
+    struct Counter {
+        dark: Cell<bool>,
+    }
 
     impl App for Counter {
-        type Msg = i32;
-        fn update(&mut self, d: i32) {
-            self.0 += d;
-        }
-        fn view(&self) -> Element<i32> {
-            column([button(text("+")).on_press(1).height(40.0).into()]).into()
+        fn view(&self) -> Element {
+            stateful(|_: &i32, h| {
+                button(text("+"))
+                    .on_click(move |cx| cx.update(h, |n: &mut i32| *n += 1))
+                    .height(40.0)
+            })
+            .into()
         }
         fn background(&self) -> Color {
-            if self.0 > 0 {
+            if self.dark.get() {
                 Color::BLACK
             } else {
                 Color::WHITE
@@ -717,77 +770,43 @@ mod tests {
     }
 
     #[test]
-    fn button_click_emits_msg_only_when_released_inside() {
-        let mut rt = Runtime::new(Counter(0));
+    fn button_click_updates_only_when_released_inside() {
+        let mut rt = Runtime::new(Counter::default());
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
         rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
-        assert_eq!(rt.app.0, 1);
+        assert_eq!(*root::<i32, _>(&mut rt), 1);
         rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
         rt.dispatch(Event::PointerUp { x: 10.0, y: 100.0 });
-        assert_eq!(rt.app.0, 1);
+        assert_eq!(*root::<i32, _>(&mut rt), 1);
         rt.dispatch(Event::PointerDown { x: 10.0, y: 100.0 });
         rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
-        assert_eq!(rt.app.0, 1);
+        assert_eq!(*root::<i32, _>(&mut rt), 1);
     }
 
-    struct Local(i32);
+    struct Field;
 
-    impl App for Local {
-        type Msg = i32;
-        fn update(&mut self, d: i32) {
-            self.0 += d;
-        }
-        fn view(&self) -> Element<i32> {
-            stateful(|n: &i32, h| {
-                button(text(format!("{n}")))
-                    .on_click(move |cx| {
-                        cx.update(h, |n: &mut i32| *n += 1);
-                        cx.emit(10);
-                    })
-                    .height(40.0)
+    impl App for Field {
+        fn view(&self) -> Element {
+            stateful(|v: &String, h| {
+                text_input(v.clone()).on_change(move |cx, v| cx.update(h, |s: &mut String| *s = v))
             })
             .into()
         }
     }
 
-    #[test]
-    fn stateful_update_survives_rebuild_alongside_msgs() {
-        let mut rt = Runtime::new(Local(0));
-        rt.viewport = (200.0, 200.0);
-        rt.relayout();
-        for _ in 0..2 {
-            rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
-            rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
-        }
-        assert_eq!(rt.app.0, 20);
-        let id = rt.ids[0];
-        assert_eq!(*rt.states.get_mut(&id).unwrap().get::<i32>(), 2);
-    }
-
-    struct Field(String);
-
-    impl App for Field {
-        type Msg = String;
-        fn update(&mut self, v: String) {
-            self.0 = v;
-        }
-        fn view(&self) -> Element<String> {
-            column([text_input(self.0.clone())
-                .on_change(|cx, v| cx.emit(v))
-                .into()])
-            .into()
-        }
+    fn field(rt: &mut Runtime<Field>) -> String {
+        root::<String, _>(rt).clone()
     }
 
     #[test]
     fn text_input_edits_only_while_focused() {
-        let mut rt = Runtime::new(Field(String::new()));
+        let mut rt = Runtime::new(Field);
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         rt.dispatch(Event::Text("x".into()));
-        assert_eq!(rt.app.0, "");
+        assert_eq!(field(&mut rt), "");
 
         rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
         rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
@@ -802,11 +821,11 @@ mod tests {
         ] {
             rt.dispatch(ev);
         }
-        assert_eq!(rt.app.0, "X");
+        assert_eq!(field(&mut rt), "X");
 
         rt.dispatch(Event::PointerDown { x: 10.0, y: 190.0 });
         rt.dispatch(Event::Text("z".into()));
-        assert_eq!(rt.app.0, "X");
+        assert_eq!(field(&mut rt), "X");
     }
 
     fn damage_after<A: App>(
@@ -829,7 +848,7 @@ mod tests {
 
     #[test]
     fn interactions_damage_only_the_widget() {
-        let mut rt = Runtime::new(Counter(0));
+        let mut rt = Runtime::new(Counter::default());
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         let hover = damage_after(&mut rt, [Event::PointerMove { x: 10.0, y: 10.0 }]).unwrap();
@@ -840,7 +859,7 @@ mod tests {
             None
         );
 
-        let mut rt = Runtime::new(Field(String::new()));
+        let mut rt = Runtime::new(Field);
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
@@ -854,21 +873,20 @@ mod tests {
 
     #[test]
     fn background_change_damages_everything() {
-        let mut rt = Runtime::new(Counter(0));
+        let mut rt = Runtime::new(Counter::default());
         rt.viewport = (200.0, 200.0);
         rt.relayout();
-        let click = [
-            Event::PointerDown { x: 10.0, y: 10.0 },
-            Event::PointerUp { x: 10.0, y: 10.0 },
-        ];
-        let d = damage_after(&mut rt, click).unwrap();
+        let (a, na) = rt.scene(&mut false);
+        rt.app.dark.set(true);
+        let (b, nb) = rt.scene(&mut false);
+        let d = damage(&a, &na, &b, &nb).unwrap();
         assert!(d.w >= 200.0 && d.h >= 200.0, "{d:?}");
     }
 
     #[test]
     #[ignore = "needs a GPU"]
     fn new_device_gets_outlines_already_uploaded_elsewhere() {
-        let mut rt = Runtime::new(Counter(0));
+        let mut rt = Runtime::new(Counter::default());
         rt.viewport = (40.0, 40.0);
         rt.relayout();
         let (scene, _) = rt.scene(&mut false);
@@ -886,103 +904,107 @@ mod tests {
         seg: usize,
     }
 
-    #[derive(Clone)]
-    enum Ctl {
-        On(bool),
-        Level(f32),
-        Pick,
-        Seg(usize),
-    }
+    struct ControlsApp;
 
-    impl App for Controls {
-        type Msg = Ctl;
-        fn update(&mut self, m: Ctl) {
-            match m {
-                Ctl::On(b) => self.on = b,
-                Ctl::Level(v) => self.level = v,
-                Ctl::Pick => self.picked = true,
-                Ctl::Seg(i) => self.seg = i,
-            }
-        }
-        fn view(&self) -> Element<Ctl> {
-            column([
-                toggle(self.on)
-                    .on_change(|cx, b| cx.emit(Ctl::On(b)))
-                    .into(),
-                slider(self.level, 0.0..=10.0)
-                    .on_change(|cx, v| cx.emit(Ctl::Level(v)))
-                    .width(122.0)
-                    .into(),
-                radio(self.picked, text("pick"))
-                    .on_select(|cx| cx.emit(Ctl::Pick))
-                    .into(),
-                segmented(["a", "b", "c"], self.seg)
-                    .on_change(|cx, i| cx.emit(Ctl::Seg(i)))
-                    .width(150.0)
-                    .into(),
-            ])
-            .align(taffy::AlignItems::START)
+    impl App for ControlsApp {
+        fn view(&self) -> Element {
+            stateful(|s: &Controls, h| {
+                column([
+                    toggle(s.on)
+                        .on_change(move |cx, b| cx.update(h, move |s: &mut Controls| s.on = b))
+                        .into(),
+                    slider(s.level, 0.0..=10.0)
+                        .on_change(move |cx, v| cx.update(h, move |s: &mut Controls| s.level = v))
+                        .width(122.0)
+                        .into(),
+                    radio(s.picked, text("pick"))
+                        .on_select(move |cx| cx.update(h, |s: &mut Controls| s.picked = true))
+                        .into(),
+                    segmented(["a", "b", "c"], s.seg)
+                        .on_change(move |cx, i| cx.update(h, move |s: &mut Controls| s.seg = i))
+                        .width(150.0)
+                        .into(),
+                ])
+                .align(taffy::AlignItems::START)
+            })
             .into()
         }
     }
 
     #[test]
     fn controls_report_taps_and_drags() {
-        let mut rt = Runtime::new(Controls::default());
+        let mut rt = Runtime::new(ControlsApp);
         rt.viewport = (300.0, 400.0);
         rt.relayout();
-        let center = |rt: &Runtime<Controls>, i: usize| {
+        let center = |rt: &Runtime<ControlsApp>, i: usize| {
             let r = rt.placed[i].rect;
             (r.x + r.w / 2.0, r.y + r.h / 2.0)
         };
-        let tap = |rt: &mut Runtime<Controls>, (x, y): (f32, f32)| {
+        let tap = |rt: &mut Runtime<ControlsApp>, (x, y): (f32, f32)| {
             rt.dispatch(Event::PointerDown { x, y });
             rt.dispatch(Event::PointerUp { x, y });
         };
-        // Pre-order: column, toggle, slider, radio, its label, segmented.
-        let p = center(&rt, 1);
+        // Pre-order: stateful, column, toggle, slider, radio, its label, segmented.
+        let p = center(&rt, 2);
         tap(&mut rt, p);
-        assert!(rt.app.on);
+        assert!(root::<Controls, _>(&mut rt).on);
         tap(&mut rt, p);
-        assert!(!rt.app.on);
+        assert!(!root::<Controls, _>(&mut rt).on);
 
         // 122px wide with a 22px thumb: 100px of travel from x = 11.
-        let (_, y) = center(&rt, 2);
+        let (_, y) = center(&rt, 3);
         rt.dispatch(Event::PointerDown { x: 61.0, y });
-        assert_eq!(rt.app.level, 5.0, "tap jumps to the middle");
+        assert_eq!(
+            root::<Controls, _>(&mut rt).level,
+            5.0,
+            "tap jumps to the middle"
+        );
         rt.dispatch(Event::PointerMove {
             x: 81.0,
             y: y + 300.0,
         });
-        assert_eq!(rt.app.level, 7.0, "captured drag follows x only");
+        assert_eq!(
+            root::<Controls, _>(&mut rt).level,
+            7.0,
+            "captured drag follows x only"
+        );
         rt.dispatch(Event::PointerMove { x: 500.0, y });
         rt.dispatch(Event::PointerUp { x: 500.0, y });
-        assert_eq!(rt.app.level, 10.0, "clamped to the range");
+        assert_eq!(
+            root::<Controls, _>(&mut rt).level,
+            10.0,
+            "clamped to the range"
+        );
         rt.dispatch(Event::PointerMove { x: 11.0, y });
-        assert_eq!(rt.app.level, 10.0, "released");
+        assert_eq!(root::<Controls, _>(&mut rt).level, 10.0, "released");
 
-        let p = center(&rt, 4);
+        let p = center(&rt, 5);
         tap(&mut rt, p);
-        assert!(rt.app.picked, "the label is part of the target");
+        assert!(
+            root::<Controls, _>(&mut rt).picked,
+            "the label is part of the target"
+        );
 
-        let seg = rt.placed[5].rect;
+        let seg = rt.placed[6].rect;
         let y = seg.y + seg.h / 2.0;
         tap(&mut rt, (seg.x + seg.w - 5.0, y));
-        assert_eq!(rt.app.seg, 2);
+        assert_eq!(root::<Controls, _>(&mut rt).seg, 2);
         rt.dispatch(Event::PointerDown { x: seg.x + 5.0, y });
         rt.dispatch(Event::PointerUp {
             x: seg.x + seg.w / 2.0,
             y,
         });
-        assert_eq!(rt.app.seg, 2, "released over another option");
+        assert_eq!(
+            root::<Controls, _>(&mut rt).seg,
+            2,
+            "released over another option"
+        );
     }
 
     struct Long;
 
     impl App for Long {
-        type Msg = ();
-        fn update(&mut self, _: ()) {}
-        fn view(&self) -> Element<()> {
+        fn view(&self) -> Element {
             let rows = (0..10).map(|_| column([]).height(50.0).into());
             column([scroll(column(rows)).grow(1.0).into()]).into()
         }
@@ -1012,7 +1034,7 @@ mod tests {
 
     #[test]
     fn transitions_request_frames_until_settled() {
-        let mut rt = Runtime::new(Counter(0));
+        let mut rt = Runtime::new(Counter::default());
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         let t = Instant::now();
@@ -1031,7 +1053,7 @@ mod tests {
 
     #[test]
     fn caret_moves_and_deletes_whole_graphemes() {
-        let mut rt = Runtime::new(Field(String::new()));
+        let mut rt = Runtime::new(Field);
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
@@ -1046,18 +1068,18 @@ mod tests {
         // Left twice from the end skips "b", then the whole flag.
         keys(&mut rt, &[Key::Left, Key::Left]);
         rt.dispatch(Event::Text("|".into()));
-        assert_eq!(rt.app.0, "ae\u{301}|\u{1f1ea}\u{1f1f8}b");
+        assert_eq!(field(&mut rt), "ae\u{301}|\u{1f1ea}\u{1f1f8}b");
         // Backspace removes "|", then "e" together with its accent.
         keys(&mut rt, &[Key::Backspace, Key::Backspace]);
-        assert_eq!(rt.app.0, "a\u{1f1ea}\u{1f1f8}b");
+        assert_eq!(field(&mut rt), "a\u{1f1ea}\u{1f1f8}b");
         // Delete removes the whole flag.
         keys(&mut rt, &[Key::Delete]);
-        assert_eq!(rt.app.0, "ab");
+        assert_eq!(field(&mut rt), "ab");
     }
 
     #[test]
     fn selection_extends_with_shift_and_is_replaced_by_edits() {
-        let mut rt = Runtime::new(Field(String::new()));
+        let mut rt = Runtime::new(Field);
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
@@ -1070,30 +1092,30 @@ mod tests {
         }
         rt.mods = ModifiersState::empty();
         rt.dispatch(Event::Text("there".into()));
-        assert_eq!(rt.app.0, "hello there");
+        assert_eq!(field(&mut rt), "hello there");
         // Shift+Home selects back to the start; Left collapses to it.
         rt.mods = ModifiersState::SHIFT;
         rt.dispatch(Event::Key(Key::Home));
         rt.mods = ModifiersState::empty();
         rt.dispatch(Event::Key(Key::Left));
         rt.dispatch(Event::Text(">".into()));
-        assert_eq!(rt.app.0, ">hello there");
+        assert_eq!(field(&mut rt), ">hello there");
         // Select all, then Backspace clears it.
         rt.dispatch(Event::Key(Key::SelectAll));
         rt.dispatch(Event::Key(Key::Backspace));
-        assert_eq!(rt.app.0, "");
+        assert_eq!(field(&mut rt), "");
         // Dragging from the start of new text selects it.
         rt.dispatch(Event::Text("drag".into()));
         rt.dispatch(Event::PointerDown { x: 0.0, y: 10.0 });
         rt.dispatch(Event::PointerMove { x: 190.0, y: 10.0 });
         rt.dispatch(Event::PointerUp { x: 190.0, y: 10.0 });
         rt.dispatch(Event::Text("x".into()));
-        assert_eq!(rt.app.0, "x");
+        assert_eq!(field(&mut rt), "x");
     }
 
     #[test]
     fn copy_and_cut_take_the_selection() {
-        let mut rt = Runtime::new(Field(String::new()));
+        let mut rt = Runtime::new(Field);
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
@@ -1108,16 +1130,16 @@ mod tests {
         rt.mods = ModifiersState::empty();
         rt.dispatch(Event::Key(Key::Cut));
         assert_eq!(rt.clipboard.get().as_deref(), Some("wörld"));
-        assert_eq!(rt.app.0, "héllo ");
+        assert_eq!(field(&mut rt), "héllo ");
         rt.dispatch(Event::Key(Key::SelectAll));
         rt.dispatch(Event::Key(Key::Copy));
         assert_eq!(rt.clipboard.get().as_deref(), Some("héllo "));
-        assert_eq!(rt.app.0, "héllo ");
+        assert_eq!(field(&mut rt), "héllo ");
     }
 
     #[test]
     fn caret_blinks_on_timed_wakeups() {
-        let mut rt = Runtime::new(Field(String::new()));
+        let mut rt = Runtime::new(Field);
         rt.viewport = (200.0, 200.0);
         rt.relayout();
         let t = Instant::now();
@@ -1189,5 +1211,101 @@ mod tests {
         rt.dispatch(Event::PointerUp { x: 50.0, y: 100.0 });
         assert!(!paint_at(3300, &mut rt));
         assert_eq!(offset(&rt), 250.0);
+    }
+
+    /// A stream fed by hand: items queued, then closed.
+    #[derive(Clone, Default)]
+    struct Queue(Rc<RefCell<(VecDeque<u32>, bool)>>);
+
+    impl futures_core::Stream for Queue {
+        type Item = u32;
+        fn poll_next(self: Pin<&mut Self>, _: &mut Context) -> Poll<Option<u32>> {
+            let mut q = self.0.borrow_mut();
+            match q.0.pop_front() {
+                Some(v) => Poll::Ready(Some(v)),
+                None if q.1 => Poll::Ready(None),
+                None => Poll::Pending,
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct Feed {
+        queue: Queue,
+        run: Cell<u32>,
+        hidden: Cell<bool>,
+    }
+
+    impl App for Feed {
+        fn view(&self) -> Element {
+            if self.hidden.get() {
+                return column([]).into();
+            }
+            let feed = stream_builder(
+                self.run.get(),
+                |s: Scope| s.get::<Queue>().unwrap().clone(),
+                |snap: &Snapshot<Vec<u32>>| text(format!("{:?}", snap.data)),
+            );
+            provide(self.queue.clone(), feed).into()
+        }
+    }
+
+    fn snap(rt: &mut Runtime<Feed>) -> (Vec<u32>, bool) {
+        let id = rt.ids[1];
+        let s = rt.states.get_mut(&id).unwrap().get::<Snapshot<Vec<u32>>>();
+        (s.data.clone(), s.done)
+    }
+
+    #[test]
+    fn stream_builder_collects_restarts_and_cancels() {
+        let mut rt = Runtime::new(Feed::default());
+        assert!(!rt.drive(), "nothing queued yet");
+        rt.app.queue.0.borrow_mut().0.extend([1, 2]);
+        assert!(rt.drive());
+        assert_eq!(snap(&mut rt), (vec![1, 2], false));
+
+        rt.app.run.set(1);
+        rt.rebuild();
+        assert_eq!(snap(&mut rt), (vec![], false), "new deps start fresh");
+        rt.app.queue.0.borrow_mut().0.push_back(3);
+        rt.app.queue.0.borrow_mut().1 = true;
+        assert!(rt.drive());
+        assert_eq!(snap(&mut rt), (vec![3], true));
+        rt.rebuild();
+        assert!(!rt.drive(), "a finished stream isn't restarted");
+
+        rt.app.hidden.set(true);
+        rt.rebuild();
+        assert!(rt.tasks.is_empty());
+        assert_eq!(Rc::strong_count(&rt.app.queue.0), 1, "stream dropped");
+    }
+
+    struct Answer;
+
+    impl App for Answer {
+        fn view(&self) -> Element {
+            let answer = future_builder(
+                (),
+                |s: Scope| {
+                    let x = *s.get::<u32>().unwrap();
+                    async move { x * 2 }
+                },
+                |snap: &Snapshot<Option<u32>>| text(format!("{:?}", snap.data)),
+            );
+            provide(21u32, answer).into()
+        }
+    }
+
+    #[test]
+    fn future_builder_reads_providers_and_resolves() {
+        let mut rt = Runtime::new(Answer);
+        assert!(rt.drive());
+        let id = rt.ids[1];
+        let s = rt
+            .states
+            .get_mut(&id)
+            .unwrap()
+            .get::<Snapshot<Option<u32>>>();
+        assert_eq!((s.data, s.done), (Some(42), true));
     }
 }

@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::Instant;
@@ -8,11 +9,12 @@ use taffy::{
 };
 
 use crate::render::Rect;
+use crate::task::Tasks;
 use crate::text::Text;
-use crate::widget::{Element, State, Widget};
+use crate::widget::{BuildCx, Element, Scope, State, Widget};
 
-pub(crate) struct Node<'a, Msg> {
-    pub w: &'a dyn Widget<Msg>,
+pub(crate) struct Node<'a> {
+    pub w: &'a dyn Widget,
     pub id: u64,
     pub parent: Option<usize>,
     /// One past the last descendant in pre-order.
@@ -34,50 +36,61 @@ pub(crate) struct Placed {
     pub content: Size<f32>,
 }
 
-/// Pre-order flattening of the element tree, expanding stateful widgets.
-pub(crate) fn flatten<'a, Msg>(
-    root: &'a Element<Msg>,
+/// Pre-order flattening of the element tree, expanding stateful widgets and
+/// starting or keeping their tasks.
+pub(crate) fn flatten<'a>(
+    root: &'a Element,
     states: &mut HashMap<u64, State>,
-) -> Vec<Node<'a, Msg>> {
-    fn go<'a, Msg>(
-        e: &'a Element<Msg>,
-        parent: Option<usize>,
-        slot: u64,
-        states: &mut HashMap<u64, State>,
-        out: &mut Vec<Node<'a, Msg>>,
-    ) {
+    tasks: &mut Tasks,
+) -> Vec<Node<'a>> {
+    struct Cx<'s, 'a> {
+        states: &'s mut HashMap<u64, State>,
+        tasks: &'s mut Tasks,
+        provided: Vec<&'a dyn Any>,
+        out: Vec<Node<'a>>,
+    }
+    fn go<'a>(e: &'a Element, parent: Option<usize>, slot: u64, cx: &mut Cx<'_, 'a>) {
         let mut h = DefaultHasher::new();
-        parent.map(|p| out[p].id).hash(&mut h);
+        parent.map(|p| cx.out[p].id).hash(&mut h);
         e.key.is_some().hash(&mut h);
         e.key.unwrap_or(slot).hash(&mut h);
         let id = h.finish();
-        e.widget.expand(id, states.entry(id).or_default());
-        let i = out.len();
-        out.push(Node {
+        e.widget.expand(&mut BuildCx {
+            id,
+            state: cx.states.entry(id).or_default(),
+            scope: Scope(&cx.provided),
+            tasks: cx.tasks,
+        });
+        let i = cx.out.len();
+        cx.out.push(Node {
             w: e.widget.as_ref(),
             id,
             parent,
             end: 0,
         });
+        let provides = e.widget.provide().map(|v| cx.provided.push(v)).is_some();
         for (n, c) in e.widget.children().iter().enumerate() {
-            go(c, Some(i), n as u64, states, out);
+            go(c, Some(i), n as u64, cx);
         }
-        out[i].end = out.len();
+        if provides {
+            cx.provided.pop();
+        }
+        cx.out[i].end = cx.out.len();
     }
-    let mut out = Vec::new();
-    go(root, None, 0, states, &mut out);
-    out
+    let mut cx = Cx {
+        states,
+        tasks,
+        provided: Vec::new(),
+        out: Vec::new(),
+    };
+    go(root, None, 0, &mut cx);
+    cx.out
 }
 
 /// `flatten` of a tree whose ids it already returned: same nodes, without
 /// hashing ids, touching `states` or expanding.
-pub(crate) fn walk<'a, Msg>(root: &'a Element<Msg>, ids: &[u64]) -> Vec<Node<'a, Msg>> {
-    fn go<'a, Msg>(
-        e: &'a Element<Msg>,
-        parent: Option<usize>,
-        ids: &[u64],
-        out: &mut Vec<Node<'a, Msg>>,
-    ) {
+pub(crate) fn walk<'a>(root: &'a Element, ids: &[u64]) -> Vec<Node<'a>> {
+    fn go<'a>(e: &'a Element, parent: Option<usize>, ids: &[u64], out: &mut Vec<Node<'a>>) {
         let i = out.len();
         out.push(Node {
             w: e.widget.as_ref(),
@@ -96,7 +109,7 @@ pub(crate) fn walk<'a, Msg>(root: &'a Element<Msg>, ids: &[u64]) -> Vec<Node<'a,
     out
 }
 
-pub(crate) fn children<Msg>(nodes: &[Node<'_, Msg>], i: usize) -> impl Iterator<Item = usize> {
+pub(crate) fn children(nodes: &[Node<'_>], i: usize) -> impl Iterator<Item = usize> {
     let end = nodes[i].end;
     let mut j = i + 1;
     std::iter::from_fn(move || {
@@ -145,9 +158,9 @@ impl Layout {
     /// Flex layout via taffy. The root fills the viewport; `insets` (system
     /// bars) are added to its padding so backgrounds bleed edge to edge while
     /// content stays clear. Only needed when the tree or viewport changes.
-    pub(crate) fn measure<Msg>(
+    pub(crate) fn measure(
         &mut self,
-        nodes: &[Node<'_, Msg>],
+        nodes: &[Node<'_>],
         text: &Text,
         viewport: (f32, f32),
         insets: Insets,
@@ -260,8 +273,8 @@ impl Layout {
 
 /// Absolute boxes from `measure`'s result, with scroll offsets and clips;
 /// cheap enough to run on every redraw.
-pub(crate) fn place<Msg>(
-    nodes: &[Node<'_, Msg>],
+pub(crate) fn place(
+    nodes: &[Node<'_>],
     measured: &[Measured],
     states: &mut HashMap<u64, State>,
     now: Instant,
@@ -308,7 +321,7 @@ mod tests {
 
     #[test]
     fn column_padding_gap_grow() {
-        let root: Element<()> = column([
+        let root: Element = column([
             row([]).height(20.0).into(),
             spacer().grow(1.0).into(),
             row([]).height(30.0).into(),
@@ -317,7 +330,7 @@ mod tests {
         .gap(5.0)
         .into();
         let mut states = HashMap::new();
-        let nodes = flatten(&root, &mut states);
+        let nodes = flatten(&root, &mut states, &mut Default::default());
         let m = Layout::default().measure(&nodes, &Text::default(), (100.0, 200.0), [0.0; 4]);
         let p = place(&nodes, &m, &mut states, Instant::now());
         assert_eq!(p[0].rect, Rect::new(0.0, 0.0, 100.0, 200.0));
@@ -327,9 +340,9 @@ mod tests {
         assert_eq!(p[3].rect, Rect::new(10.0, 160.0, 80.0, 30.0));
     }
 
-    fn list(items: &[(u64, &str)]) -> Element<()> {
+    fn list(items: &[(u64, &str)]) -> Element {
         let rows = items.iter().map(|&(k, s)| {
-            let r: Element<()> = row([text(s).into(), spacer().grow(1.0).into()]).into();
+            let r: Element = row([text(s).into(), spacer().grow(1.0).into()]).into();
             r.key(k)
         });
         column([column(rows).gap(4.0).into(), text("footer").into()])
@@ -339,16 +352,16 @@ mod tests {
 
     #[test]
     fn walk_matches_flatten() {
-        let root: Element<()> = column([
+        let root: Element = column([
             list(&[(1, "a"), (2, "b")]),
             stateful(|_: &u8, _| row([text("x").into(), spacer().into()])).into(),
         ])
         .into();
         let mut states = HashMap::new();
-        let flat = flatten(&root, &mut states);
+        let flat = flatten(&root, &mut states, &mut Default::default());
         let ids: Vec<u64> = flat.iter().map(|n| n.id).collect();
         let walked = walk(&root, &ids);
-        let shape = |ns: &[Node<()>]| {
+        let shape = |ns: &[Node]| {
             ns.iter()
                 .map(|n| (n.id, n.parent, n.end))
                 .collect::<Vec<_>>()
@@ -371,7 +384,7 @@ mod tests {
         for (n, items) in steps.iter().enumerate() {
             let root = list(items);
             let mut states = HashMap::new();
-            let nodes = flatten(&root, &mut states);
+            let nodes = flatten(&root, &mut states, &mut Default::default());
             let got = kept.measure(&nodes, &text, (300.0, 400.0), [0.0; 4]);
             let want = Layout::default().measure(&nodes, &text, (300.0, 400.0), [0.0; 4]);
             assert_eq!(got, want, "step {n}");

@@ -4,9 +4,11 @@
 //! each widget opts in next to its definition. Third-party widgets can do the
 //! same or use `Element::new`.
 
+mod builder;
 mod button;
 mod container;
 mod label;
+mod provide;
 mod radio;
 mod scroll;
 mod segmented;
@@ -17,9 +19,11 @@ mod toggle;
 
 use taffy::{AlignItems, Dimension, FlexWrap, JustifyContent, LengthPercentage, Size, Style};
 
+pub use builder::{Builder, Snapshot, future_builder, stream_builder};
 pub use button::{Button, button};
 pub use container::{Container, column, container, row, spacer};
 pub use label::{Label, text};
+pub use provide::{Provide, provide};
 pub use radio::{Radio, radio};
 pub use scroll::{Scroll, scroll};
 pub use segmented::{Segmented, segmented, tabs};

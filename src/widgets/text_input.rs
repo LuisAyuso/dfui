@@ -11,7 +11,7 @@ use crate::render::{Color, Rect};
 use crate::text::{Font, Text};
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, Widget};
 
-type OnChange<Msg> = Box<dyn Fn(&mut EventCx<Msg>, String)>;
+type OnChange = Box<dyn Fn(&mut EventCx, String)>;
 
 /// Caret and selection anchor in chars, always on grapheme boundaries; the
 /// selection is the range between them.
@@ -27,18 +27,18 @@ struct Caret {
 const BLINK: Duration = Duration::from_millis(500);
 
 /// Single-line controlled text field: shows `value`, reports edits via `on_change`.
-pub struct TextInput<Msg> {
+pub struct TextInput {
     value: String,
     placeholder: String,
     font: Font,
     size: f32,
     color: Color,
     accent: Color,
-    on_change: Option<OnChange<Msg>>,
+    on_change: Option<OnChange>,
     style: Style,
 }
 
-pub fn text_input<Msg>(value: impl Into<String>) -> TextInput<Msg> {
+pub fn text_input(value: impl Into<String>) -> TextInput {
     TextInput {
         value: value.into(),
         placeholder: String::new(),
@@ -59,9 +59,9 @@ pub fn text_input<Msg>(value: impl Into<String>) -> TextInput<Msg> {
     }
 }
 
-impl<Msg> TextInput<Msg> {
+impl TextInput {
     /// Called with the edited value; without it the field is read-only.
-    pub fn on_change(mut self, f: impl Fn(&mut EventCx<Msg>, String) + 'static) -> Self {
+    pub fn on_change(mut self, f: impl Fn(&mut EventCx, String) + 'static) -> Self {
         self.on_change = Some(Box::new(f));
         self
     }
@@ -143,19 +143,19 @@ impl<Msg> TextInput<Msg> {
     }
 }
 
-impl<Msg: 'static> From<TextInput<Msg>> for Element<Msg> {
-    fn from(w: TextInput<Msg>) -> Self {
+impl From<TextInput> for Element {
+    fn from(w: TextInput) -> Self {
         Element::new(w)
     }
 }
 
-impl<Msg> Styled for TextInput<Msg> {
+impl Styled for TextInput {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
     }
 }
 
-impl<Msg> Widget<Msg> for TextInput<Msg> {
+impl Widget for TextInput {
     fn style(&self) -> Style {
         self.style.clone()
     }
@@ -229,13 +229,13 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
         }
         cx.clip = outer;
     }
-    fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
         let (caret, anchor) = self.caret(cx.state.get::<Caret>());
         let sel = caret.min(anchor)..caret.max(anchor);
         let bounds = self.boundaries();
         let prev = bounds.iter().rfind(|&&b| b < caret).copied();
         let next = bounds.iter().find(|&&b| b > caret).copied();
-        let select = |cx: &mut EventCx<Msg>, pos: usize, anchor: usize| {
+        let select = |cx: &mut EventCx, pos: usize, anchor: usize| {
             let c = cx.state.get::<Caret>();
             (c.pos, c.anchor) = (pos, anchor);
             // Restart the blink, solid first, so the caret shows while typing.
@@ -243,7 +243,7 @@ impl<Msg> Widget<Msg> for TextInput<Msg> {
             cx.request_redraw();
         };
         // Replaces `range` (chars) with `with` and puts the caret after it.
-        let replace = |cx: &mut EventCx<Msg>, range: Range<usize>, with: &str| {
+        let replace = |cx: &mut EventCx, range: Range<usize>, with: &str| {
             let mut v = self.value.clone();
             v.replace_range(self.byte(range.start)..self.byte(range.end), with);
             let at = range.start + with.chars().count();

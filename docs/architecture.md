@@ -2,8 +2,9 @@
 
 ## Goals
 
-- Elm-style API: app state + `update(Msg)` + `view() -> Element`. No signals,
-  no retained widget objects owned by the user.
+- Declarative API: `view() -> Element` rebuilt from state owned by
+  `stateful` widgets, provided values and async sources. No messages, no
+  signals, no retained widget objects owned by the user.
 - One rendering primitive: every pixel comes from one instanced draw whose
   fragment shader evaluates either a rounded-rect distance field or glyph
   coverage from Bézier outlines. No texture atlases, no tessellation.
@@ -14,7 +15,8 @@
 ## Frame loop
 
 ```
-input event ──► dispatch ──► Msg* ──► App::update ──► App::view ──► new Element tree
+input event ──► dispatch ──► state updates ──┐
+task wake ────► poll tasks ──► results ───────┴──► App::view ──► new Element tree
                                                                         │
 RedrawRequested ◄── request_redraw ◄── measure (taffy) + place ◄───────┘
       │                       ▲
@@ -37,10 +39,11 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 | `lib.rs` | Public API: `App`, `run`, `run_android`, re-exports. |
 | `widget.rs` | `Element`, `Widget` trait, `Event`, `State`, `PaintCx`, `EventCx`. |
 | `widgets/mod.rs` | Widget infrastructure: the `Styled` flex modifiers, re-exports. |
-| `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `text_input`, `toggle`, `slider`, `radio`, `segmented` (`segmented`/`tabs`). |
+| `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `provide`, `builder` (`future_builder`/`stream_builder`), `text_input`, `toggle`, `slider`, `radio`, `segmented` (`segmented`/`tabs`). |
 | `anim.rs` | `Animated<T>` transitions, `Lerp`, `ease` curves; driven by `PaintCx::now` and `request_frame`. `Morph` between two `Path`s (e.g. glyphs), cutting segments of the shorter contour into as many pieces as needed. |
 | `path.rs` | `Path`: contours of quadratic segments, filled by `PaintCx::path` through the glyph renderer (per-frame shapes use a reserved region of the outline buffers). |
 | `layout.rs` | Flattens the tree to pre-order nodes; `measure` runs taffy, `place` produces absolute rects, clips and scroll offsets. |
+| `task.rs` | Widget-owned futures/streams, polling, the event-loop waker. |
 | `runtime.rs` | Event loop, input → `Event` translation, dispatch, pointer capture, frame stats, `snapshot`. |
 | `render.rs` | `Scene`, `Color`/`Rect`/`Shadow`, wgpu setup, the single render pass, GPU timestamp timing, offscreen rendering. |
 | `shader.wgsl` | Vertex expands instances to quads; fragment does SDF shapes (kind 0) and outline glyphs (kind 1). |
@@ -50,24 +53,44 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 
 ## Widgets and state
 
-- `view` rebuilds the whole `Element` tree every time a message is handled.
-  Elements are cheap boxed descriptions.
+- `view` rebuilds the whole `Element` tree after every state update or task
+  result. Elements are cheap boxed descriptions.
 - Composite widgets are plain functions returning `Element`. Implement
   `Widget` only for new layout, paint or input behavior.
 - Framework-owned per-widget state (`State`, a typed `Box<dyn Any>` slot) is
   keyed by a hash of the parent id plus child slot index, or `Element::key`
   when set. State for ids missing from the new tree is dropped after each
   update. Use `key` for reorderable lists.
-- Two kinds of state: app/domain state lives in `App` and changes through
-  `Msg`; ephemeral UI state (expanded, tab index, field contents) lives in a
-  `stateful(|s: &S, h: Handle<S>| ...)` widget. Handlers capture the `Copy`
-  handle, never the state, and call `cx.update(h, |s: &mut S| ...)`; the
-  runtime lends the state during the call, so there are no borrow problems.
+- UI state lives in `stateful(|s: &S, h: Handle<S>| ...)` widgets, including
+  app-wide state in a root `stateful`. Handlers capture the `Copy` handle,
+  never the state, and call `cx.update(h, |s: &mut S| ...)`; the runtime
+  lends the state during the call, so there are no borrow problems.
 - `stateful` builds its subtree lazily in `flatten` via `Widget::expand`, with
   `S` read from its state slot. Queued updates are applied after dispatch,
-  before messages, then the tree is rebuilt.
-- `Button::on_click(|cx| ..)` is the general handler; `on_press(msg)` is sugar
-  for emitting a message.
+  then the tree is rebuilt.
+- External state stays outside the framework. The app owns it and hands it
+  down with `provide(value, child)`; descendants read the nearest one with
+  `Scope::get::<T>()` during `expand`. `flatten` keeps the stack of provided
+  values while it walks children.
+- `Button::on_click(|cx| ..)` is the general handler.
+
+## Async
+
+- `future_builder(deps, |scope| fut, build)` and
+  `stream_builder(deps, |scope| stream, build)` build their subtree from a
+  `Snapshot` (`data`, `done`) that the source writes. Sources are any std
+  `Future` or `futures_core::Stream`, so they can come from any runtime.
+  Streams collect into `S: Default + Extend<Item>` (`Vec`, `String`, ...).
+- In `expand` a builder starts its source as a task keyed by node id
+  (`src/task.rs`), or keeps the running one when the hash of `deps` matches.
+  New deps reset the snapshot and replace the task. Tasks are dropped with
+  their node in the same pass that drops state, which cancels them.
+- Tasks are polled on the UI thread, so sources need not be `Send`. One
+  `Waker` posts a winit user event (deduplicated); `user_event` polls every
+  task, draining ready items so a burst costs one rebuild, and rebuilds
+  until no task changes (new tasks get their first poll that way). Without
+  an event loop (tests, benches) the waker is a no-op and `drive` is called
+  directly.
 
 ## Layout
 

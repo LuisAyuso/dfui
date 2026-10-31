@@ -8,7 +8,7 @@ use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
-type Handler<Msg> = Box<dyn Fn(&mut EventCx<Msg>)>;
+type Handler = Box<dyn Fn(&mut EventCx)>;
 
 const GROW: Duration = Duration::from_millis(140);
 const RING: Color = Color::hex(0x9a9fb0);
@@ -24,15 +24,15 @@ struct RadioState {
 
 /// One option of a group: a ring before `child`, filled when `selected`.
 /// The whole row is the tap target.
-pub struct Radio<Msg> {
-    child: [Element<Msg>; 1],
+pub struct Radio {
+    child: [Element; 1],
     selected: bool,
     accent: Color,
-    on_select: Option<Handler<Msg>>,
+    on_select: Option<Handler>,
     style: Style,
 }
 
-pub fn radio<Msg>(selected: bool, child: impl Into<Element<Msg>>) -> Radio<Msg> {
+pub fn radio(selected: bool, child: impl Into<Element>) -> Radio {
     Radio {
         child: [child.into()],
         selected,
@@ -55,9 +55,9 @@ pub fn radio<Msg>(selected: bool, child: impl Into<Element<Msg>>) -> Radio<Msg> 
     }
 }
 
-impl<Msg> Radio<Msg> {
+impl Radio {
     /// Runs when tapped while not selected.
-    pub fn on_select(mut self, f: impl Fn(&mut EventCx<Msg>) + 'static) -> Self {
+    pub fn on_select(mut self, f: impl Fn(&mut EventCx) + 'static) -> Self {
         self.on_select = Some(Box::new(f));
         self
     }
@@ -67,23 +67,23 @@ impl<Msg> Radio<Msg> {
     }
 }
 
-impl<Msg: 'static> From<Radio<Msg>> for Element<Msg> {
-    fn from(w: Radio<Msg>) -> Self {
+impl From<Radio> for Element {
+    fn from(w: Radio) -> Self {
         Element::new(w)
     }
 }
 
-impl<Msg> Styled for Radio<Msg> {
+impl Styled for Radio {
     fn style_mut(&mut self) -> &mut Style {
         &mut self.style
     }
 }
 
-impl<Msg> Widget<Msg> for Radio<Msg> {
+impl Widget for Radio {
     fn style(&self) -> Style {
         self.style.clone()
     }
-    fn children(&self) -> &[Element<Msg>] {
+    fn children(&self) -> &[Element] {
         &self.child
     }
     fn paint(&self, cx: &mut PaintCx) {
@@ -105,7 +105,7 @@ impl<Msg> Widget<Msg> for Radio<Msg> {
             cx.fill(dot, d / 2.0, self.accent);
         }
     }
-    fn event(&self, ev: &Event, cx: &mut EventCx<Msg>) {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
         let mut tap = std::mem::take(&mut cx.state.get::<RadioState>().tap);
         let fire = tap.event(ev, cx);
         cx.state.get::<RadioState>().tap = tap;

@@ -42,7 +42,7 @@ fn frame(c: &mut Criterion) {
     for n in [10, 100, 1000] {
         let mut bench = Bench::new(Cards::new(n), VIEWPORT);
         g.bench_with_input(BenchmarkId::new("edit", n), &n, |b, _| {
-            b.iter(|| bench.update(()))
+            b.iter(|| bench.update(Cards::edit))
         });
     }
     // A wheel tick: no rebuild, so taffy's result is reused.

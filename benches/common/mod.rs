@@ -16,16 +16,16 @@ impl Cards {
     pub fn new(n: u32) -> Self {
         Cards { n, edits: 0 }
     }
+
+    pub fn edit(&mut self) {
+        self.edits += 1;
+    }
 }
 
 impl App for Cards {
-    type Msg = ();
-    fn update(&mut self, _: ()) {
-        self.edits += 1;
-    }
-    fn view(&self) -> Element<()> {
+    fn view(&self) -> Element {
         let cards = (1..=self.n).map(|n| {
-            let card: Element<()> = row([
+            let card: Element = row([
                 container(text(n.to_string()).size(20.0).color(Color::WHITE))
                     .bg(Color::hex(0x3b6fe0))
                     .radius(24.0)
@@ -46,7 +46,7 @@ impl App for Cards {
                 ])
                 .grow(1.0)
                 .into(),
-                button(text("×")).on_press(()).into(),
+                button(text("×")).on_click(|_| {}).into(),
             ])
             .align(AlignItems::CENTER)
             .gap(14.0)
@@ -71,9 +71,7 @@ impl App for Cards {
 pub struct TextWall;
 
 impl App for TextWall {
-    type Msg = ();
-    fn update(&mut self, _: ()) {}
-    fn view(&self) -> Element<()> {
+    fn view(&self) -> Element {
         column((0..14).map(|_| text("Rag&@ %g1 WM").size(64.0).into()))
             .padding(16.0)
             .into()
