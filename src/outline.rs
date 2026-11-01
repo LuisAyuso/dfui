@@ -52,6 +52,11 @@ impl Outlines {
         self.insert(quads, 0.0, false)
     }
 
+    /// Stores closed contours (y up) for good, like a glyph.
+    pub fn store(&mut self, quads: Vec<Quad>, pad: f32) -> Option<OutlineGlyph> {
+        self.insert(quads, pad, false)
+    }
+
     /// Frees the transient region; the runtime calls this before painting.
     pub fn begin_frame(&mut self) {
         self.transient = (0, 0);

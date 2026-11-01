@@ -6,11 +6,12 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
+use crate::path::{Path, Shape};
 use crate::text::Font;
 use crate::widget::Scope;
 use crate::widgets::{
-    Snapshot, Styled, button, column, dialog, future_builder, overlays, popup, provide, radio,
-    scroll, segmented, slider, stateful, stream_builder, text, text_input, toggle,
+    Snapshot, Styled, button, column, dialog, future_builder, icon_button, overlays, popup,
+    provide, radio, scroll, segmented, slider, stateful, stream_builder, text, text_input, toggle,
 };
 
 /// State of the root `stateful`.
@@ -784,4 +785,35 @@ fn max_lines_keeps_a_label_to_one_line() {
     let line = rt.text.line_height(Font::DEFAULT, 16.0);
     let r = rt.placed[1].rect;
     assert!(r.h <= line.ceil() && r.w <= 100.0, "{r:?}");
+}
+
+struct Tapper(Shape);
+
+impl App for Tapper {
+    fn view(&self) -> Element {
+        column([icon_button(&self.0).on_click(|_| {}).into()]).into()
+    }
+}
+
+#[test]
+fn icon_button_shrinks_while_pressed_and_overshoots_on_release() {
+    let sq = Path::polygon(&[[0.0, 0.0], [24.0, 0.0], [24.0, 24.0], [0.0, 24.0]]);
+    let mut rt = Runtime::new(Tapper(Shape::new(sq, Rect::new(0.0, 0.0, 24.0, 24.0))));
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    let t = Instant::now();
+    let width = |rt: &mut Runtime<Tapper>, ms: u64| {
+        rt.clock = Some(t + Duration::from_millis(ms));
+        let (scene, _) = rt.scene(&mut false);
+        scene.instances[1].rect[2]
+    };
+    let rest = width(&mut rt, 0);
+    rt.dispatch(Event::PointerDown { x: 20.0, y: 20.0 });
+    width(&mut rt, 10);
+    assert!(width(&mut rt, 200) < rest * 0.85, "pressed");
+    rt.clock = Some(t + Duration::from_millis(200));
+    rt.dispatch(Event::PointerUp { x: 20.0, y: 20.0 });
+    width(&mut rt, 210);
+    assert!(width(&mut rt, 420) > rest * 1.04, "springs past its size");
+    assert!((width(&mut rt, 2000) - rest).abs() < 0.01, "settles");
 }

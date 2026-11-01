@@ -141,7 +141,7 @@ pub struct Shadow {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct Instance {
-    rect: [f32; 4],
+    pub(crate) rect: [f32; 4],
     uv: [f32; 4],
     color: [f32; 4],
     border_color: [f32; 4],

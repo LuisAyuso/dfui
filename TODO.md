@@ -77,8 +77,9 @@ Text:
 
 Widgets:
 
-- [ ] Transparent / icon button: `flat()` only drops the shadow, so every
-      icon button passes its surface color to look borderless (see Theming).
+- [x] Icon button: `icon_button(&shape)`, borderless, shrinks on press and
+      springs back past its size; `icon(&shape)` without the button. Shapes
+      (`Shape`) are stored once like glyphs and drawn into any rect.
 - [ ] `tabs` too narrow for its labels (6 demo tabs on a 411dp phone): the
       labels overflow their equal slots, but the indicator and hit-testing
       still use the slots, so tapping "Cards" selects "Async". Clip or
@@ -90,8 +91,9 @@ Widgets:
 - [ ] List row: title, subtitle, trailing actions.
 - [ ] Image fit modes and a placeholder (also under Image follow-ups);
       apps downscale covers themselves for lack of mipmaps.
-- [ ] Stroked paths, for line icon sets like Feather (stroke-only SVGs)
-      to be drawn as vectors instead of pre-rendered PNGs.
+- [x] Stroked SVG icons (Feather) as vectors: the music app parses them
+      with usvg, turns strokes into fills and draws them as `Shape`s; dfui
+      itself stays free of an SVG parser.
 
 ## Design studies (need discussion before code)
 

@@ -6,7 +6,7 @@ use web_time::Instant;
 
 use taffy::{AvailableSpace, Size, Style};
 
-use crate::path::Path;
+use crate::path::{Path, Shape};
 use crate::render::{Bitmap, Color, Rect, Scene, Shadow};
 use crate::runtime::task::Tasks;
 use crate::text::{Font, Text, TextLayout};
@@ -256,6 +256,12 @@ impl PaintCx<'_> {
         let bands = [g.header as f32, g.bands_h as f32, g.bands_v as f32];
         self.scene
             .glyph(r, [x0, y1, x1, y0], color, self.clip, bands);
+    }
+
+    /// `shape` with its view box mapped onto `r`; stored once, so drawing it
+    /// at any size or every frame is cheap.
+    pub fn shape(&mut self, shape: &Shape, r: Rect, color: Color) {
+        self.text.draw_shape(shape, r, color, self.clip, self.scene);
     }
 
     /// Outline of `c` at `size` px, pen at the origin on the baseline.

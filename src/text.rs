@@ -10,7 +10,7 @@ use read_fonts::types::GlyphId;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::outline::Outlines;
-use crate::path::Path;
+use crate::path::{Path, Shape};
 use crate::render::{Color, Rect, Scene};
 
 /// TrueType/OpenType font data. Fonts are told apart by address, so keep each
@@ -79,6 +79,9 @@ pub struct Text {
     plans: RefCell<Vec<(FaceId, Rc<ShapePlan>)>>,
     buffer: RefCell<Option<Buffer>>,
     glyphs: HashMap<(FaceId, GlyphId), Option<Glyph>>,
+    /// `Shape`s by id, stored like glyphs in units of the view's larger side.
+    // ponytail: never evicted; fine for icon sets, add eviction if apps make shapes per frame.
+    shapes: HashMap<u64, Option<Glyph>>,
     /// Layouts by hash of (text, font, size, max width); `view` rebuilds the
     /// same strings every frame and taffy measures each label several times.
     layouts: RefCell<HashMap<u64, Cached>>,
@@ -92,6 +95,7 @@ impl Default for Text {
             plans: RefCell::default(),
             buffer: RefCell::default(),
             glyphs: HashMap::new(),
+            shapes: HashMap::new(),
             layouts: RefCell::default(),
             outlines: Outlines::default(),
         };
@@ -380,6 +384,51 @@ impl Text {
         }
     }
 
+    /// Draws `shape` with its view box mapped onto `r`.
+    pub(crate) fn draw_shape(
+        &mut self,
+        shape: &Shape,
+        r: Rect,
+        color: Color,
+        clip: Rect,
+        scene: &mut Scene,
+    ) {
+        let d = &shape.0;
+        let v = d.view;
+        let span = v.w.max(v.h);
+        if span <= 0.0 {
+            return;
+        }
+        let g = *self.shapes.entry(d.id).or_insert_with(|| {
+            // Unit box, y up, like glyph em space.
+            let unit = d
+                .path
+                .contours
+                .iter()
+                .flatten()
+                .map(|q| q.map(|[x, y]| [(x - v.x) / span, (v.y + v.h - y) / span]));
+            // Room for the antialiased edge of shapes that touch the view box.
+            let g = self.outlines.store(unit.collect(), 0.02)?;
+            let [x0, y0, x1, y1] = g.bbox;
+            Some(Glyph {
+                em: [x0, y1, x1, y0],
+                plane: Rect::new(x0, y0, x1 - x0, y1 - y0),
+                bands: [g.header as f32, g.bands_h as f32, g.bands_v as f32],
+            })
+        });
+        let Some(g) = g else { return };
+        // Unit box to `r`; `plane` holds the bbox, y up.
+        let (sx, sy) = (r.w * span / v.w, r.h * span / v.h);
+        let top = v.h / span - (g.plane.y + g.plane.h);
+        let q = Rect::new(
+            r.x + g.plane.x * sx,
+            r.y + top * sy,
+            g.plane.w * sx,
+            g.plane.h * sy,
+        );
+        scene.glyph(q, g.em, color, clip, g.bands);
+    }
+
     fn glyph(&mut self, face: FaceId, id: GlyphId) -> Option<Glyph> {
         if let Some(g) = self.glyphs.get(&(face, id)) {
             return *g;
@@ -479,6 +528,45 @@ mod tests {
             "Super…"
         );
         assert_eq!(t.truncate("line\nbreak", f, size, 1000.0, 1), "line…");
+    }
+
+    #[test]
+    fn shapes_are_stored_once_and_mapped_onto_the_rect() {
+        let mut t = Text::default();
+        // A 12×12 square in the middle of a 24×24 view.
+        let sq = Path::polygon(&[[6.0, 6.0], [18.0, 6.0], [18.0, 18.0], [6.0, 18.0]]);
+        let shape = Shape::new(sq, Rect::new(0.0, 0.0, 24.0, 24.0));
+        let mut scene = Scene::default();
+        let all = Rect::new(0.0, 0.0, 1000.0, 1000.0);
+        t.draw_shape(
+            &shape,
+            Rect::new(100.0, 50.0, 48.0, 48.0),
+            Color::BLACK,
+            all,
+            &mut scene,
+        );
+        let stored = t.outlines.curves.len();
+        t.draw_shape(
+            &shape,
+            Rect::new(0.0, 0.0, 240.0, 240.0),
+            Color::BLACK,
+            all,
+            &mut scene,
+        );
+        assert_eq!(
+            t.outlines.curves.len(),
+            stored,
+            "drawn again from the store"
+        );
+        // Twice the view's size: the square lands at 12..36 plus the edge padding.
+        let [x, y, w, h] = scene.instances[0].rect;
+        let pad = 0.02 * 48.0;
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        assert!(near(x, 112.0 - pad) && near(y, 62.0 - pad), "{x} {y}");
+        assert!(
+            near(w, 24.0 + 2.0 * pad) && near(h, 24.0 + 2.0 * pad),
+            "{w} {h}"
+        );
     }
 
     #[test]

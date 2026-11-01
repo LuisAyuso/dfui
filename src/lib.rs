@@ -12,7 +12,7 @@ mod widget;
 pub mod widgets;
 
 pub use anim::Animated;
-pub use path::Path;
+pub use path::{Path, Shape};
 pub use render::{Bitmap, Color, Rect, Shadow};
 pub use runtime::task::{Sleep, sleep};
 pub use runtime::{Bench, GpuBench, snapshot};

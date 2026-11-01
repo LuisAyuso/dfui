@@ -1,5 +1,10 @@
 //! Filled outlines drawn the same way as glyphs.
 
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::render::Rect;
+
 pub type Point = [f32; 2];
 /// Quadratic Bézier segment: start, control, end.
 pub type Quad = [Point; 3];
@@ -30,6 +35,36 @@ impl Path {
             }
         }
         self
+    }
+}
+
+/// A `Path` stored on the GPU once, like a glyph, and drawn into any rect
+/// with `PaintCx::shape`: scaling it costs nothing. Use it for icons and
+/// other shapes drawn every frame; cheap to clone.
+#[derive(Clone)]
+pub struct Shape(pub(crate) Rc<ShapeData>);
+
+pub(crate) struct ShapeData {
+    pub id: u64,
+    pub path: Path,
+    pub view: Rect,
+}
+
+impl Shape {
+    /// `path` with `view` as the box that `PaintCx::shape` maps onto its
+    /// target rect, like an SVG `viewBox`.
+    pub fn new(path: Path, view: Rect) -> Shape {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        Shape(Rc::new(ShapeData { id, path, view }))
+    }
+
+    pub fn view(&self) -> Rect {
+        self.0.view
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0.path
     }
 }
 
