@@ -12,6 +12,7 @@ use crate::widget::Scope;
 use crate::widgets::{
     Snapshot, Styled, button, column, dialog, future_builder, icon_button, overlays, popup,
     provide, radio, scroll, segmented, slider, stateful, stream_builder, text, text_input, toggle,
+    watch,
 };
 
 /// State of the root `stateful`.
@@ -816,4 +817,44 @@ fn icon_button_shrinks_while_pressed_and_overshoots_on_release() {
     width(&mut rt, 210);
     assert!(width(&mut rt, 420) > rest * 1.04, "springs past its size");
     assert!((width(&mut rt, 2000) - rest).abs() < 0.01, "settles");
+}
+
+struct Watched {
+    notifier: crate::Notifier,
+    count: std::sync::Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl App for Watched {
+    fn view(&self) -> Element {
+        let count = self.count.clone();
+        watch(&self.notifier, move || {
+            let n = count.load(std::sync::atomic::Ordering::Relaxed);
+            text(n.to_string())
+        })
+        .into()
+    }
+}
+
+#[test]
+fn watch_rebuilds_when_another_thread_notifies() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let app = Watched {
+        notifier: crate::Notifier::new(),
+        count: Default::default(),
+    };
+    let (n, count) = (app.notifier.clone(), app.count.clone());
+    let mut rt = Runtime::new(app);
+    assert!(!rt.drive(), "nothing to rebuild yet");
+    for i in 1..=2 {
+        let (n, count) = (n.clone(), count.clone());
+        std::thread::spawn(move || {
+            count.store(i, Relaxed);
+            n.notify();
+            n.notify();
+        })
+        .join()
+        .unwrap();
+        assert!(rt.drive(), "notify {i} rebuilds");
+        assert!(!rt.drive(), "a burst is one rebuild");
+    }
 }

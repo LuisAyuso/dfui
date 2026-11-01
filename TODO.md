@@ -41,10 +41,8 @@ Android lifecycle and platform:
 
 State and async:
 
-- [ ] A notify handle any thread can trigger to rebuild (e.g.
-      `Notifier::notify()`). Today it takes a futures channel, an
-      `Extend<()>` dummy type for `stream_builder` and a
-      `Cell<Option<Receiver>>` taken in `App::view`.
+- [x] A notify handle any thread can trigger to rebuild:
+      `Notifier::notify()`, watched by `widgets::watch(&notifier, || view)`.
 - [ ] Keep-alive / offstage children (an `IndexedStack`): state is keyed by
       tree position, so switching tabs drops the hidden page's state (e.g.
       its scroll offset).

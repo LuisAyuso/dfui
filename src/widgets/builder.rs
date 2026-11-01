@@ -7,7 +7,7 @@ use futures_core::Stream;
 use taffy::{FlexDirection, Style};
 
 use super::Styled;
-use crate::runtime::task::Task;
+use crate::runtime::task::{Notifier, Task};
 use crate::widget::{BuildCx, Element, Scope, State, Widget};
 
 /// What an async source has produced so far, and whether it has finished.
@@ -92,6 +92,32 @@ where
         )
     })
 }
+
+/// Rebuilds `build`'s subtree each time `notifier` is notified, from any
+/// thread. Unlike a stream, it can't run dry: restarts and several watchers
+/// of one notifier all keep working.
+pub fn watch<E: Into<Element>>(
+    notifier: &Notifier,
+    build: impl Fn() -> E + 'static,
+) -> Builder<Seen> {
+    let n = notifier.clone();
+    builder(
+        notifier.id(),
+        move |_: &Seen| build(),
+        move |_| {
+            Box::new(move |cx: &mut Context, seen: &mut Seen| {
+                let v = n.poll_version(cx);
+                let changed = v != seen.0;
+                seen.0 = v;
+                (changed, false)
+            })
+        },
+    )
+}
+
+/// The notifier version a `watch` last built from.
+#[derive(Default)]
+pub struct Seen(u64);
 
 fn builder<S: Default + 'static, E: Into<Element>>(
     deps: impl Hash,

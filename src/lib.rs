@@ -14,7 +14,7 @@ pub mod widgets;
 pub use anim::Animated;
 pub use path::{Path, Shape};
 pub use render::{Bitmap, Color, Rect, Shadow};
-pub use runtime::task::{Sleep, sleep};
+pub use runtime::task::{Notifier, Sleep, sleep};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;
 pub use text::{Font, Text, TextLayout};

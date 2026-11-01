@@ -25,7 +25,7 @@ use taffy::{
     Style,
 };
 
-pub use builder::{Builder, Snapshot, future_builder, stream_builder};
+pub use builder::{Builder, Seen, Snapshot, future_builder, stream_builder, watch};
 pub use button::{Button, button};
 pub use container::{Container, column, container, row, spacer};
 pub use icon::{Icon, icon, icon_button};

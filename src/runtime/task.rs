@@ -4,8 +4,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{self, Context, Wake, Waker};
 use std::time::Duration;
 
@@ -79,6 +79,49 @@ impl Wake for LoopWaker {
         if !self.pending.swap(true, Ordering::AcqRel) {
             (self.wake)();
         }
+    }
+}
+
+/// Asks the UI to rebuild, from any thread: worker threads hold clones and
+/// call `notify` after changing data the view reads; `widgets::watch`
+/// rebuilds its subtree when that happens. Notifies before the UI exists, or
+/// several in a burst, cost one rebuild.
+#[derive(Clone, Default)]
+pub struct Notifier(Arc<Notify>);
+
+#[derive(Default)]
+pub(crate) struct Notify {
+    version: AtomicU64,
+    /// The UI's waker, set by the `watch` polling this notifier.
+    // ponytail: one slot, so one runtime per notifier; a list if a notifier ever feeds several windows.
+    waker: Mutex<Option<Waker>>,
+}
+
+impl Notifier {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn notify(&self) {
+        self.0.version.fetch_add(1, Ordering::AcqRel);
+        if let Some(w) = &*self.0.waker.lock().unwrap() {
+            w.wake_by_ref();
+        }
+    }
+
+    /// Current version; registers `cx`'s waker for the next `notify`.
+    pub(crate) fn poll_version(&self, cx: &Context) -> u64 {
+        let mut slot = self.0.waker.lock().unwrap();
+        if !slot.as_ref().is_some_and(|w| w.will_wake(cx.waker())) {
+            *slot = Some(cx.waker().clone());
+        }
+        drop(slot);
+        self.0.version.load(Ordering::Acquire)
+    }
+
+    /// Tells notifiers apart, for `watch`'s restart key.
+    pub(crate) fn id(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
     }
 }
 
