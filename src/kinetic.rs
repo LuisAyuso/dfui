@@ -90,6 +90,22 @@ impl Drag {
         self.fling = None;
     }
 
+    /// Moves the press's start offset and a fling's origin by `d`, for when
+    /// the content moves under the drag (an item above it collapses).
+    pub fn shift(&mut self, d: f32) {
+        if let Some((_, from)) = &mut self.start {
+            *from += d;
+        }
+        if let Some(f) = &mut self.fling {
+            f.from += d;
+        }
+    }
+
+    /// A press is down (a tap or a drag in progress).
+    pub fn pressed(&self) -> bool {
+        self.start.is_some()
+    }
+
     pub fn flinging(&self) -> bool {
         self.fling.is_some()
     }
@@ -133,6 +149,9 @@ mod tests {
         d.down(100.0, 40.0, at(0));
         assert_eq!(d.moved(104.0, at(10)), None, "within slop: still a tap");
         assert_eq!(d.moved(90.0, at(20)), Some(50.0));
+        d.shift(-10.0);
+        assert_eq!(d.moved(90.0, at(30)), Some(40.0));
+        d.shift(10.0);
         // 60 px up in 40 ms: a fast fling towards larger offsets.
         assert_eq!(d.moved(40.0, at(60)), Some(100.0));
         assert!(d.up(40.0, 100.0, at(60)));
@@ -148,7 +167,9 @@ mod tests {
         let at = |ms| t0 + Duration::from_millis(ms);
         let mut d = Drag::default();
         d.down(0.0, 0.0, at(0));
+        assert!(d.pressed());
         assert!(!d.up(0.0, 0.0, at(50)), "a tap");
+        assert!(!d.pressed());
         d.down(0.0, 0.0, at(100));
         d.moved(-80.0, at(120));
         // Held still for longer than the velocity window before lifting.
