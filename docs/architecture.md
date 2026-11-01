@@ -46,6 +46,7 @@ the window through the `Host` trait.
 | `widgets/mod.rs` | Widget infrastructure: the `Styled` flex modifiers, re-exports. |
 | `widgets/*.rs` | One file per built-in: `container` (`row`/`column`/`container`/`spacer`), `label` (`text`), `button`, `scroll`, `stateful`, `provide`, `builder` (`future_builder`/`stream_builder`), `text_input`, `toggle`, `slider`, `radio`, `segmented` (`segmented`/`tabs`), `overlay` (`overlay`/`popup` and the `dialog`, `drawer`, `bottom_sheet`, `snackbar`, `tooltip`, `dropdown` built on them). |
 | `anim.rs` | `Animated<T>` transitions, `Lerp`, `ease` curves; driven by `PaintCx::now` and `request_frame`. `Morph` between two `Path`s (e.g. glyphs), cutting segments of the shorter contour into as many pieces as needed. |
+| `kinetic.rs` | `Drag`: drag slop, release velocity and fling decay for widgets that scroll themselves (`scroll`, app widgets). |
 | `path.rs` | `Path`: contours of quadratic segments, filled by `PaintCx::path` through the glyph renderer (per-frame shapes use a reserved region of the outline buffers). |
 | `layout.rs` | Flattens the tree to pre-order nodes; `measure` runs taffy, `place` produces absolute rects, clips and scroll offsets. |
 | `runtime/mod.rs` | `Runtime`: input → `Event` translation, dispatch, pointer capture, focus, frame pacing and stats. |

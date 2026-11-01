@@ -192,44 +192,43 @@ impl Widget for TextInput {
         let (caret, anchor) = self.caret(cx.state.get::<Caret>());
         let (stops, shift) = self.stops(cx.text, caret, c.w);
         let h = cx.text.line_height(self.font, self.size);
-        let outer = cx.clip;
-        cx.clip = outer.intersect(&c);
-        if cx.focused && caret != anchor {
-            let (a, b) = (stops[caret.min(anchor)], stops[caret.max(anchor)]);
-            let sel = Rect::new(c.x + a - shift, c.y, b - a, h);
-            cx.fill(sel, 0.0, self.accent.alpha(0.25));
-        }
-        if self.value.is_empty() {
-            let muted = self.color.alpha(0.4);
-            cx.text(
-                &self.placeholder,
-                self.font,
-                self.size,
-                muted,
-                None,
-                (c.x, c.y),
-            );
-        } else {
-            cx.text(
-                &self.value,
-                self.font,
-                self.size,
-                self.color,
-                None,
-                (c.x - shift, c.y),
-            );
-        }
-        if cx.focused {
-            let now = cx.now;
-            let start = *cx.state.get::<Caret>().blink.get_or_insert(now);
-            let phase = now.saturating_duration_since(start).as_millis() / BLINK.as_millis();
-            if phase.is_multiple_of(2) {
-                let x = c.x + stops[caret] - shift;
-                cx.fill(Rect::new(x, c.y, 1.5, h), 0.0, self.accent);
+        cx.with_clip(c, |cx| {
+            if cx.focused && caret != anchor {
+                let (a, b) = (stops[caret.min(anchor)], stops[caret.max(anchor)]);
+                let sel = Rect::new(c.x + a - shift, c.y, b - a, h);
+                cx.fill(sel, 0.0, self.accent.alpha(0.25));
             }
-            cx.request_frame_at(start + BLINK * (phase as u32 + 1));
-        }
-        cx.clip = outer;
+            if self.value.is_empty() {
+                let muted = self.color.alpha(0.4);
+                cx.text(
+                    &self.placeholder,
+                    self.font,
+                    self.size,
+                    muted,
+                    None,
+                    (c.x, c.y),
+                );
+            } else {
+                cx.text(
+                    &self.value,
+                    self.font,
+                    self.size,
+                    self.color,
+                    None,
+                    (c.x - shift, c.y),
+                );
+            }
+            if cx.focused {
+                let now = cx.now;
+                let start = *cx.state.get::<Caret>().blink.get_or_insert(now);
+                let phase = now.saturating_duration_since(start).as_millis() / BLINK.as_millis();
+                if phase.is_multiple_of(2) {
+                    let x = c.x + stops[caret] - shift;
+                    cx.fill(Rect::new(x, c.y, 1.5, h), 0.0, self.accent);
+                }
+                cx.request_frame_at(start + BLINK * (phase as u32 + 1));
+            }
+        });
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
         let (caret, anchor) = self.caret(cx.state.get::<Caret>());

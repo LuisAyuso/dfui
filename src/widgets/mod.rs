@@ -19,7 +19,10 @@ mod stateful;
 mod text_input;
 mod toggle;
 
-use taffy::{AlignItems, Dimension, FlexWrap, JustifyContent, LengthPercentage, Size, Style};
+use taffy::{
+    AlignItems, Dimension, FlexWrap, JustifyContent, LengthPercentage, LengthPercentageAuto, Size,
+    Style,
+};
 
 pub use builder::{Builder, Snapshot, future_builder, stream_builder};
 pub use button::{Button, button};
@@ -75,6 +78,24 @@ pub trait Styled: Sized {
     }
     fn height(mut self, h: f32) -> Self {
         self.style_mut().size.height = Dimension::length(h);
+        self
+    }
+    fn min_width(mut self, w: f32) -> Self {
+        self.style_mut().min_size.width = LengthPercentageAuto::length(w);
+        self
+    }
+    fn min_height(mut self, h: f32) -> Self {
+        self.style_mut().min_size.height = LengthPercentageAuto::length(h);
+        self
+    }
+    /// Takes the space left along the parent's main axis, and no more: unlike
+    /// `grow(1.0)`, the content's size doesn't push the parent. Use it on
+    /// every flex box between the window and a `scroll`.
+    fn fill(mut self) -> Self {
+        let s = self.style_mut();
+        s.flex_grow = 1.0;
+        s.flex_basis = Dimension::length(0.0);
+        s.min_size = Size::length(0.0);
         self
     }
     fn fill_width(mut self) -> Self {

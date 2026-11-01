@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::marker::PhantomData;
+use std::rc::Rc;
 use web_time::Instant;
 
 use taffy::{AvailableSpace, Size, Style};
@@ -7,7 +8,7 @@ use taffy::{AvailableSpace, Size, Style};
 use crate::path::Path;
 use crate::render::{Bitmap, Color, Rect, Scene, Shadow};
 use crate::runtime::task::Tasks;
-use crate::text::{Font, Text};
+use crate::text::{Font, Text, TextLayout};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
@@ -285,6 +286,26 @@ impl PaintCx<'_> {
     /// `bitmap` stretched over `r`, multiplied by `tint` (`Color::WHITE` keeps it as is).
     pub fn image(&mut self, r: Rect, bitmap: &Bitmap, radius: f32, tint: Color) {
         self.scene.image(r, bitmap, radius, tint, self.clip);
+    }
+
+    /// Paints what `f` paints clipped to `r` as well.
+    pub fn with_clip<R>(&mut self, r: Rect, f: impl FnOnce(&mut Self) -> R) -> R {
+        let saved = self.clip;
+        self.clip = saved.intersect(&r);
+        let out = f(self);
+        self.clip = saved;
+        out
+    }
+
+    /// `s` laid out as `text` would draw it, for its `width` and `height`.
+    pub fn measure(
+        &self,
+        s: &str,
+        font: Font,
+        size: f32,
+        max_width: Option<f32>,
+    ) -> Rc<TextLayout> {
+        self.text.layout(s, font, size, max_width)
     }
 
     pub fn text(

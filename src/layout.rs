@@ -385,6 +385,28 @@ mod tests {
         assert_eq!(p[3].rect, Rect::new(10.0, 160.0, 80.0, 30.0));
     }
 
+    /// Window > column > [header, scroll of 10×50], 200 tall.
+    fn nested_scroll(fill: bool) -> Rect {
+        use crate::widgets::scroll;
+        let rows = (0..10).map(|_| column([]).height(50.0).into());
+        let list = scroll(column(rows));
+        let list = if fill { list.fill() } else { list.grow(1.0) };
+        let page = column([row([]).height(20.0).into(), list.into()]);
+        let page = if fill { page.fill() } else { page.grow(1.0) };
+        let root: Element = column([page.into()]).into();
+        let mut states = HashMap::new();
+        let nodes = flatten(&root, &mut states, &mut Default::default());
+        let m = Layout::default().measure(&nodes, &Text::default(), (100.0, 200.0), [0.0; 4]);
+        place(&nodes, &m, &mut states, Instant::now())[3].rect
+    }
+
+    #[test]
+    fn fill_bounds_a_nested_scroll() {
+        assert_eq!(nested_scroll(true), Rect::new(0.0, 20.0, 100.0, 180.0));
+        // grow alone lets the list's height push through every column.
+        assert_eq!(nested_scroll(false).h, 500.0);
+    }
+
     fn list(items: &[(u64, &str)]) -> Element {
         let rows = items.iter().map(|&(k, s)| {
             let r: Element = row([text(s).into(), spacer().grow(1.0).into()]).into();

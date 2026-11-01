@@ -1,6 +1,7 @@
 //! Declarative (Elm-style) UI framework rendered entirely with distance fields.
 
 pub mod anim;
+pub mod kinetic;
 mod layout;
 mod outline;
 pub mod path;
@@ -16,7 +17,7 @@ pub use render::{Bitmap, Color, Rect, Shadow};
 pub use runtime::task::{Sleep, sleep};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;
-pub use text::{Font, Text};
+pub use text::{Font, Text, TextLayout};
 pub use web_time::Instant;
 pub use widget::{
     BuildCx, Element, Event, EventCx, Handle, Key, Layer, PaintCx, Scope, State, Widget,

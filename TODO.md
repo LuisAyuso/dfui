@@ -54,21 +54,16 @@ State and async:
 
 Layout:
 
-- [ ] `min_height`/`min_width` modifiers on `Styled` (or a `fill()` that is
-      `grow(1)` + zero basis). A `scroll` nested in flex columns doesn't
-      bound: each column's automatic minimum height is its content's, so the
-      scroll grows to the whole list. The app needed `.grow(1).height(0)` on
-      every wrapper. Mention it in `scroll`'s docs.
+- [x] `min_width`/`min_height` modifiers and `fill()` (grow into the space
+      left, zero basis and minimum) for flex boxes around a `scroll`, which
+      otherwise grows to its whole list; `scroll`'s docs say so.
 
 Custom widgets:
 
-- [ ] Public kinetic-drag helpers (drag slop, velocity window, fling decay).
-      A custom scrolling widget (the card stack) copied them from
-      `scroll.rs`.
-- [ ] `PaintCx::with_clip(rect, |cx| ..)` instead of swapping the public
-      `cx.clip` field by hand.
-- [ ] Text measurement for widgets outside the crate (`PaintCx`'s `Text`
-      is `pub(crate)`), needed to right-align or truncate in `paint`.
+- [x] Public kinetic drag (`dfui::kinetic::Drag`: slop, release velocity,
+      fling decay); `scroll` uses it.
+- [x] `PaintCx::with_clip(rect, |cx| ..)`.
+- [x] `PaintCx::measure` for text width/height in `paint`.
 
 Text:
 
