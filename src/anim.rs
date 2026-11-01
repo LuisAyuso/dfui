@@ -111,8 +111,10 @@ impl<T: Lerp + PartialEq> Animated<T> {
     }
 }
 
-/// Morph between two `Path`s, e.g. two glyphs. Contours pair up in order;
-/// one without a partner shrinks to its centre. Within a pair, the contour
+/// Morph between two `Path`s, e.g. two glyphs. Each contour pairs with the
+/// nearest one (by centre) of the other path that winds the same way, so
+/// outlines meet outlines and holes meet holes whatever order the fonts list
+/// them in; one without a partner shrinks to its centre. Within a pair, the contour
 /// with fewer segments has them cut (which keeps its shape) into as many
 /// pieces as needed to match the other, the longest pieces first, and the
 /// pairing starts at the offset with the least travel. Each segment's points
@@ -124,10 +126,9 @@ pub struct Morph {
 
 impl Morph {
     pub fn new(from: &Path, to: &Path) -> Self {
-        let n = from.contours.len().max(to.contours.len());
         let (mut a, mut b) = (Path::default(), Path::default());
-        for i in 0..n {
-            let (x, y) = match (from.contours.get(i), to.contours.get(i)) {
+        for pair in pairs(from, to) {
+            let (x, y) = match pair {
                 (Some(x), Some(y)) if x.len() <= y.len() => (split(x, y), y.clone()),
                 (Some(x), Some(y)) => (x.clone(), split(y, x)),
                 (Some(x), None) => (x.clone(), collapse(x)),
@@ -153,6 +154,39 @@ impl Morph {
 
 fn lerp_quad(a: &Quad, b: &Quad, t: f32) -> Quad {
     [0, 1, 2].map(|i| [a[i][0].lerp(b[i][0], t), a[i][1].lerp(b[i][1], t)])
+}
+
+type Contour = Vec<Quad>;
+
+/// `from`'s contours, each with its partner in `to` if one is left that winds
+/// the same way (nearest centre first), then `to`'s unpaired contours.
+fn pairs<'a>(from: &'a Path, to: &'a Path) -> Vec<(Option<&'a Contour>, Option<&'a Contour>)> {
+    let centre = |c: &Contour| collapse(c).first().map_or([0.0; 2], |q| q[0]);
+    // Shoelace over the control polygon: its sign is the winding.
+    let clockwise = |c: &Contour| {
+        let pts = c.iter().flat_map(|q| [q[0], q[1]]);
+        let next = c.iter().flat_map(|q| [q[1], q[2]]);
+        pts.zip(next)
+            .map(|(a, b)| a[0] * b[1] - b[0] * a[1])
+            .sum::<f32>()
+            > 0.0
+    };
+    let mut free: Vec<&Contour> = to.contours.iter().collect();
+    let mut out = Vec::new();
+    for x in &from.contours {
+        let (cx, wx) = (centre(x), clockwise(x));
+        let d = |y: &&Contour| {
+            let cy = centre(y);
+            (cx[0] - cy[0]).powi(2) + (cx[1] - cy[1]).powi(2)
+        };
+        let best = (free.iter().enumerate())
+            .filter(|(_, y)| clockwise(y) == wx)
+            .min_by(|a, b| d(a.1).total_cmp(&d(b.1)))
+            .map(|(k, _)| k);
+        out.push((Some(x), best.map(|k| free.remove(k))));
+    }
+    out.extend(free.into_iter().map(|y| (None, Some(y))));
+    out
 }
 
 /// Every point of `c` at its centre, so a contour can grow from or shrink to nothing.
@@ -298,6 +332,25 @@ mod tests {
             let d = ((q[2][0] - q[0][0]).powi(2) + (q[2][1] - q[0][1]).powi(2)).sqrt();
             assert!((d - 1.0).abs() < 1e-5, "{q:?}");
         }
+    }
+
+    #[test]
+    fn holes_pair_with_holes_whatever_the_order() {
+        let outer = Path::polygon(&[[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]]);
+        let mut hole = Path::polygon(&[[1.0, 1.0], [3.0, 1.0], [3.0, 3.0], [1.0, 3.0]]);
+        hole.contours[0].reverse();
+        for q in &mut hole.contours[0] {
+            q.reverse();
+        }
+        let (o, h) = (outer.contours[0].clone(), hole.contours[0].clone());
+        let a = Path {
+            contours: vec![o.clone(), h.clone()],
+        };
+        let b = Path {
+            contours: vec![h, o],
+        };
+        // The same shape listed hole-first: nothing should move.
+        assert_eq!(Morph::new(&a, &b).at(0.5), a);
     }
 
     #[test]

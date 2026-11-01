@@ -128,6 +128,12 @@ impl Text {
         faces.len() - 1
     }
 
+    /// Baseline below the top of a line.
+    pub(crate) fn ascent(&self, font: Font, size: f32) -> f32 {
+        let id = self.face_id(font);
+        line_box(&self.faces.borrow()[id].1, size).0
+    }
+
     pub fn line_height(&self, font: Font, size: f32) -> f32 {
         let id = self.face_id(font);
         let (a, d, g) = line_box(&self.faces.borrow()[id].1, size);
@@ -622,6 +628,10 @@ mod tests {
                 }
             }
         }
-        assert_eq!(m.at(0.0).contours[1], o.contours[1]);
+        // O's outline becomes C's; its hole (listed first) has no partner and
+        // shrinks to a point.
+        assert_eq!(m.at(0.0).contours[0], o.contours[0]);
+        let hole = &m.at(1.0).contours[0];
+        assert!(hole.iter().flatten().all(|p| p == &hole[0][0]));
     }
 }
