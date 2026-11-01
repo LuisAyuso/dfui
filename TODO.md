@@ -78,10 +78,9 @@ Widgets:
 - [x] Icon button: `icon_button(&shape)`, borderless, shrinks on press and
       springs back past its size; `icon(&shape)` without the button. Shapes
       (`Shape`) are stored once like glyphs and drawn into any rect.
-- [ ] `tabs` too narrow for its labels (6 demo tabs on a 411dp phone): the
-      labels overflow their equal slots, but the indicator and hit-testing
-      still use the slots, so tapping "Cards" selects "Async". Clip or
-      scroll the labels, or hit-test against their real rects.
+- [x] `tabs` slots sized by their labels (plus a share of the spare width),
+      so underline and taps match what's drawn; the selected label morphs
+      to bold. Tab bars wider than the window still overflow (clipped).
 - [ ] `tabs`/`segmented` styling: label font, size and colors, and the
       divider color are fixed for a light theme (see Theming).
 - [ ] Determinate progress bar (playback position, download progress).
