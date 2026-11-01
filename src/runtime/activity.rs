@@ -88,7 +88,6 @@ pub(crate) fn run<A: App>(mut rt: Runtime<A>, app: AndroidApp) {
             (rt.next_frame.into_iter().chain(timer).min()).map(|t| t.saturating_duration_since(now))
         };
         app.poll_events(timeout, |ev| match ev {
-            PollEvent::Wake => rt.woken(),
             PollEvent::Main(MainEvent::InitWindow { .. }) => {
                 if let Some(native) = app.native_window() {
                     let window = Window {
@@ -121,6 +120,11 @@ pub(crate) fn run<A: App>(mut rt: Runtime<A>, app: AndroidApp) {
         });
         if let Ok(mut events) = app.input_events_iter() {
             while events.next(|ev| input(&mut rt, &app, ev)) {}
+        }
+        // A wake can arrive as any event, not only `PollEvent::Wake`; missing
+        // one would leave the waker pending and silence it for good.
+        if rt.loop_waker.as_ref().is_some_and(|w| w.pending()) {
+            rt.woken();
         }
         if rt.renderer.is_some() && redraw.take() {
             rt.paint();

@@ -62,6 +62,12 @@ impl LoopWaker {
     pub fn clear(&self) {
         self.pending.store(false, Ordering::Release);
     }
+
+    /// A wake was sent and not yet handled.
+    #[cfg(target_os = "android")]
+    pub fn pending(&self) -> bool {
+        self.pending.load(Ordering::Acquire)
+    }
 }
 
 impl Wake for LoopWaker {
