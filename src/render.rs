@@ -6,7 +6,6 @@ use std::sync::{Arc, Weak};
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
-use winit::window::Window;
 
 use crate::text::Text;
 
@@ -789,8 +788,22 @@ impl Gpu {
     }
 }
 
+/// The platform window a `Renderer` draws into.
+pub(crate) trait Host {
+    fn surface(&self, instance: &wgpu::Instance) -> wgpu::Surface<'static>;
+    /// Physical px.
+    fn size(&self) -> (u32, u32);
+    fn scale(&self) -> f32;
+    fn request_redraw(&self);
+    fn pre_present(&self) {}
+    fn refresh_mhz(&self) -> Option<u32> {
+        None
+    }
+    /// Shows or hides the soft keyboard.
+    fn set_ime(&self, _on: bool) {}
+}
+
 pub(crate) struct Renderer {
-    window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     gpu: Gpu,
@@ -804,6 +817,8 @@ pub(crate) struct Renderer {
     show_damage: Option<usize>,
     /// Last presented frame carries the overlay tint; next one must present.
     tinted: bool,
+    /// Last, so it's dropped after the surface drawing into it.
+    window: Box<dyn Host>,
 }
 
 fn canvas(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::Texture {
@@ -839,10 +854,8 @@ fn scissor(d: Rect, scale: f32, (w, h): (u32, u32)) -> [u32; 4] {
 impl Renderer {
     /// Async because adapter and device requests are; on native they resolve
     /// on first poll, on the web they wait for the browser.
-    pub async fn new(instance: wgpu::Instance, window: Arc<Window>) -> Renderer {
-        let surface = instance
-            .create_surface(window.clone())
-            .expect("create surface");
+    pub async fn new(instance: wgpu::Instance, window: Box<dyn Host>) -> Renderer {
+        let surface = window.surface(&instance);
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
@@ -860,7 +873,7 @@ impl Renderer {
         // Blend in sRGB space like browsers do; linear blending makes AA edges look thin and stepped.
         let view_format = format.remove_srgb_suffix();
         let gpu = Gpu::new(&adapter, view_format).await;
-        let size = window.inner_size();
+        let (width, height) = window.size();
         let copyable = caps.usages.contains(wgpu::TextureUsages::COPY_DST);
         let config = wgpu::SurfaceConfiguration {
             usage: if copyable {
@@ -869,8 +882,8 @@ impl Renderer {
                 wgpu::TextureUsages::RENDER_ATTACHMENT
             },
             format,
-            width: size.width.max(1),
-            height: size.height.max(1),
+            width: width.max(1),
+            height: height.max(1),
             present_mode: wgpu::PresentMode::AutoVsync,
             desired_maximum_frame_latency: 2,
             alpha_mode: caps.alpha_modes[0],
@@ -884,7 +897,6 @@ impl Renderer {
         surface.configure(&gpu.device, &config);
         let canvas = copyable.then(|| canvas(&gpu.device, &config));
         Renderer {
-            window,
             surface,
             config,
             gpu,
@@ -892,11 +904,12 @@ impl Renderer {
             fresh: true,
             show_damage: std::env::var_os("DFUI_SHOW_DAMAGE").map(|_| 0),
             tinted: false,
+            window,
         }
     }
 
-    pub fn window(&self) -> &Window {
-        &self.window
+    pub fn window(&self) -> &dyn Host {
+        &*self.window
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
@@ -917,7 +930,7 @@ impl Renderer {
     /// Redraws `damage` (logical px; empty redraws nothing), or everything when
     /// `None`.
     pub fn render(&mut self, scene: &Scene, text: &mut Text, damage: Option<Rect>) -> Outcome {
-        let scale = self.window.scale_factor() as f32;
+        let scale = self.window.scale();
         let viewport = [
             self.config.width as f32 / scale,
             self.config.height as f32 / scale,
@@ -1008,7 +1021,7 @@ impl Renderer {
                 self.window.request_redraw();
             }
         }
-        self.window.pre_present_notify();
+        self.window.pre_present();
         self.gpu.queue.present(frame);
         Outcome::Presented(waited)
     }

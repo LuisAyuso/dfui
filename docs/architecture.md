@@ -28,10 +28,14 @@ RedrawRequested ◄── request_redraw ◄── measure (taffy) + place ◄�
  paint every node ──► Scene (flat instance list) ──► Renderer (one pass) ──► surface
 ```
 
-`Runtime` (`src/runtime.rs`) is the winit `ApplicationHandler` that owns the
-app, the current element tree, per-widget state, the text system and the
-renderer. On Android the renderer is dropped on `suspended` and rebuilt on
-`resumed`, since the native window is destroyed when backgrounded.
+`Runtime` (`src/runtime/mod.rs`) owns the app, the current element tree,
+per-widget state, the text system and the renderer. On desktop and the web
+it is a winit `ApplicationHandler`. On Android, `runtime/activity.rs` drives
+it from android-activity's `poll_events` instead, so the loop can return on
+`onDestroy` and start again for a recreated activity; winit can't do either.
+There, the renderer is dropped when the native window goes away
+(backgrounded) and rebuilt when a new one arrives. The renderer only sees
+the window through the `Host` trait.
 
 ## Modules
 
@@ -44,13 +48,17 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
 | `anim.rs` | `Animated<T>` transitions, `Lerp`, `ease` curves; driven by `PaintCx::now` and `request_frame`. `Morph` between two `Path`s (e.g. glyphs), cutting segments of the shorter contour into as many pieces as needed. |
 | `path.rs` | `Path`: contours of quadratic segments, filled by `PaintCx::path` through the glyph renderer (per-frame shapes use a reserved region of the outline buffers). |
 | `layout.rs` | Flattens the tree to pre-order nodes; `measure` runs taffy, `place` produces absolute rects, clips and scroll offsets. |
-| `task.rs` | Widget-owned futures/streams, polling, the event-loop waker. |
-| `runtime.rs` | Event loop, input → `Event` translation, dispatch, pointer capture, frame stats, `snapshot`. |
+| `runtime/mod.rs` | `Runtime`: input → `Event` translation, dispatch, pointer capture, focus, frame pacing and stats. |
+| `runtime/winit_app.rs` | Desktop and web event loop (winit `ApplicationHandler`). |
+| `runtime/activity.rs` | Android event loop on android-activity: lifecycle, touch, keys, soft keyboard, system bar icon color. |
+| `runtime/android.rs` | `dfui::android`: `with_activity` JNI helper, system bar insets and appearance. |
+| `runtime/task.rs` | Widget-owned futures/streams, polling, `sleep` timers, the event-loop waker. |
+| `runtime/clipboard.rs` | System clipboard on desktop, in-app elsewhere. |
+| `runtime/bench.rs` | `Bench`, `GpuBench` and `snapshot`, through the real runtime without a window. |
 | `render.rs` | `Scene`, `Color`/`Rect`/`Shadow`, wgpu setup, the single render pass, GPU timestamp timing, offscreen rendering. |
 | `shader.wgsl` | Vertex expands instances to quads; fragment does SDF shapes (kind 0) and outline glyphs (kind 1). |
 | `text.rs` | `Font` handles (bundled DejaVu Sans as default and fallback), per-word shaping with harfrust, greedy word wrap, lazy glyph outline building. |
 | `outline.rs` | Converts glyph contours to monotonic quadratics and per-glyph band lists for the shader. |
-| `android.rs` | JNI query for system bar / cutout insets. |
 
 ## Widgets and state
 
@@ -83,7 +91,7 @@ renderer. On Android the renderer is dropped on `suspended` and rebuilt on
   `Future` or `futures_core::Stream`, so they can come from any runtime.
   Streams collect into `S: Default + Extend<Item>` (`Vec`, `String`, ...).
 - In `expand` a builder starts its source as a task keyed by node id
-  (`src/task.rs`), or keeps the running one when the hash of `deps` matches.
+  (`src/runtime/task.rs`), or keeps the running one when the hash of `deps` matches.
   New deps reset the snapshot and replace the task. Tasks are dropped with
   their node in the same pass that drops state, which cancels them.
 - Tasks are polled on the UI thread, so sources need not be `Send`. One

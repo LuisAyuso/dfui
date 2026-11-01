@@ -4,13 +4,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::task::{self, Context, Wake, Waker};
 use std::time::Duration;
 
 use web_time::Instant;
-use winit::event_loop::EventLoopProxy;
 
 use crate::widget::State;
 
@@ -47,14 +46,14 @@ pub(crate) fn poll(tasks: &mut Tasks, states: &mut HashMap<u64, State>, waker: &
 
 /// Wakes the event loop from any thread or runtime; one pending wake at a time.
 pub(crate) struct LoopWaker {
-    proxy: Mutex<EventLoopProxy<()>>,
+    wake: Box<dyn Fn() + Send + Sync>,
     pending: AtomicBool,
 }
 
 impl LoopWaker {
-    pub fn new(proxy: EventLoopProxy<()>) -> Arc<Self> {
+    pub fn new(wake: impl Fn() + Send + Sync + 'static) -> Arc<Self> {
         Arc::new(LoopWaker {
-            proxy: Mutex::new(proxy),
+            wake: Box::new(wake),
             pending: AtomicBool::new(false),
         })
     }
@@ -72,8 +71,7 @@ impl Wake for LoopWaker {
 
     fn wake_by_ref(self: &Arc<Self>) {
         if !self.pending.swap(true, Ordering::AcqRel) {
-            // Fails only once the loop has exited.
-            let _ = self.proxy.lock().unwrap().send_event(());
+            (self.wake)();
         }
     }
 }

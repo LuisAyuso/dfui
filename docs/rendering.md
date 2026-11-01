@@ -135,7 +135,7 @@ back to back rather than against this table.
 
 ## Partial redraws
 
-In `render.rs` / `runtime.rs`: a scissored retained canvas, per-node damage
+In `render.rs` / `runtime/mod.rs`: a scissored retained canvas, per-node damage
 from a scene diff, and idle frames skipped entirely. Not yet measured on the
 phone.
 

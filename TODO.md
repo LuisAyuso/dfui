@@ -17,8 +17,8 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [ ] Faster outline text: store curves inline in each band list (drop the
       index indirection, one fewer dependent load per curve). Re-measure with
       the Bench screen.
-- [ ] Status bar icon color: light/dark appearance so icons stay visible on
-      light backgrounds.
+- [x] Status bar icon color: dark icons over a light `App::background`
+      (API 30+).
 
 ## Findings from a real app
 
@@ -27,23 +27,17 @@ custom card-stack widget, background downloads, a playback service).
 
 Android lifecycle and platform:
 
-- [ ] Leave the run loop on `MainEvent::Destroy`. Today `run_android` never
-      returns, and `NativeActivity.onDestroy` waits for `android_main` to
-      return, so the UI thread blocks forever. With the process kept alive (a
-      service, a download), reopening calls `android_main` again and winit
-      refuses a second event loop (`RecreationAttempt`). The app had to
-      subclass NativeActivity and `System.exit` before `super.onDestroy()`.
-      Document whatever the supported answer is.
+- [x] Leave the run loop on `MainEvent::Destroy`: Android runs on
+      android-activity directly instead of winit, whose loop ignores
+      Destroy and can't be created twice in a process. `run_android`
+      returns on Destroy and runs again for a recreated activity.
 - [ ] Packaging beyond cargo-apk: services, resources (launcher icon) and
       app Java classes can't be declared, so the app builds its APK by hand
       (javac, d8, aapt2 compile/link, zipalign, apksigner). Ship that as a
       script/template, or fold it into the cargo-apk replacement (Tooling).
-- [ ] JNI helper: run a closure on a JNI-attached thread with the activity
-      at hand. Native threads can't see the app's class loader, so app
-      classes must be reached by name (`Intent.setClassName`); worth
-      documenting next to the helper.
-- [ ] Logging: `eprintln!` is lost on Android; document `log` +
-      `android_logger` as the way to log from app code.
+- [x] JNI helper: `dfui::android::with_activity`; its module docs say how
+      to reach app classes from native threads.
+- [x] Logging: `log` + `android_logger`, documented in the README.
 
 State and async:
 
@@ -89,6 +83,10 @@ Widgets:
 
 - [ ] Transparent / icon button: `flat()` only drops the shadow, so every
       icon button passes its surface color to look borderless (see Theming).
+- [ ] `tabs` too narrow for its labels (6 demo tabs on a 411dp phone): the
+      labels overflow their equal slots, but the indicator and hit-testing
+      still use the slots, so tapping "Cards" selects "Async". Clip or
+      scroll the labels, or hit-test against their real rects.
 - [ ] `tabs`/`segmented` styling: label font, size and colors, and the
       divider color are fixed for a light theme (see Theming).
 - [ ] Determinate progress bar (playback position, download progress).

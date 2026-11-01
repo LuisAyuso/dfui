@@ -105,7 +105,10 @@ cargo install cargo-apk
 cargo apk run --lib --release
 ```
 
-The repository README covers the SDK and NDK setup.
+`run_android` returns when the activity is destroyed. If the process outlives
+it, `android_main` runs again for the next activity. Log with `log` and
+`android_logger`, since `eprintln!` output is lost. The repository README
+covers the SDK and NDK setup.
 
 ## Web
 

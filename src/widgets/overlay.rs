@@ -12,7 +12,7 @@ use super::{
 };
 use crate::anim::{Animated, ease};
 use crate::render::{Color, Rect, Shadow};
-use crate::task::sleep;
+use crate::runtime::task::sleep;
 use crate::widget::{Element, Event, EventCx, Handle, Layer, PaintCx, Scope, State, Widget};
 
 type Handler = Box<dyn Fn(&mut EventCx)>;

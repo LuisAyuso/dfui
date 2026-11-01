@@ -1,14 +1,11 @@
 //! Declarative (Elm-style) UI framework rendered entirely with distance fields.
 
-#[cfg(target_os = "android")]
-mod android;
 pub mod anim;
 mod layout;
 mod outline;
 pub mod path;
 mod render;
 mod runtime;
-mod task;
 mod text;
 mod widget;
 pub mod widgets;
@@ -16,9 +13,9 @@ pub mod widgets;
 pub use anim::Animated;
 pub use path::Path;
 pub use render::{Bitmap, Color, Rect, Shadow};
+pub use runtime::task::{Sleep, sleep};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;
-pub use task::{Sleep, sleep};
 pub use text::{Font, Text};
 pub use web_time::Instant;
 pub use widget::{
@@ -41,16 +38,14 @@ pub fn run<A: App>(app: A) {
 }
 
 #[cfg(target_os = "android")]
+pub use runtime::android;
+#[cfg(target_os = "android")]
 pub use winit::platform::android::activity::AndroidApp;
 
+/// Runs `app` until the activity is destroyed; call it from `android_main`.
+/// The process may outlive the activity (a service, a download) and start
+/// `android_main` again for a new one.
 #[cfg(target_os = "android")]
 pub fn run_android<A: App>(app: A, android: AndroidApp) {
-    use winit::platform::android::EventLoopBuilderExtAndroid;
-    let event_loop = winit::event_loop::EventLoop::builder()
-        .with_android_app(android.clone())
-        .build()
-        .expect("event loop");
-    let mut rt = runtime::Runtime::new(app);
-    rt.android = Some(android);
-    rt.run(event_loop);
+    runtime::activity::run(runtime::Runtime::new(app), android);
 }

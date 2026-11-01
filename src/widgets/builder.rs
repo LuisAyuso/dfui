@@ -7,7 +7,7 @@ use futures_core::Stream;
 use taffy::{FlexDirection, Style};
 
 use super::Styled;
-use crate::task::Task;
+use crate::runtime::task::Task;
 use crate::widget::{BuildCx, Element, Scope, State, Widget};
 
 /// What an async source has produced so far, and whether it has finished.

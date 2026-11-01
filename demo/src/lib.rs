@@ -828,15 +828,15 @@ mod tests {
     #[test]
     #[ignore = "needs a GPU; writes target/demo.png for eyeballing"]
     fn snapshot() {
-        let img = dfui::snapshot(super::Demo::default(), (800, 1000), 2.0);
+        let img = dfui::snapshot(Demo::default(), (800, 1000), 2.0);
         img.save(concat!(env!("CARGO_MANIFEST_DIR"), "/../target/demo.png"))
             .unwrap();
     }
 
     struct Ladder;
 
-    impl dfui::App for Ladder {
-        fn view(&self) -> dfui::Element {
+    impl App for Ladder {
+        fn view(&self) -> Element {
             use dfui::widgets::{Styled, column, text};
 
             column([10.0, 13.0, 18.0, 32.0, 64.0, 240.0].map(|s| text("Rag&@ %g1").size(s).into()))

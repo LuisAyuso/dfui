@@ -99,6 +99,14 @@ instead of `run` only builds it. For real distribution, point the keystore
 variables at a release keystore. Frame stats (`fps … cpu … gpu …`) are how the
 baselines in `TODO.md` are measured; use the demo's Bench screen.
 
+In an app, `android_main` calls `dfui::run_android`, which returns when the
+activity is destroyed. If the process lives on (a service, a download),
+Android calls `android_main` again for the next activity, and it can run
+again. `eprintln!` output is lost on Android, so log with `log` and
+`android_logger` (see `android_main` in `demo/src/lib.rs`) and read the logs
+with `adb logcat`. `dfui::android::with_activity` runs JNI calls with the
+activity from any thread.
+
 ## License
 
 [WTFPL](LICENSE). The bundled fonts `assets/DejaVuSans*.ttf` keep their own

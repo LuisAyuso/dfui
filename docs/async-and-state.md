@@ -2,7 +2,7 @@
 
 Study of how external, possibly asynchronous state should reach the UI, and
 how that interacts with the web (wasm) port. The executor part is implemented
-(`src/task.rs`); the state design moved to `state-management.md`.
+(`src/runtime/task.rs`); the state design moved to `state-management.md`.
 
 ## Problem
 
