@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::borrow::Cow;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use web_time::Instant;
@@ -295,6 +296,18 @@ impl PaintCx<'_> {
         let out = f(self);
         self.clip = saved;
         out
+    }
+
+    /// `s` cut to fit `max_lines` lines of `max_width`, ending in "…" when cut.
+    pub fn truncate<'s>(
+        &self,
+        s: &'s str,
+        font: Font,
+        size: f32,
+        max_width: f32,
+        max_lines: usize,
+    ) -> Cow<'s, str> {
+        self.text.truncate(s, font, size, max_width, max_lines)
     }
 
     /// `s` laid out as `text` would draw it, for its `width` and `height`.

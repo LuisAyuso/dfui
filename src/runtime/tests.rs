@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
+use crate::text::Font;
 use crate::widget::Scope;
 use crate::widgets::{
     Snapshot, Styled, button, column, dialog, future_builder, overlays, popup, provide, radio,
@@ -735,4 +736,52 @@ fn sleep_resolves_after_its_deadline() {
         .unwrap()
         .get::<Snapshot<Option<u32>>>();
     assert_eq!(s.data, Some(7));
+}
+
+struct Secret;
+
+impl App for Secret {
+    fn view(&self) -> Element {
+        stateful(|v: &String, h| {
+            text_input(v.clone())
+                .password()
+                .on_change(move |cx, v| cx.update(h, |s: &mut String| *s = v))
+        })
+        .into()
+    }
+}
+
+#[test]
+fn password_keeps_the_value_but_doesnt_copy_it() {
+    let mut rt = Runtime::new(Secret);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::Text("hunter2".into()));
+    assert_eq!(root::<String, _>(&mut rt), "hunter2");
+    rt.dispatch(Event::Key(Key::SelectAll));
+    rt.dispatch(Event::Key(Key::Copy));
+    assert_eq!(rt.clipboard.get(), None);
+}
+
+struct Title;
+
+impl App for Title {
+    fn view(&self) -> Element {
+        column([text("A title far too long for the window")
+            .max_lines(1)
+            .into()])
+        .into()
+    }
+}
+
+#[test]
+fn max_lines_keeps_a_label_to_one_line() {
+    let mut rt = Runtime::new(Title);
+    rt.viewport = (100.0, 200.0);
+    rt.relayout();
+    let line = rt.text.line_height(Font::DEFAULT, 16.0);
+    let r = rt.placed[1].rect;
+    assert!(r.h <= line.ceil() && r.w <= 100.0, "{r:?}");
 }

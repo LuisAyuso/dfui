@@ -12,8 +12,6 @@ use dfui::{
 };
 use futures_channel::{mpsc, oneshot};
 
-static BOLD: Font = Font(include_bytes!("../../assets/DejaVuSans-Bold.ttf"));
-
 const BG: Color = Color::hex(0xf2f3f7);
 const INK: Color = Color::hex(0x1d2030);
 const MUTED: Color = Color::hex(0x6b7080);
@@ -70,7 +68,7 @@ impl Screen {
             return bench(h);
         }
         let header = row([
-            text("dfui").font(BOLD).size(28.0).color(INK).into(),
+            text("dfui").font(Font::BOLD).size(28.0).color(INK).into(),
             spacer().grow(1.0).into(),
             button(text("Bench").color(INK))
                 .on_click(on(h, |s| s.bench = true))
@@ -128,6 +126,15 @@ impl Screen {
             .gap(12.0)
         });
 
+        let password = stateful(|pw: &String, h| {
+            text_input(pw.clone())
+                .password()
+                .placeholder("Password")
+                .color(INK)
+                .accent(ACCENT)
+                .on_change(move |cx, v| cx.update(h, |p: &mut String| *p = v))
+        });
+
         let counter = row([
             button(text("−").size(22.0).color(Color::WHITE))
                 .on_click(on(h, |s| s.count -= 1))
@@ -154,9 +161,11 @@ impl Screen {
 
         column([
             section("Text input", greeting.into()),
+            section("Password", password.into()),
             section("Buttons", counter.into()),
             section("Wrapping row", chips.into()),
-            text("Shapes are distance fields and glyphs are evaluated from their outlines, so both stay crisp at any size. Resize the window to watch the flex layout reflow.")
+            text("Shapes are distance fields and glyphs are evaluated from their outlines, so both stay crisp at any size. Resize the window to watch the flex layout reflow, and this paragraph end in an ellipsis once it needs more than three lines.")
+                .max_lines(3)
                 .size(15.0)
                 .color(MUTED)
                 .into(),

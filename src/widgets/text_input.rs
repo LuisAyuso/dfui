@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::ops::Range;
 use std::time::Duration;
@@ -35,6 +36,7 @@ pub struct TextInput {
     size: f32,
     color: Color,
     accent: Color,
+    password: bool,
     on_change: Option<OnChange>,
     style: Style,
 }
@@ -48,6 +50,7 @@ pub fn text_input(value: impl Into<String>) -> TextInput {
         size: 16.0,
         color: Color::BLACK,
         accent: Color::hex(0x3b6fe0),
+        password: false,
         on_change: None,
         style: Style {
             padding: taffy::Rect {
@@ -87,6 +90,21 @@ impl TextInput {
         self.accent = c;
         self
     }
+    /// Shows a dot per char and doesn't copy.
+    pub fn password(mut self) -> Self {
+        self.password = true;
+        self
+    }
+
+    /// The value as drawn: one dot per char for passwords, so caret
+    /// positions (in chars) line up either way.
+    fn shown(&self) -> Cow<'_, str> {
+        if self.password {
+            Cow::Owned("•".repeat(self.value.chars().count()))
+        } else {
+            Cow::Borrowed(&self.value)
+        }
+    }
 
     fn content(&self, r: Rect) -> Rect {
         let p = self.style.padding;
@@ -102,7 +120,7 @@ impl TextInput {
 
     /// Caret stops and the horizontal shift that keeps the caret in view.
     fn stops(&self, text: &Text, caret: usize, width: f32) -> (Vec<f32>, f32) {
-        let stops = text.caret_stops(&self.value, self.font, self.size);
+        let stops = text.caret_stops(&self.shown(), self.font, self.size);
         let shift = (stops[caret] + 2.0 - width).max(0.0);
         (stops, shift)
     }
@@ -210,7 +228,7 @@ impl Widget for TextInput {
                 );
             } else {
                 cx.text(
-                    &self.value,
+                    &self.shown(),
                     self.font,
                     self.size,
                     self.color,
@@ -285,7 +303,7 @@ impl Widget for TextInput {
                 select(cx, to, if cx.shift { anchor } else { to });
             }
             Event::Key(Key::SelectAll) => select(cx, *bounds.last().unwrap(), 0),
-            Event::Key(k @ (Key::Copy | Key::Cut)) if !sel.is_empty() => {
+            Event::Key(k @ (Key::Copy | Key::Cut)) if !sel.is_empty() && !self.password => {
                 cx.copy(&self.value[self.byte(sel.start)..self.byte(sel.end)]);
                 if *k == Key::Cut {
                     replace(cx, sel, "");

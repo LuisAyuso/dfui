@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use taffy::{AvailableSpace, Size, Style};
@@ -12,6 +13,7 @@ pub struct Label {
     font: Font,
     size: f32,
     color: Color,
+    max_lines: Option<usize>,
     style: Style,
 }
 
@@ -22,6 +24,7 @@ pub fn text(s: impl Into<String>) -> Label {
         font: Font::DEFAULT,
         size: 16.0,
         color: Color::BLACK,
+        max_lines: None,
         style: Style::default(),
     }
 }
@@ -38,6 +41,18 @@ impl Label {
     pub fn color(mut self, c: Color) -> Self {
         self.color = c;
         self
+    }
+    /// At most `n` lines; cut text ends in "…".
+    pub fn max_lines(mut self, n: usize) -> Self {
+        self.max_lines = Some(n.max(1));
+        self
+    }
+
+    fn shown<'a>(&'a self, text: &Text, max_width: Option<f32>) -> Cow<'a, str> {
+        match (self.max_lines, max_width) {
+            (Some(n), Some(w)) => text.truncate(&self.text, self.font, self.size, w, n),
+            _ => Cow::Borrowed(&self.text),
+        }
     }
 }
 
@@ -68,7 +83,7 @@ impl Widget for Label {
             AvailableSpace::MinContent => Some(0.0),
             AvailableSpace::MaxContent => None,
         });
-        let l = text.layout(&self.text, self.font, self.size, max);
+        let l = text.layout(&self.shown(text, max), self.font, self.size, max);
         Size {
             width: known.width.unwrap_or(l.width),
             height: known.height.unwrap_or(l.height),
@@ -76,11 +91,13 @@ impl Widget for Label {
     }
     fn measure_key(&self) -> u64 {
         let mut h = DefaultHasher::new();
-        (&self.text, self.font, self.size.to_bits()).hash(&mut h);
+        (&self.text, self.font, self.size.to_bits(), self.max_lines).hash(&mut h);
         h.finish()
     }
     fn paint(&self, cx: &mut PaintCx) {
         let (r, s, c) = (cx.rect, self.size, self.color);
-        cx.text(&self.text, self.font, s, c, Some(r.w + 1.0), (r.x, r.y));
+        let max = Some(r.w + 1.0);
+        let shown = self.shown(cx.text, max);
+        cx.text(&shown, self.font, s, c, max, (r.x, r.y));
     }
 }

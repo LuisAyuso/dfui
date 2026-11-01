@@ -67,12 +67,13 @@ Custom widgets:
 
 Text:
 
-- [ ] Single-line labels with ellipsis / `max_lines` (titles in rows and
-      cards are only clipped today).
-- [ ] Export the bundled bold face (`Font::BOLD`); apps copy
-      `DejaVuSans-Bold.ttf` to get it.
-- [ ] `text_input` password masking (and input type hints for the Android
-      keyboard).
+- [x] Ellipsis: `text(..).max_lines(n)`, and `Text::truncate` /
+      `PaintCx::truncate` for custom widgets.
+- [x] `Font::BOLD` (bundled DejaVu Sans Bold).
+- [x] `text_input(..).password()`: a dot per char, no copy or cut.
+- [ ] Input type hints for the Android keyboard (password, number, email):
+      android-activity's `set_ime_editor_info` is a no-op on NativeActivity,
+      which has no editor view to carry an `inputType`.
 
 Widgets:
 

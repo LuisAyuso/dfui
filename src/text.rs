@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -6,6 +7,7 @@ use std::rc::Rc;
 use harfrust::{Buffer, ShapeOptions, ShapePlan, ShapePlanKey, ShaperFont};
 use read_fonts::model::Font as Face;
 use read_fonts::types::GlyphId;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::outline::Outlines;
 use crate::path::Path;
@@ -19,6 +21,8 @@ pub struct Font(pub &'static [u8]);
 impl Font {
     /// Bundled DejaVu Sans; also the fallback for chars a font lacks.
     pub const DEFAULT: Font = Font(include_bytes!("../assets/DejaVuSans.ttf"));
+    /// Bundled DejaVu Sans Bold.
+    pub const BOLD: Font = Font(include_bytes!("../assets/DejaVuSans-Bold.ttf"));
 }
 
 impl Hash for Font {
@@ -124,6 +128,33 @@ impl Text {
         let id = self.face_id(font);
         let (a, d, g) = line_box(&self.faces.borrow()[id].1, size);
         a + d + g
+    }
+
+    /// `s` cut to fit `max_lines` lines of `max_width`, ending in "…" when
+    /// cut. Words longer than a line are cut too.
+    // ponytail: binary search shapes ~log2(graphemes) candidates per call; cache by (s, width) if it shows up in profiles.
+    pub fn truncate<'a>(
+        &self,
+        s: &'a str,
+        font: Font,
+        size: f32,
+        max_width: f32,
+        max_lines: usize,
+    ) -> Cow<'a, str> {
+        // Layout heights are whole lines, rounded up.
+        let max_height = self.line_height(font, size) * max_lines as f32 + 1.0;
+        let fits = |t: &str| {
+            let l = self.layout(t, font, size, Some(max_width));
+            l.width <= max_width && l.height <= max_height
+        };
+        if fits(s) {
+            return Cow::Borrowed(s);
+        }
+        let cut = |end: usize| format!("{}…", s[..end].trim_end());
+        // Longest grapheme prefix that fits with the ellipsis.
+        let ends: Vec<usize> = s.grapheme_indices(true).map(|(i, _)| i).collect();
+        let n = ends.partition_point(|&e| fits(&cut(e)));
+        Cow::Owned(cut(ends[n.saturating_sub(1)]))
     }
 
     fn space(&self, face: FaceId, size: f32) -> f32 {
@@ -426,8 +457,33 @@ mod tests {
     }
 
     #[test]
+    fn truncate_ends_cut_text_with_an_ellipsis() {
+        let t = Text::default();
+        let (f, size) = (Font::DEFAULT, 16.0);
+        let w = |s: &str| t.layout(s, f, size, None).width;
+        let s = "The quick brown fox jumps over the lazy dog";
+        assert_eq!(t.truncate(s, f, size, 1000.0, 1), s);
+        let max = w("The quick brown");
+        let one = t.truncate(s, f, size, max, 1);
+        // The longest prefix that fits with its ellipsis.
+        assert_eq!(one, "The quick bro…");
+        assert!(w(&one) <= max && w("The quick brow…") > max);
+        let two = t.truncate(s, f, size, w("The quick brown"), 2);
+        assert!(
+            two.starts_with("The quick brown fox") && two.ends_with('…'),
+            "{two}"
+        );
+        // A single word wider than the line is cut inside it.
+        assert_eq!(
+            t.truncate("Supercalifragilistic", f, size, w("Super…"), 1),
+            "Super…"
+        );
+        assert_eq!(t.truncate("line\nbreak", f, size, 1000.0, 1), "line…");
+    }
+
+    #[test]
     fn missing_chars_fall_back_to_default_font() {
-        static BOLD: Font = Font(include_bytes!("../assets/DejaVuSans-Bold.ttf"));
+        const BOLD: Font = Font::BOLD;
         let t = Text::default();
         // U+1D5A0 is in DejaVu Sans but not in its bold cut.
         let l = t.layout("a\u{1d5a0}", BOLD, 20.0, None);
