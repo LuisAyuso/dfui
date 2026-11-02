@@ -39,6 +39,9 @@ pub enum Event {
     Text(String),
     /// Editing key pressed while this widget has focus.
     Key(Key),
+    /// Escape, or the Android back button: sent topmost first, so the
+    /// uppermost overlay can dismiss itself and stop it.
+    Back,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

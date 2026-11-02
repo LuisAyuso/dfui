@@ -22,6 +22,7 @@ use super::Runtime;
 use super::task::{self, LoopWaker};
 use crate::App;
 use crate::render::{Host, Renderer};
+use crate::widget::Event;
 
 struct Window {
     app: AndroidApp,
@@ -166,6 +167,12 @@ fn input<A: App>(rt: &mut Runtime<A>, app: &AndroidApp, ev: &InputEvent) -> Inpu
             rt.mods.set(ModifiersState::SHIFT, meta.shift_on());
             rt.mods.set(ModifiersState::CONTROL, meta.ctrl_on());
             rt.mods.set(ModifiersState::ALT, meta.alt_on());
+            if k.key_code() == Keycode::Back {
+                return match rt.dispatch(Event::Back) {
+                    true => InputStatus::Handled,
+                    false => InputStatus::Unhandled,
+                };
+            }
             let named = match k.key_code() {
                 Keycode::Del => Some(NamedKey::Backspace),
                 Keycode::ForwardDel => Some(NamedKey::Delete),

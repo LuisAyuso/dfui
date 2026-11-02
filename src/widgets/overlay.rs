@@ -138,7 +138,8 @@ impl Overlay {
         self.scrim = Some(scrim);
         self
     }
-    /// Runs on a press outside the content, which is consumed.
+    /// Runs on a press outside the content, which is consumed, and on
+    /// Escape or Android back while it is the topmost overlay.
     pub fn on_dismiss(mut self, f: impl Fn(&mut EventCx) + 'static) -> Self {
         self.on_dismiss = Some(Box::new(f));
         self
@@ -224,6 +225,19 @@ impl Widget for Overlay {
         }
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
+        if let Event::Back = ev {
+            if cx.state.get::<OverlayState>().shown {
+                if let Some(f) = &self.on_dismiss {
+                    f(cx);
+                    cx.stop();
+                }
+                // A modal keeps Back from what's under it.
+                if self.scrim.is_some() {
+                    cx.stop();
+                }
+            }
+            return;
+        }
         let at = pointer(ev);
         if let Show::Hover = self.show {
             let hit = at.map(|(x, y)| cx.hit(x, y));
@@ -304,8 +318,9 @@ pub fn bottom_sheet(child: impl Into<Element>) -> Overlay {
 }
 
 /// Short message at the bottom of the window for four seconds after it
-/// enters the tree. Shown through `Overlays` it is also removed after;
-/// in a plain tree give it a new `key` to show it again.
+/// enters the tree. Shown through `Overlays` it waits for earlier ones to
+/// leave and is removed after; in a plain tree give it a new `key` to show
+/// it again.
 pub fn snackbar(message: impl Into<String>) -> Overlay {
     let bar = container(text(message).size(14.0).color(Color::WHITE))
         .bg(Color::hex(0x323232))
@@ -332,6 +347,8 @@ struct Entry {
     key: u64,
     build: Build,
     closing: bool,
+    /// When a timed one enters the tree, once the ones before it are gone.
+    from: Option<Instant>,
     /// When it leaves the tree: set on close, or at show for timed ones.
     until: Option<Instant>,
 }
@@ -367,14 +384,19 @@ impl Handle<Overlays> {
             o.entries.retain(|e| e.until.is_none_or(|u| u > now));
             let key = o.next;
             o.next += 1;
-            let until = match build(Shown { h, key }).show {
-                Show::For(d) => Some(now + d + MOTION),
-                _ => None,
+            let (from, until) = match build(Shown { h, key }).show {
+                Show::For(d) => {
+                    let last = o.entries.iter().filter(|e| e.from.is_some());
+                    let from = last.filter_map(|e| e.until).fold(now, Instant::max);
+                    (Some(from), Some(from + d + MOTION))
+                }
+                _ => (None, None),
             };
             o.entries.push(Entry {
                 key,
                 build: Rc::new(build),
                 closing: false,
+                from,
                 until,
             });
         });
@@ -391,14 +413,14 @@ pub fn overlays<E: Into<Element>>(
     })
 }
 
-/// An entry behind a timer that removes it at `until`. Always a builder, so
-/// closing keeps the overlay's state (its animation).
+/// An entry behind a timer that removes it at `until`, and a timed one
+/// behind another that adds it at `from`. Always builders, so closing keeps
+/// the overlay's state (its animation).
 fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
-    let (build, closing, key) = (e.build.clone(), e.closing, e.key);
-    let wait = e.until.map(|u| u.saturating_duration_since(Instant::now()));
+    let (build, closing, key, until) = (e.build.clone(), e.closing, e.key, e.until);
     let timer = move |_: Scope| async move {
-        match wait {
-            Some(d) => sleep(d).await,
+        match until {
+            Some(u) => sleep(u.saturating_duration_since(Instant::now())).await,
             None => std::future::pending().await,
         }
     };
@@ -414,7 +436,16 @@ fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
         }
         o.into()
     };
-    Element::from(future_builder((key, closing), timer, view)).key(key)
+    let shown = move || Element::from(future_builder((key, closing), timer, view.clone()));
+    let Some(from) = e.from else {
+        return shown().key(key);
+    };
+    let queue = move |_: Scope| sleep(from.saturating_duration_since(Instant::now()));
+    let wait = move |snap: &Snapshot<Option<()>>| match snap.done {
+        true => shown(),
+        false => column([]).into(),
+    };
+    Element::from(future_builder(key, queue, wait)).key(key)
 }
 
 /// Shows `tip` above `child` while the pointer is over it.

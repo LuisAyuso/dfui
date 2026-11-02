@@ -11,8 +11,8 @@ use crate::text::Font;
 use crate::widget::Scope;
 use crate::widgets::{
     Snapshot, Styled, button, column, dialog, future_builder, icon_button, overlays, popup,
-    provide, radio, scroll, segmented, slider, stateful, stream_builder, text, text_input, toggle,
-    watch,
+    provide, radio, scroll, segmented, slider, snackbar, stateful, stream_builder, text,
+    text_input, toggle, watch,
 };
 
 /// State of the root `stateful`.
@@ -396,6 +396,49 @@ fn controller_animates_overlays_out_then_removes_them() {
     task::fire_timers(Instant::now());
     assert!(rt.drive());
     assert_eq!(rt.ids.len(), 4 + 2 + 6, "the first builds nothing");
+}
+
+#[test]
+fn back_dismisses_the_topmost_overlay_only() {
+    let mut rt = Runtime::new(Host);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    assert!(!rt.dispatch(Event::Back), "nothing to dismiss");
+    rt.dispatch(Event::PointerDown { x: 5.0, y: 5.0 });
+    rt.dispatch(Event::PointerUp { x: 5.0, y: 5.0 });
+    assert!(rt.dispatch(Event::Back), "closes the dialog");
+    assert!(
+        !rt.dispatch(Event::Back),
+        "a closing dialog lets it through"
+    );
+}
+
+struct Toasts;
+
+impl App for Toasts {
+    fn view(&self) -> Element {
+        overlays(|ov| {
+            button(text("toast")).height(40.0).on_click(move |cx| {
+                ov.show(cx, |_| snackbar("one"));
+                ov.show(cx, |_| snackbar("two"));
+            })
+        })
+        .into()
+    }
+}
+
+#[test]
+fn snackbars_queue_one_at_a_time() {
+    let mut rt = Runtime::new(Toasts);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.dispatch(Event::PointerDown { x: 5.0, y: 5.0 });
+    rt.dispatch(Event::PointerUp { x: 5.0, y: 5.0 });
+    task::fire_timers(Instant::now());
+    rt.drive();
+    // Host, column, button, its text; the first: queue, timer, overlay,
+    // sink, bar, text; the second: queue, its empty column.
+    assert_eq!(rt.ids.len(), 4 + 6 + 2, "the second waits for the first");
 }
 
 struct Long;

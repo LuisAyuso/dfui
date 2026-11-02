@@ -122,7 +122,9 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                 let (x, y) = self.cursor;
                 self.dispatch(Event::PointerMove { x, y });
             }
-            WindowEvent::CursorLeft { .. } => self.dispatch(Event::Leave),
+            WindowEvent::CursorLeft { .. } => {
+                self.dispatch(Event::Leave);
+            }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
@@ -146,7 +148,9 @@ impl<A: App> ApplicationHandler for Runtime<A> {
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 self.key_pressed(&event.logical_key, event.text.as_deref());
             }
-            WindowEvent::Ime(Ime::Commit(t)) => self.dispatch(Event::Text(t)),
+            WindowEvent::Ime(Ime::Commit(t)) => {
+                self.dispatch(Event::Text(t));
+            }
             WindowEvent::Touch(t) => self.touch(
                 t.id,
                 t.phase,

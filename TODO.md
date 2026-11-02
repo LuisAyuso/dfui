@@ -151,9 +151,12 @@ Widgets:
       `tooltip`, `dropdown`.
 - [x] Overlay host (`overlays`, `Handle<Overlays>::show`, `Shown::close`):
       slide in and out, removal after the exit animation on a `sleep` timer.
+- [x] Escape (Android back) dismisses the topmost overlay
+      (`Event::Back`); snackbars shown through `Overlays` queue, one at a
+      time.
 - [ ] Layer follow-ups: animate the dropdown's menu (keep it in the tree,
-      hidden, like the tooltip), snackbar queue (one at a time), Escape to dismiss,
-      flipping popups that would leave the window, tooltips on touch (long
+      hidden, like the tooltip), closing a snackbar early doesn't pull the
+      queue forward, flipping popups that would leave the window, tooltips on touch (long
       press), anchored popups still show when their anchor is scrolled away.
 
 ## Text

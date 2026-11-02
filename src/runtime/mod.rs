@@ -275,10 +275,11 @@ impl<A: App> Runtime<A> {
         }
     }
 
-    fn dispatch(&mut self, ev: Event) {
+    /// Whether a widget stopped the event.
+    fn dispatch(&mut self, ev: Event) -> bool {
         let nodes = walk(&self.root, &self.ids);
         if nodes.len() != self.placed.len() {
-            return;
+            return false;
         }
         let mut updates = Vec::new();
         let mut copied = None;
@@ -286,7 +287,8 @@ impl<A: App> Runtime<A> {
         let now = self.now();
         let mut focus = None;
         let keyboard = matches!(ev, Event::Text(_) | Event::Key(_));
-        let targets: Vec<usize> = match (keyboard, self.captured) {
+        let captured = self.captured.filter(|_| !matches!(ev, Event::Back));
+        let targets: Vec<usize> = match (keyboard, captured) {
             (true, _) => (self.focused)
                 .and_then(|id| nodes.iter().position(|n| n.id == id))
                 .into_iter()
@@ -320,9 +322,11 @@ impl<A: App> Runtime<A> {
             }
             (cx.capture, cx.stop)
         };
+        let mut stopped = false;
         for i in targets {
             // ponytail: every event visits every node; index by rect if trees get huge.
             let (capture, stop) = send(i, &ev, &mut self.states);
+            stopped = stop;
             if capture && self.captured.is_none() {
                 self.captured = Some(nodes[i].id);
                 for j in (0..nodes.len()).filter(|&j| j != i) {
@@ -358,6 +362,7 @@ impl<A: App> Runtime<A> {
         } else if redraw {
             self.reposition();
         }
+        stopped
     }
 
     fn key_pressed(&mut self, key: &WKey, text: Option<&str>) {
@@ -375,6 +380,10 @@ impl<A: App> Runtime<A> {
             WKey::Named(NamedKey::ArrowRight) => Some(Key::Right),
             WKey::Named(NamedKey::Home) => Some(Key::Home),
             WKey::Named(NamedKey::End) => Some(Key::End),
+            WKey::Named(NamedKey::Escape) => {
+                self.dispatch(Event::Back);
+                return;
+            }
             _ if shortcut("a") => Some(Key::SelectAll),
             _ if shortcut("c") => Some(Key::Copy),
             _ if shortcut("x") => Some(Key::Cut),
@@ -411,7 +420,9 @@ impl<A: App> Runtime<A> {
                 self.touch = Some(id);
                 self.dispatch(Event::PointerDown { x, y });
             }
-            TouchPhase::Moved => self.dispatch(Event::PointerMove { x, y }),
+            TouchPhase::Moved => {
+                self.dispatch(Event::PointerMove { x, y });
+            }
             TouchPhase::Ended => {
                 self.touch = None;
                 self.dispatch(Event::PointerUp { x, y });
