@@ -110,6 +110,38 @@ pub(crate) fn walk<'a>(root: &'a Element, ids: &[u64]) -> Vec<Node<'a>> {
     out
 }
 
+/// The widgets at pre-order indices `at` (sorted), in that order, visiting
+/// only subtrees that hold one; `ends[i]` is one past `i`'s last descendant.
+pub(crate) fn walk_to<'a>(root: &'a Element, ends: &[usize], at: &[usize]) -> Vec<&'a dyn Widget> {
+    fn go<'a>(
+        e: &'a Element,
+        i: usize,
+        ends: &[usize],
+        at: &[usize],
+        out: &mut Vec<&'a dyn Widget>,
+    ) {
+        if at.binary_search(&i).is_ok() {
+            out.push(e.widget.as_ref());
+        }
+        let mut j = i + 1;
+        for c in e.widget.children() {
+            let end = ends[j];
+            if at
+                .get(at.partition_point(|&t| t < j))
+                .is_some_and(|&t| t < end)
+            {
+                go(c, j, ends, at, out);
+            }
+            j = end;
+        }
+    }
+    let mut out = Vec::with_capacity(at.len());
+    if !at.is_empty() {
+        go(root, 0, ends, at, &mut out);
+    }
+    out
+}
+
 /// Paint order: pre-order, with each layer's subtree after everything it
 /// covers. Input goes in reverse.
 pub(crate) fn order(nodes: &[Node<'_>]) -> Vec<usize> {

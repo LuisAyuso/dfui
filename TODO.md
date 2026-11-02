@@ -197,8 +197,10 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
 - [ ] Upload only newly added glyph data (all outlines re-uploaded today).
 - [x] Flatten once per rebuild: ids cached, other passes re-walk the tree
       (`docs/tree.md`). Pointer move −57%, scroll frame −21% at 1000 cards.
-- [ ] Event hit-testing index: every pointer event still visits every node
-      (~215 µs of a 282 µs pointer move at 1000 cards).
+- [x] Pointer events visit only the nodes under the pointer, the ones it
+      just left or pressed, and layers; the walk skips other subtrees.
+      Pointer move at 1000 cards 282 → 4.3 µs (a linear scan of the boxes
+      is what's left).
 - [x] Profile 120 Hz: Pixel 10a at 120 Hz with every frame forced to a full
       redraw holds 120 fps; Bench screen ~3.2 ms GPU / ~1.8 ms CPU, main
       screen ~2.6 ms GPU / ~2.3 ms CPU, against an 8.3 ms budget.

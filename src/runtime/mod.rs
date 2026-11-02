@@ -10,7 +10,7 @@ use winit::event::TouchPhase;
 use winit::keyboard::{Key as WKey, ModifiersState, NamedKey};
 
 use crate::App;
-use crate::layout::{Insets, Layout, Measured, Placed, flatten, order, place, walk};
+use crate::layout::{Insets, Layout, Measured, Placed, flatten, order, place, walk, walk_to};
 use crate::render::{Color, Outcome, Rect, Renderer, Scene, Spans, damage};
 use crate::text::Text;
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
@@ -39,6 +39,11 @@ pub(crate) struct Runtime<A: App> {
     ids: Vec<u64>,
     /// Paint order of `ids`' indices; layers last.
     order: Vec<usize>,
+    /// Per index: one past its last descendant, and its place in `order`.
+    ends: Vec<usize>,
+    rank: Vec<usize>,
+    /// Indices of layer widgets.
+    layers: Vec<usize>,
     states: HashMap<u64, State>,
     tasks: Tasks,
     /// Wakes the event loop when a task can progress; a no-op without one.
@@ -50,6 +55,11 @@ pub(crate) struct Runtime<A: App> {
     measured: Vec<Measured>,
     placed: Vec<Placed>,
     captured: Option<u64>,
+    /// Nodes (index, id) under the last pointer event and under the press
+    /// in progress: they get the next pointer events too, so they see the
+    /// pointer leave and keep tracking a drag.
+    hovered: Vec<(usize, u64)>,
+    pressed: Vec<(usize, u64)>,
     /// Last painted frame, diffed against the next one for damage.
     prev: Option<(Scene, Spans)>,
     /// Animation frame due after an idle one; idle frames don't block on
@@ -118,12 +128,15 @@ impl<A: App> Runtime<A> {
         let root = app.view();
         let mut states = HashMap::new();
         let mut tasks = Tasks::new();
-        let (ids, order) = flat_ids(&root, &mut states, &mut tasks);
+        let f = flat_ids(&root, &mut states, &mut tasks);
         Runtime {
             app,
             root,
-            ids,
-            order,
+            ids: f.ids,
+            order: f.order,
+            ends: f.ends,
+            rank: f.rank,
+            layers: f.layers,
             states,
             tasks,
             waker: Waker::noop().clone(),
@@ -133,6 +146,8 @@ impl<A: App> Runtime<A> {
             measured: Vec::new(),
             placed: Vec::new(),
             captured: None,
+            hovered: Vec::new(),
+            pressed: Vec::new(),
             prev: None,
             next_frame: None,
             wake: None,
@@ -166,7 +181,9 @@ impl<A: App> Runtime<A> {
     /// The only way `root` changes, so `ids` always matches it.
     fn set_root(&mut self, root: Element) {
         self.root = root;
-        (self.ids, self.order) = flat_ids(&self.root, &mut self.states, &mut self.tasks);
+        let f = flat_ids(&self.root, &mut self.states, &mut self.tasks);
+        (self.ids, self.order, self.ends, self.rank, self.layers) =
+            (f.ids, f.order, f.ends, f.rank, f.layers);
     }
 
     /// Rebuilds the tree from `view`, dropping state and tasks of removed nodes.
@@ -277,8 +294,7 @@ impl<A: App> Runtime<A> {
 
     /// Whether a widget stopped the event.
     fn dispatch(&mut self, ev: Event) -> bool {
-        let nodes = walk(&self.root, &self.ids);
-        if nodes.len() != self.placed.len() {
+        if self.ids.len() != self.placed.len() {
             return false;
         }
         let mut updates = Vec::new();
@@ -288,25 +304,65 @@ impl<A: App> Runtime<A> {
         let mut focus = None;
         let keyboard = matches!(ev, Event::Text(_) | Event::Key(_));
         let captured = self.captured.filter(|_| !matches!(ev, Event::Back));
+        let find = |id: u64| self.ids.iter().position(|&n| n == id);
         let targets: Vec<usize> = match (keyboard, captured) {
-            (true, _) => (self.focused)
-                .and_then(|id| nodes.iter().position(|n| n.id == id))
-                .into_iter()
-                .collect(),
-            (false, Some(id)) => nodes.iter().position(|n| n.id == id).into_iter().collect(),
-            // Topmost first: layers, then descendants and later siblings.
-            (false, None) => self.order.iter().rev().copied().collect(),
+            (true, _) => self.focused.and_then(find).into_iter().collect(),
+            (false, Some(id)) => find(id).into_iter().collect(),
+            (false, None) if matches!(ev, Event::Cancel | Event::Back) => {
+                self.order.iter().rev().copied().collect()
+            }
+            // Pointer events go to the nodes under them, the tracked ones and
+            // layers (overlays watch for taps anywhere); no other node acts
+            // on a pointer that isn't over it.
+            (false, None) => {
+                let ids = &self.ids;
+                // A rebuild can move a node; find it again by id.
+                let at = |&(i, id): &(usize, u64)| match ids.get(i) == Some(&id) {
+                    true => Some(i),
+                    false => ids.iter().position(|&n| n == id),
+                };
+                let mut t: Vec<usize> = self
+                    .hovered
+                    .iter()
+                    .chain(&self.pressed)
+                    .filter_map(at)
+                    .collect();
+                if let Some((x, y)) = pointer_at(&ev) {
+                    // ponytail: scans every placed box; a spatial index if this shows up again.
+                    let hits: Vec<(usize, u64)> = (0..ids.len())
+                        .filter(|&i| {
+                            let p = &self.placed[i];
+                            p.rect.contains(x, y) && p.clip.contains(x, y)
+                        })
+                        .map(|i| (i, ids[i]))
+                        .collect();
+                    t.extend(hits.iter().map(|h| h.0));
+                    if let Event::PointerDown { .. } = ev {
+                        self.pressed = hits.clone();
+                    }
+                    self.hovered = hits;
+                }
+                t.extend(&self.layers);
+                // Topmost first: layers, then descendants and later siblings.
+                t.sort_unstable_by_key(|&i| std::cmp::Reverse(self.rank[i]));
+                t.dedup();
+                t
+            }
         };
+        let mut sorted = targets.clone();
+        sorted.sort_unstable();
+        let widgets = walk_to(&self.root, &self.ends, &sorted);
+        let widget = |i: usize| widgets[sorted.binary_search(&i).unwrap()];
         let mut send = |i: usize, ev: &Event, states: &mut HashMap<u64, State>| {
-            let (n, p) = (&nodes[i], self.placed[i]);
+            let (id, p) = (self.ids[i], self.placed[i]);
             let mut cx = EventCx {
                 now,
                 rect: p.rect,
                 clip: p.clip,
                 content: p.content,
-                focused: self.focused == Some(n.id),
+                focused: self.focused == Some(id),
                 shift: self.mods.shift_key(),
-                state: states.entry(n.id).or_default(),
+                state: states.entry(id).or_default(),
                 text: &self.text,
                 updates: &mut updates,
                 copied: &mut copied,
@@ -315,21 +371,21 @@ impl<A: App> Runtime<A> {
                 stop: false,
                 redraw: false,
             };
-            n.w.event(ev, &mut cx);
+            widget(i).event(ev, &mut cx);
             redraw |= cx.redraw;
             if cx.focus {
-                focus = Some(n.id);
+                focus = Some(id);
             }
             (cx.capture, cx.stop)
         };
         let mut stopped = false;
-        for i in targets {
-            // ponytail: every event visits every node; index by rect if trees get huge.
+        for &i in &targets {
             let (capture, stop) = send(i, &ev, &mut self.states);
             stopped = stop;
             if capture && self.captured.is_none() {
-                self.captured = Some(nodes[i].id);
-                for j in (0..nodes.len()).filter(|&j| j != i) {
+                self.captured = Some(self.ids[i]);
+                // Only nodes that got pointer events can have a gesture to drop.
+                for &j in targets.iter().filter(|&&j| j != i) {
                     send(j, &Event::Cancel, &mut self.states);
                 }
                 break;
@@ -340,6 +396,11 @@ impl<A: App> Runtime<A> {
         }
         if matches!(ev, Event::PointerUp { .. }) {
             self.captured = None;
+            self.pressed.clear();
+        }
+        if matches!(ev, Event::Leave | Event::Cancel) {
+            self.hovered.clear();
+            self.pressed.clear();
         }
         if let Some(t) = copied {
             self.clipboard.set(t);
@@ -533,15 +594,42 @@ impl<A: App> Runtime<A> {
     }
 }
 
+fn pointer_at(ev: &Event) -> Option<(f32, f32)> {
+    match *ev {
+        Event::PointerDown { x, y }
+        | Event::PointerMove { x, y }
+        | Event::PointerUp { x, y }
+        | Event::Wheel { x, y, .. } => Some((x, y)),
+        _ => None,
+    }
+}
+
 fn printable(t: &str) -> String {
     t.chars().filter(|c| !c.is_control()).collect()
 }
 
-fn flat_ids(
-    root: &Element,
-    states: &mut HashMap<u64, State>,
-    tasks: &mut Tasks,
-) -> (Vec<u64>, Vec<usize>) {
+struct Flat {
+    ids: Vec<u64>,
+    order: Vec<usize>,
+    ends: Vec<usize>,
+    rank: Vec<usize>,
+    layers: Vec<usize>,
+}
+
+fn flat_ids(root: &Element, states: &mut HashMap<u64, State>, tasks: &mut Tasks) -> Flat {
     let nodes = flatten(root, states, tasks);
-    (nodes.iter().map(|n| n.id).collect(), order(&nodes))
+    let order = order(&nodes);
+    let mut rank = vec![0; nodes.len()];
+    for (r, &i) in order.iter().enumerate() {
+        rank[i] = r;
+    }
+    Flat {
+        ids: nodes.iter().map(|n| n.id).collect(),
+        ends: nodes.iter().map(|n| n.end).collect(),
+        layers: (0..nodes.len())
+            .filter(|&i| nodes[i].w.layer().is_some())
+            .collect(),
+        rank,
+        order,
+    }
 }

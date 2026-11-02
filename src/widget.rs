@@ -141,6 +141,9 @@ pub trait Widget {
 
     fn paint(&self, _cx: &mut PaintCx) {}
 
+    /// Pointer events reach a widget while the pointer is over it, once more
+    /// when it leaves, and throughout a press that began on it; layers get
+    /// them all.
     fn event(&self, _ev: &Event, _cx: &mut EventCx) {}
 }
 

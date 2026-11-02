@@ -52,7 +52,7 @@ in the same pre-order and pairs each widget with `ids[i]`. It rebuilds
 ```
   App::view ─► set_root ─► flatten once ─► ids: Vec<u64>
                                              │
-               dispatch ──── walk(root, ids) ┤
+               dispatch ──── walk_to(root, ends, targets) ┤
                relayout ──── walk(root, ids) ┤
                reposition ── walk(root, ids) ┤
                scene ─────── walk(root, ids) ┘
@@ -103,12 +103,22 @@ On the Pixel 10a (`scripts/android-bench.sh cpu`, A/B against the previous
 commit): `frame/scroll` 765 → 631 µs at 100 cards and 10.2 → 8.4 ms at
 1000; `frame/edit` unchanged.
 
+## Pointer targets
+
+Dispatch doesn't walk the whole tree. `flat_ids` also caches each node's
+`end`, its rank in paint order and the layer indices. A pointer event goes
+to the nodes whose box (within their clip) holds it, the nodes the previous
+event hit (so they see the pointer leave), the nodes hit at the press in
+progress (so drags that leave keep tracking), and every layer (overlays
+dismiss on taps anywhere). Those are sorted topmost first, and `walk_to`
+descends only into subtrees that hold one, using `end` to skip the rest.
+
+Tracked nodes are kept as (index, id); after a rebuild that moved one, it is
+found again by id. Finding the hit nodes still scans every placed box, which
+is all that's left of the cost: `frame/pointer_move` at 1000 cards went
+282 → 4.3 µs (10 cards 2.5 µs → 172 ns).
+
 ## Not done
 
-- Dispatch still offers each pointer event to every node (about 215 µs of
-  the 282 µs at 1000 cards). A spatial index would need to keep the
-  current behavior where widgets also see moves that miss them (hover off,
-  drags that leave a scroll view), for example by tracking every widget hit
-  since pointer down.
 - A rebuild re-flattens the whole tree even when `view` changed one label;
   that belongs with partial rebuild in `TODO.md`.

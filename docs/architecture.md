@@ -170,7 +170,8 @@ escapes scroll views, and leaves it out of the parent's scrollable content.
 Paint order is pre-order, except that each layer's subtree comes after
 everything it covers (sorted by layer depth, computed once per tree in
 `Runtime::order`); dispatch walks that order in reverse, so layers get input
-first.
+first. Pointer events only reach the nodes under the pointer, the ones it
+just left or pressed, and layers (`docs/tree.md`, "Pointer targets").
 
 `Overlay` is the built-in layer. Its content sits in a `Sink` that stops
 pointer events hitting it, so any press that reaches the overlay landed

@@ -8,11 +8,11 @@ use std::task::{Context, Poll};
 
 use crate::path::{Path, Shape};
 use crate::text::Font;
-use crate::widget::Scope;
+use crate::widget::{Scope, Widget};
 use crate::widgets::{
     Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon_button, overlays,
-    popup, provide, radio, scroll, segmented, slider, snackbar, spacer, stateful, stream_builder,
-    text, text_input, toggle, tooltip, watch,
+    popup, provide, radio, row, scroll, segmented, slider, snackbar, spacer, stateful,
+    stream_builder, text, text_input, toggle, tooltip, watch,
 };
 
 /// State of the root `stateful`.
@@ -571,6 +571,74 @@ fn closed_dropdown_menu_lets_taps_through() {
     tap(&mut rt, x, y);
     let s = root::<Pick, _>(&mut rt);
     assert_eq!((s.below, s.selected), (1, 1), "picked from the open menu");
+}
+
+/// Logs, per pointer event it receives, whether the pointer was over it.
+struct Probe(Rc<RefCell<Vec<(char, bool)>>>, char);
+
+impl Widget for Probe {
+    fn style(&self) -> taffy::Style {
+        taffy::Style {
+            size: taffy::Size::from_lengths(50.0, 50.0),
+            ..Default::default()
+        }
+    }
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
+        if let Event::PointerDown { x, y }
+        | Event::PointerMove { x, y }
+        | Event::PointerUp { x, y } = *ev
+        {
+            self.0.borrow_mut().push((self.1, cx.hit(x, y)));
+        }
+    }
+}
+
+#[derive(Default)]
+struct Probes {
+    log: Rc<RefCell<Vec<(char, bool)>>>,
+    shifted: Cell<bool>,
+}
+
+impl App for Probes {
+    fn view(&self) -> Element {
+        let probe = |c: char| Element::new(Probe(self.log.clone(), c)).key(c as u64);
+        let lead = self.shifted.get().then(|| column([]).width(5.0).into());
+        row(lead.into_iter().chain([probe('a'), probe('b')])).into()
+    }
+}
+
+#[test]
+fn pointer_events_reach_nodes_under_them_and_the_ones_they_left() {
+    let mut rt = Runtime::new(Probes::default());
+    rt.viewport = (200.0, 100.0);
+    rt.relayout();
+    let step = |rt: &mut Runtime<Probes>, ev: Event| {
+        rt.dispatch(ev);
+        std::mem::take(&mut *rt.app.log.borrow_mut())
+    };
+    let mv = |x| Event::PointerMove { x, y: 10.0 };
+    assert_eq!(step(&mut rt, mv(10.0)), [('a', true)]);
+    assert_eq!(
+        step(&mut rt, mv(60.0)),
+        [('b', true), ('a', false)],
+        "a sees it leave"
+    );
+    assert_eq!(step(&mut rt, mv(70.0)), [('b', true)], "then a is skipped");
+
+    // A press keeps reaching its node however far the pointer goes.
+    step(&mut rt, Event::PointerDown { x: 10.0, y: 10.0 });
+    assert_eq!(step(&mut rt, mv(150.0)), [('a', false)]);
+    assert_eq!(step(&mut rt, mv(160.0)), [('a', false)]);
+    let up = step(&mut rt, Event::PointerUp { x: 160.0, y: 10.0 });
+    assert_eq!(up, [('a', false)]);
+    assert_eq!(step(&mut rt, mv(170.0)), [], "released");
+
+    // A node that moved in a rebuild still sees the pointer leave.
+    step(&mut rt, mv(10.0));
+    rt.app.shifted.set(true);
+    rt.rebuild();
+    rt.relayout();
+    assert_eq!(step(&mut rt, mv(150.0)), [('a', false)]);
 }
 
 struct Long;
