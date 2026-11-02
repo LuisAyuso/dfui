@@ -1,8 +1,9 @@
 # dfui
 
 A small declarative UI framework in Rust that renders everything —
-shapes, shadows and text — as distance fields / analytic coverage in a single
-wgpu shader. Primary target is Android (NativeActivity, Vulkan); desktop runs
+shapes, shadows, text and icons — analytically in a single wgpu shader, with
+no glyph atlas. Text and icons are drawn straight from their Bézier outlines
+with the [Slug algorithm](docs/glyphs.md). Primary target is Android (NativeActivity, Vulkan); desktop runs
 through the same winit event loop.
 
 ```rust
@@ -25,6 +26,7 @@ fn main() { dfui::run(Counter); }
 - `site/` — docs site published to GitHub Pages: guide pages and a live example per widget
 - `docs/architecture.md` — how it fits together
 - `docs/rendering.md` — renderer details and design decisions
+- `docs/glyphs.md` — how text and icons are drawn from outlines (Slug)
 - `docs/tree.md` — the flattened node list and its id cache
 - `docs/async-and-state.md` — study: external/async state and the web port
 - `docs/state-management.md` — study: state architectures across UI frameworks

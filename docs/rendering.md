@@ -44,7 +44,9 @@ full quad.
 ## Text
 
 Glyphs are drawn directly from their outlines, with no atlas
-(`outline.rs`, shader `ray_coverage`):
+(`outline.rs`, shader `ray_coverage`), using a variant of Lengyel's
+[Slug algorithm](https://jcgt.org/published/0006/02/02/). Icons use the same
+path. See [`glyphs.md`](glyphs.md) for a walkthrough with diagrams.
 
 - Contours are converted to monotonic quadratic Béziers. Cubics (CFF) get a
   fixed 4-way split. Each glyph gets horizontal and vertical band lists of
