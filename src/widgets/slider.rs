@@ -1,8 +1,10 @@
 use std::ops::RangeInclusive;
+use std::time::Duration;
 
 use taffy::{AvailableSpace, Size, Style};
 
 use super::Styled;
+use crate::anim::{Animated, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::text::Text;
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
@@ -11,6 +13,15 @@ type OnChange = Box<dyn Fn(&mut EventCx, f32)>;
 
 const THUMB: f32 = 22.0;
 const TRACK: Color = Color::hex(0xd5d8e0);
+/// Thumb scale while dragged.
+const GRAB: f32 = 1.2;
+const GROW: Duration = Duration::from_millis(120);
+
+#[derive(Default)]
+struct SliderState {
+    dragging: bool,
+    scale: Animated<f32>,
+}
 
 /// Controlled horizontal slider over `range`: shows `value`, reports drags
 /// via `on_change`. Tapping the track jumps there.
@@ -82,32 +93,43 @@ impl Widget for Slider {
         }
     }
     fn paint(&self, cx: &mut PaintCx) {
-        let r = cx.rect;
+        let (now, r) = (cx.now, cx.rect);
+        let s = cx.state.get::<SliderState>();
+        let target = if s.dragging { GRAB } else { 1.0 };
+        s.scale.to(target, now, GROW, ease::out_cubic);
+        let d = THUMB * s.scale.get(now);
+        if s.scale.running(now) {
+            cx.request_frame();
+        }
         let (x0, len) = Self::track(r);
         let cy = r.y + r.h / 2.0;
         let x = x0 + self.fraction() * len;
         cx.fill(Rect::new(x0, cy - 2.0, len, 4.0), 2.0, TRACK);
         cx.fill(Rect::new(x0, cy - 2.0, x - x0, 4.0), 2.0, self.accent);
-        let thumb = Rect::new(x - THUMB / 2.0, cy - THUMB / 2.0, THUMB, THUMB);
+        let thumb = Rect::new(x - d / 2.0, cy - d / 2.0, d, d);
         let sh = Shadow {
             color: Color::BLACK.alpha(0.25),
             offset: (0.0, 1.0),
             blur: 3.0,
         };
-        cx.shadow(thumb, THUMB / 2.0, sh);
-        cx.fill_bordered(thumb, THUMB / 2.0, Color::WHITE, 1.0, TRACK);
+        cx.shadow(thumb, d / 2.0, sh);
+        cx.fill_bordered(thumb, d / 2.0, Color::WHITE, 1.0, TRACK);
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
-        let dragging = *cx.state.get::<bool>();
+        let dragging = cx.state.get::<SliderState>().dragging;
         let x = match *ev {
             Event::PointerDown { x, y } if cx.hit(x, y) => {
-                *cx.state.get::<bool>() = true;
+                cx.state.get::<SliderState>().dragging = true;
                 cx.capture();
+                cx.request_redraw();
                 x
             }
             Event::PointerMove { x, .. } if dragging => x,
             Event::PointerUp { .. } | Event::Cancel => {
-                *cx.state.get::<bool>() = false;
+                if dragging {
+                    cx.state.get::<SliderState>().dragging = false;
+                    cx.request_redraw();
+                }
                 return;
             }
             _ => return,
