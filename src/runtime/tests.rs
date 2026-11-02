@@ -10,9 +10,9 @@ use crate::path::{Path, Shape};
 use crate::text::Font;
 use crate::widget::Scope;
 use crate::widgets::{
-    Snapshot, Styled, button, column, dialog, future_builder, icon_button, overlays, popup,
-    provide, radio, scroll, segmented, slider, snackbar, stateful, stream_builder, text,
-    text_input, toggle, watch,
+    Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon_button, overlays,
+    popup, provide, radio, scroll, segmented, slider, snackbar, spacer, stateful, stream_builder,
+    text, text_input, toggle, tooltip, watch,
 };
 
 /// State of the root `stateful`.
@@ -439,6 +439,138 @@ fn snackbars_queue_one_at_a_time() {
     // Host, column, button, its text; the first: queue, timer, overlay,
     // sink, bar, text; the second: queue, its empty column.
     assert_eq!(rt.ids.len(), 4 + 6 + 2, "the second waits for the first");
+}
+
+struct Anchored;
+
+impl App for Anchored {
+    fn view(&self) -> Element {
+        let anchor = || column([popup(column([]).width(50.0).height(30.0)).into()]).height(20.0);
+        let list = column([anchor().into(), column([]).height(300.0).into()]);
+        column([
+            scroll(list).height(100.0).into(),
+            spacer().grow(1.0).into(),
+            anchor().into(),
+        ])
+        .into()
+    }
+}
+
+#[test]
+fn popups_flip_into_the_window_and_hide_with_their_anchor() {
+    let mut rt = Runtime::new(Anchored);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    let menus: Vec<usize> = (0..rt.placed.len())
+        .filter(|&i| (rt.placed[i].rect.w, rt.placed[i].rect.h) == (50.0, 30.0))
+        .collect();
+    let [top, bottom] = menus[..] else {
+        panic!("two menus, got {menus:?}")
+    };
+    assert_eq!(rt.placed[top].rect.y, 24.0, "below its anchor");
+    assert_eq!(
+        rt.placed[bottom].rect.y,
+        180.0 - 4.0 - 30.0,
+        "flipped above"
+    );
+    assert!(rt.placed[top].clip.contains(10.0, 30.0));
+    rt.dispatch(Event::Wheel {
+        x: 10.0,
+        y: 10.0,
+        dy: 50.0,
+    });
+    let clip = rt.placed[top].clip;
+    assert!(clip.w * clip.h == 0.0, "anchor scrolled away: {clip:?}");
+}
+
+struct Tip;
+
+impl App for Tip {
+    fn view(&self) -> Element {
+        tooltip(button(text("b")).height(40.0), "tip").into()
+    }
+}
+
+#[test]
+fn tooltip_shows_on_long_press_and_lingers() {
+    let mut rt = Runtime::new(Tip);
+    rt.viewport = (200.0, 200.0);
+    let t = Instant::now();
+    let ms = Duration::from_millis;
+    rt.clock = Some(t);
+    rt.relayout();
+    let tip = rt.placed.len() - 1;
+    let at = |rt: &mut Runtime<Tip>, d: u64| {
+        rt.clock = Some(t + ms(d));
+        rt.reposition();
+        rt.placed[tip].rect.y.abs() < 1e5
+    };
+    let lift = |rt: &mut Runtime<Tip>| {
+        rt.dispatch(Event::PointerUp { x: 5.0, y: 5.0 });
+        rt.dispatch(Event::Leave);
+    };
+    rt.dispatch(Event::PointerDown { x: 5.0, y: 5.0 });
+    assert!(!at(&mut rt, 100), "not on a short press");
+    lift(&mut rt);
+    assert!(!at(&mut rt, 200), "nor after a tap");
+    rt.dispatch(Event::PointerDown { x: 5.0, y: 5.0 });
+    assert!(at(&mut rt, 800), "held long enough");
+    lift(&mut rt);
+    assert!(at(&mut rt, 1500), "lingers after release");
+    assert!(!at(&mut rt, 2500), "then hides");
+}
+
+#[derive(Default)]
+struct Pick {
+    selected: usize,
+    below: u32,
+}
+
+struct PickApp;
+
+impl App for PickApp {
+    fn view(&self) -> Element {
+        stateful(|s: &Pick, h| {
+            column([
+                dropdown(["a", "b", "c"], s.selected)
+                    .on_change(move |cx, i| cx.update(h, move |s: &mut Pick| s.selected = i))
+                    .into(),
+                button(text("below"))
+                    .height(150.0)
+                    .on_click(move |cx| cx.update(h, |s: &mut Pick| s.below += 1))
+                    .into(),
+            ])
+        })
+        .into()
+    }
+}
+
+#[test]
+fn closed_dropdown_menu_lets_taps_through() {
+    let mut rt = Runtime::new(PickApp);
+    rt.viewport = (200.0, 300.0);
+    let t = Instant::now();
+    rt.clock = Some(t);
+    rt.relayout();
+    let tap = |rt: &mut Runtime<PickApp>, x: f32, y: f32| {
+        rt.dispatch(Event::PointerDown { x, y });
+        rt.dispatch(Event::PointerUp { x, y });
+    };
+    let field = rt.placed[3].rect;
+    // Where the menu's second item rests when open.
+    let (x, y) = (field.x + 5.0, field.y + field.h + 60.0);
+    tap(&mut rt, x, y);
+    assert_eq!(
+        root::<Pick, _>(&mut rt).below,
+        1,
+        "no closed menu in the way"
+    );
+    tap(&mut rt, field.x + 5.0, field.y + 5.0);
+    rt.clock = Some(t + Duration::from_secs(1));
+    rt.reposition();
+    tap(&mut rt, x, y);
+    let s = root::<Pick, _>(&mut rt);
+    assert_eq!((s.below, s.selected), (1, 1), "picked from the open menu");
 }
 
 struct Long;

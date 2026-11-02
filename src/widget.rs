@@ -133,7 +133,8 @@ pub trait Widget {
     }
 
     /// Children are clipped to this widget's `rect` and shifted by the
-    /// returned offset, as of frame time `now`.
+    /// returned offset, as of frame time `now`. A `Layer::Parent` widget gets
+    /// the box its children rest in instead, moved to stay in the window.
     fn scroll(&self, _state: &mut State, _rect: Rect, _now: Instant) -> Option<(f32, f32)> {
         None
     }

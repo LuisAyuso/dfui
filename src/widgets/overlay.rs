@@ -22,6 +22,11 @@ type Build = Rc<dyn Fn(Shown) -> Overlay>;
 /// Slide and scrim fade, in and out.
 const MOTION: Duration = Duration::from_millis(250);
 
+/// Hold on a tooltip's anchor that shows it on touch, and how long it stays
+/// after the finger lifts.
+const LONG_PRESS: Duration = Duration::from_millis(500);
+const LINGER: Duration = Duration::from_millis(1500);
+
 const SCRIM: Color = Color::BLACK.alpha(0.4);
 const INK: Color = Color::hex(0x1d2030);
 const SHADOW: Shadow = Shadow {
@@ -40,6 +45,10 @@ enum Show {
 #[derive(Default)]
 struct OverlayState {
     hovered: bool,
+    /// When a press on a tooltip's anchor started.
+    pressed: Option<Instant>,
+    /// Until when a long-pressed tooltip stays after release.
+    linger: Option<Instant>,
     since: Option<Instant>,
     /// Whether the last placement had it open; only then does it take input.
     shown: bool,
@@ -182,10 +191,16 @@ impl Widget for Overlay {
         let s = state.get::<OverlayState>();
         let first = s.since.is_none();
         let since = *s.since.get_or_insert(now);
+        if s.linger.is_some_and(|u| now >= u) {
+            s.linger = None;
+        }
         s.shown = !self.closing
             && match self.show {
                 Show::Always => true,
-                Show::Hover => s.hovered,
+                Show::Hover => {
+                    let held = s.pressed.map(|t| now >= t + LONG_PRESS);
+                    held.unwrap_or(s.hovered) || s.linger.is_some()
+                }
                 Show::For(d) => now < since + d,
             };
         // Hidden content is scrolled out of the overlay's clip.
@@ -204,6 +219,8 @@ impl Widget for Overlay {
         let now = cx.now;
         let s = cx.state.get::<OverlayState>();
         let (shown, since, moving) = (s.shown, s.since, s.t.running(now));
+        let press = s.pressed.map(|t| t + LONG_PRESS).filter(|_| !shown);
+        let linger = s.linger.filter(|_| shown);
         let t = match self.slide {
             Some(_) => s.t.get(now),
             None if shown => 1.0,
@@ -211,6 +228,7 @@ impl Widget for Overlay {
         };
         let timer = match (self.show, since) {
             (Show::For(d), Some(since)) if shown => Some(since + d),
+            (Show::Hover, _) => press.or(linger),
             _ => None,
         };
         if (self.slide.is_some() && moving) || timer.is_some_and(|at| now >= at) {
@@ -240,14 +258,31 @@ impl Widget for Overlay {
         }
         let at = pointer(ev);
         if let Show::Hover = self.show {
-            let hit = at.map(|(x, y)| cx.hit(x, y));
+            let (now, hit) = (cx.now, at.map(|(x, y)| cx.hit(x, y)));
             let s = cx.state.get::<OverlayState>();
-            let hovered = match ev {
-                Event::Leave | Event::Cancel => false,
-                _ => hit.unwrap_or(s.hovered),
-            };
-            if hovered != s.hovered {
-                s.hovered = hovered;
+            let before = (s.hovered, s.pressed, s.linger);
+            match ev {
+                Event::PointerDown { .. } if hit == Some(true) => {
+                    (s.hovered, s.pressed) = (true, Some(now));
+                }
+                // The anchor took the press; the Leave after it still comes.
+                // ponytail: a touch the system cancels leaves `pressed` set until the next Leave.
+                Event::Cancel => {}
+                Event::PointerUp { .. } | Event::Leave => {
+                    if s.pressed.is_some_and(|t| now >= t + LONG_PRESS) {
+                        s.linger = Some(now + LINGER);
+                    }
+                    s.pressed = None;
+                    s.hovered &= !matches!(ev, Event::Leave);
+                }
+                _ => {
+                    if let Some(h) = hit {
+                        s.hovered = h;
+                        s.pressed = s.pressed.filter(|_| h);
+                    }
+                }
+            }
+            if (s.hovered, s.pressed, s.linger) != before {
                 cx.request_redraw();
             }
         }
@@ -365,11 +400,31 @@ impl Shown {
     pub fn close(self, cx: &mut EventCx) {
         let key = self.key;
         cx.update(self.h, move |o: &mut Overlays| {
-            if let Some(e) = o.entries.iter_mut().find(|e| e.key == key && !e.closing) {
-                e.closing = true;
-                e.until = Some(Instant::now() + MOTION);
+            let now = Instant::now();
+            let Some(e) = o.entries.iter_mut().find(|e| e.key == key && !e.closing) else {
+                return;
+            };
+            e.closing = true;
+            e.until = Some(now + MOTION);
+            if e.from.is_some_and(|f| f > now) {
+                (e.from, e.until) = (Some(now), Some(now));
             }
+            requeue(&mut o.entries, now);
         });
+    }
+}
+
+/// Moves timed entries still waiting at `now` up into time freed before them.
+fn requeue(entries: &mut [Entry], now: Instant) {
+    let mut end = now;
+    for e in entries {
+        let (Some(from), Some(until)) = (e.from, e.until) else {
+            continue;
+        };
+        if from > now {
+            (e.from, e.until) = (Some(end), Some(end + (until - from)));
+        }
+        end = end.max(e.until.unwrap_or(end));
     }
 }
 
@@ -445,7 +500,7 @@ fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
         true => shown(),
         false => column([]).into(),
     };
-    Element::from(future_builder(key, queue, wait)).key(key)
+    Element::from(future_builder((key, from), queue, wait)).key(key)
 }
 
 /// Shows `tip` above `child` while the pointer is over it.
@@ -502,7 +557,7 @@ impl From<Dropdown> for Element {
             )
             .color(Color::hex(0xe8e9ef))
             .on_click(set(!open));
-            let menu = open.then(|| {
+            let menu = {
                 let items = labels.iter().enumerate().map(|(i, l)| {
                     let f = on_change.clone();
                     let bg = if i == selected {
@@ -528,10 +583,39 @@ impl From<Dropdown> for Element {
                     .radius(8.0)
                     .padding(4.0)
                     .shadow(SHADOW);
-                popup(list).on_dismiss(set(false)).into()
-            });
-            column(std::iter::once(field.into()).chain(menu)).align(AlignItems::FLEX_START)
+                // Kept while closed, so it can slide shut.
+                let mut menu = popup(list).on_dismiss(set(false));
+                menu.closing = !open;
+                menu.slide = Some((0.0, -1.0));
+                menu
+            };
+            column([field.into(), menu.into()]).align(AlignItems::FLEX_START)
         })
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closing_a_snackbar_pulls_the_queue_forward() {
+        let now = Instant::now();
+        let s = Duration::from_secs;
+        let timed = |key, from, until| Entry {
+            key,
+            build: Rc::new(|_| snackbar("")),
+            closing: false,
+            from: Some(now + s(from)),
+            until: Some(now + s(until)),
+        };
+        // The first was closed now and leaves at 1 s; the others were queued
+        // behind its full 5 s.
+        let mut entries = [timed(0, 0, 1), timed(1, 5, 10), timed(2, 10, 15)];
+        requeue(&mut entries, now);
+        let at = |e: &Entry| (e.from.unwrap() - now, e.until.unwrap() - now);
+        assert_eq!(at(&entries[1]), (s(1), s(6)));
+        assert_eq!(at(&entries[2]), (s(6), s(11)));
     }
 }

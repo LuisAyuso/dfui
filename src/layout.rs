@@ -322,29 +322,41 @@ pub(crate) fn place(
         f32::MAX / 2.0,
         f32::MAX / 2.0,
     );
-    let mut placed = vec![Placed::default(); nodes.len()];
-    let mut offsets = vec![None; nodes.len()];
-    for i in 0..nodes.len() {
+    let n = nodes.len();
+    let mut placed = vec![Placed::default(); n];
+    let mut offsets = vec![None; n];
+    // A parent layer's children rest in `rests[i]`, moved by `shifts[i]` to
+    // stay in the window.
+    let mut shifts = vec![(0.0, 0.0); n];
+    let mut rests = vec![None; n];
+    for i in 0..n {
         let m = measured[i];
         let (origin, clip) = match (nodes[i].parent, nodes[i].w.layer()) {
             (None, _) => ((0.0, 0.0), full),
             // Taffy places layers relative to their containing block.
-            (Some(p), Some(l)) => {
-                let cb = match l {
-                    Layer::Parent => placed[p].rect,
-                    Layer::Window => placed[0].rect,
+            (Some(p), Some(Layer::Parent)) => {
+                // Hidden with its anchor when that is scrolled out of view.
+                let anchor = placed[p].rect;
+                let clip = match anchor.intersect(&placed[p].clip) {
+                    v if v.w > 0.0 && v.h > 0.0 => placed[0].rect,
+                    v => v,
                 };
-                ((cb.x, cb.y), placed[0].rect)
+                ((anchor.x, anchor.y), clip)
+            }
+            (Some(_), Some(Layer::Window)) => {
+                let w = placed[0].rect;
+                ((w.x, w.y), w)
             }
             (Some(p), None) => {
                 let pr = placed[p].rect;
                 let (dx, dy) = offsets[p].unwrap_or((0.0, 0.0));
+                let (sx, sy) = shifts[p];
                 let clip = if offsets[p].is_some() {
-                    placed[p].clip.intersect(&pr)
+                    placed[p].clip.intersect(&rests[p].unwrap_or(pr))
                 } else {
                     placed[p].clip
                 };
-                ((pr.x - dx, pr.y - dy), clip)
+                ((pr.x - dx + sx, pr.y - dy + sy), clip)
             }
         };
         placed[i] = Placed {
@@ -352,16 +364,63 @@ pub(crate) fn place(
             clip,
             content: m.content,
         };
+        let mut area = placed[i].rect;
+        if nodes[i].w.layer() == Some(Layer::Parent) {
+            let r = placed[i].rect;
+            let rest = children(nodes, i)
+                .map(|c| measured[c].rect)
+                .map(|c| Rect::new(r.x + c.x, r.y + c.y, c.w, c.h))
+                .reduce(|a, b| a.union(&b));
+            if let Some(rest) = rest {
+                let (sx, sy) = fit(placed[0].rect, r, rest);
+                area = Rect::new(rest.x + sx, rest.y + sy, rest.w, rest.h);
+                (shifts[i], rests[i]) = ((sx, sy), Some(area));
+            }
+        }
         offsets[i] = nodes[i]
             .w
-            .scroll(states.entry(nodes[i].id).or_default(), placed[i].rect, now);
+            .scroll(states.entry(nodes[i].id).or_default(), area, now);
     }
     placed
+}
+
+/// How far to move `content`, floating at `anchor`, to keep it in `window`:
+/// to the anchor's other side when it would leave at the top or bottom and
+/// fits there, and sideways when it would leave at the left or right.
+fn fit(window: Rect, anchor: Rect, content: Rect) -> (f32, f32) {
+    let out = |y: f32| y < window.y || y + content.h > window.y + window.h;
+    let mirrored = 2.0 * anchor.y + anchor.h - content.y - content.h;
+    let dy = if out(content.y) && !out(mirrored) {
+        mirrored - content.y
+    } else {
+        0.0
+    };
+    let right = window.x + window.w;
+    let dx = if content.x + content.w > right {
+        (right - content.x - content.w).max(window.x - content.x)
+    } else {
+        (window.x - content.x).max(0.0)
+    };
+    (dx, dy)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fit_flips_and_shifts_into_the_window() {
+        let window = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let anchor = Rect::new(10.0, 80.0, 20.0, 10.0);
+        let below = Rect::new(10.0, 94.0, 40.0, 30.0);
+        assert_eq!(fit(window, anchor, below), (0.0, -48.0), "flips above");
+        let above = Rect::new(10.0, 46.0, 40.0, 30.0);
+        assert_eq!(fit(window, anchor, above), (0.0, 0.0), "already fits");
+        let wide = Rect::new(80.0, 10.0, 40.0, 10.0);
+        assert_eq!(fit(window, anchor, wide), (-20.0, 0.0), "shifts left");
+        let huge = Rect::new(10.0, 94.0, 40.0, 300.0);
+        assert_eq!(fit(window, anchor, huge).1, 0.0, "fits on neither side");
+    }
     use crate::widgets::{Styled, column, row, spacer, stateful, text};
 
     #[test]

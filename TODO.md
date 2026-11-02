@@ -154,10 +154,12 @@ Widgets:
 - [x] Escape (Android back) dismisses the topmost overlay
       (`Event::Back`); snackbars shown through `Overlays` queue, one at a
       time.
-- [ ] Layer follow-ups: animate the dropdown's menu (keep it in the tree,
-      hidden, like the tooltip), closing a snackbar early doesn't pull the
-      queue forward, flipping popups that would leave the window, tooltips on touch (long
-      press), anchored popups still show when their anchor is scrolled away.
+- [x] Layer follow-ups: the dropdown's menu slides open and shut; closing
+      a snackbar pulls the queue forward; popups and tooltips flip to their
+      anchor's other side (or shift sideways) to stay in the window; tooltips
+      show on a long press and linger; anchored popups hide with their
+      anchor when it is scrolled away.
+- [ ] A flipped dropdown menu still unrolls downward.
 
 ## Text
 
