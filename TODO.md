@@ -83,7 +83,9 @@ Widgets:
       to bold. Tab bars wider than the window still overflow (clipped).
 - [ ] `tabs`/`segmented` styling: label font, size and colors, and the
       divider color are fixed for a light theme (see Theming).
-- [ ] Determinate progress bar (playback position, download progress).
+- [x] Progress: `progress(v)`, `stacked_progress` (several fractions in
+      one bar, smaller on top), `wait_bar()` and `spinner()` for waits of
+      unknown length.
 - [ ] Virtualized list: build and lay out only the visible rows.
 - [ ] List row: title, subtitle, trailing actions.
 - [ ] Image fit modes and a placeholder (also under Image follow-ups);

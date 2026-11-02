@@ -3,8 +3,9 @@ use std::time::{Duration, Instant};
 use dfui::anim::{Lerp, Morph, ease};
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
-    Snapshot, Styled, button, column, container, future_builder, image, provide, radio, row,
-    scroll, segmented, slider, spacer, stateful, stream_builder, tabs, text, text_input, toggle,
+    Snapshot, Styled, button, column, container, future_builder, image, progress, provide, radio,
+    row, scroll, segmented, slider, spacer, spinner, stacked_progress, stateful, stream_builder,
+    tabs, text, text_input, toggle, wait_bar,
 };
 use dfui::{
     Animated, App, Bitmap, Color, Element, EventCx, Font, Handle, PaintCx, Path, Rect, Scope,
@@ -731,8 +732,24 @@ fn controls() -> Element {
         );
         let range = segmented(["Day", "Week", "Month"], s.range)
             .on_change(move |cx, i| cx.update(h, move |s: &mut Settings| s.range = i));
+        let v = s.volume / 100.0;
+        let bars = column([
+            progress(v).accent(ACCENT).fill_width().into(),
+            stacked_progress([(v, ACCENT), ((v * 1.6).min(1.0), Color::hex(0xa9bdf0))])
+                .fill_width()
+                .into(),
+            row([
+                wait_bar().accent(ACCENT).grow(1.0).into(),
+                spinner().color(ACCENT).into(),
+            ])
+            .gap(16.0)
+            .align(AlignItems::CENTER)
+            .into(),
+        ])
+        .gap(14.0);
         column([
             section("Toggle and slider", panel(switches.into())),
+            section("Progress (follows the volume)", panel(bars.into())),
             section("Radio buttons", panel(sizes.into())),
             section("Segmented button", range.into()),
         ])

@@ -19,6 +19,7 @@ const WIDGETS: &[&str] = &[
     "text_input",
     "toggle",
     "slider",
+    "progress",
     "radio",
     "segmented",
     "tabs",
