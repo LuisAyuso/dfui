@@ -111,9 +111,16 @@ fn button_states() {
     b.settle();
     let hover = b.shot(SCALE);
     b.event(Event::PointerDown { x: 20.0, y: 20.0 });
+    let mut frames = vec![rest, hover];
+    // The label morphs toward bold on the way down.
+    frames.extend(film(&mut b, &[30]));
     b.settle();
-    let pressed = b.shot(SCALE);
-    check("button", &strip(&[rest, hover, pressed]));
+    frames.push(b.shot(SCALE));
+    b.event(Event::PointerUp { x: 20.0, y: 20.0 });
+    frames.extend(film(&mut b, &[30]));
+    b.settle();
+    frames.push(b.shot(SCALE));
+    check("button", &strip(&frames));
 }
 
 #[test]
@@ -317,4 +324,11 @@ fn snackbar_shows_then_leaves() {
     b.settle();
     frames.push(b.shot(SCALE));
     check("snackbar", &strip(&frames));
+}
+
+#[test]
+fn spinner_cycle() {
+    let mut b = bench(|| padded(spinner().size(96.0)), (112.0, 112.0));
+    let at: Vec<u64> = (0..8).map(|i| i * 250).collect();
+    check("spinner", &strip(&film(&mut b, &at)));
 }

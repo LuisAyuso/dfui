@@ -1,12 +1,25 @@
 use std::borrow::Cow;
+use std::cell::Cell;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::rc::Rc;
 
 use taffy::{AvailableSpace, Size, Style};
 
 use super::Styled;
+use crate::anim::{Lerp, Morph};
 use crate::render::Color;
 use crate::text::{Font, Text};
-use crate::widget::{Element, PaintCx, Widget};
+use crate::widget::{BuildCx, Element, PaintCx, Widget};
+
+/// How far toward bold an ancestor wants its labels, 0..=1; a button sets
+/// it to its press before its children paint.
+#[derive(Clone, Default)]
+pub(crate) struct Emphasis(pub Rc<Cell<f32>>);
+
+#[derive(Default)]
+struct LabelState {
+    emphasis: Option<Emphasis>,
+}
 
 pub struct Label {
     text: String,
@@ -94,10 +107,53 @@ impl Widget for Label {
         (&self.text, self.font, self.size.to_bits(), self.max_lines).hash(&mut h);
         h.finish()
     }
+    fn expand(&self, cx: &mut BuildCx) {
+        cx.state.get::<LabelState>().emphasis = cx.scope.get::<Emphasis>().cloned();
+    }
     fn paint(&self, cx: &mut PaintCx) {
         let (r, s, c) = (cx.rect, self.size, self.color);
+        let st = cx.state.get::<LabelState>();
+        let t = st.emphasis.as_ref().map_or(0.0, |e| e.0.get());
+        let regular = std::ptr::eq(self.font.0, Font::DEFAULT.0);
+        if t > 0.0 && regular && self.max_lines.is_none() && !self.text.contains('\n') {
+            return weight(cx, &self.text, s, c, t, (r.x, r.w), r.y);
+        }
         let max = Some(r.w + 1.0);
         let shown = self.shown(cx.text, max);
         cx.text(&shown, self.font, s, c, max, (r.x, r.y));
+    }
+}
+
+/// One line of `s` between regular (`t` 0) and bold (`t` 1), centered in
+/// `x..x + w` with its top at `y`. Between the two, each glyph's outline
+/// morphs and the glyphs slide between the two spacings.
+pub(crate) fn weight(
+    cx: &mut PaintCx,
+    s: &str,
+    size: f32,
+    color: Color,
+    t: f32,
+    (x, w): (f32, f32),
+    y: f32,
+) {
+    if t <= 0.0 || t >= 1.0 {
+        let font = if t >= 1.0 { Font::BOLD } else { Font::DEFAULT };
+        let lw = cx.text.layout(s, font, size, None).width;
+        cx.text(s, font, size, color, None, (x + (w - lw) / 2.0, y));
+        return;
+    }
+    let a = cx.text.caret_stops(s, Font::DEFAULT, size);
+    let b = cx.text.caret_stops(s, Font::BOLD, size);
+    let lw = a[a.len() - 1].lerp(b[b.len() - 1], t);
+    let (x0, base) = (x + (w - lw) / 2.0, y + cx.text.ascent(Font::DEFAULT, size));
+    for (i, ch) in s.chars().enumerate() {
+        let regular = cx.glyph_path(Font::DEFAULT, ch, size);
+        let bold = cx.glyph_path(Font::BOLD, ch, size);
+        if let (Some(p), Some(q)) = (regular, bold) {
+            let glyph = Morph::new(&p, &q)
+                .at(t)
+                .offset(x0 + a[i].lerp(b[i], t), base);
+            cx.path(&glyph, color);
+        }
     }
 }

@@ -17,8 +17,10 @@ const TRACK: Color = Color::hex(0xd5d8e0);
 const STEP: Duration = Duration::from_millis(250);
 /// One sweep of the wait bar.
 const SWEEP: f32 = 1.6;
-/// One grow-and-shrink of the spinner's arc.
-const CYCLE: f32 = 1.4;
+/// One draw-and-retract of the spinner's spiral.
+const CYCLE: f32 = 2.0;
+/// Turns of the spinner's spiral, outer end to centre.
+const TURNS: f32 = 2.0;
 
 #[derive(Default)]
 struct ProgressState {
@@ -132,8 +134,8 @@ impl Widget for Progress {
     }
 }
 
-/// A spinning arc for a wait of unknown length: it grows and shrinks while
-/// it turns.
+/// A spiral for a wait of unknown length, thin outside and thick at the
+/// centre: it draws in from the outer end, then retracts the same way.
 pub struct Spinner {
     size: f32,
     color: Color,
@@ -172,16 +174,12 @@ impl Styled for Spinner {
     }
 }
 
-/// Start and end of the arc in turns, `t` seconds in. Each cycle the head
-/// runs ahead and the tail catches up 3/4 turn later, on top of a slow spin.
-fn arc_span(t: f32) -> (f32, f32) {
-    let (k, c) = ((t / CYCLE).floor(), (t / CYCLE).fract());
-    let grow = ease::in_out_cubic((c * 2.0).min(1.0));
-    let shrink = ease::in_out_cubic((c * 2.0 - 1.0).max(0.0));
-    let spin = t / 2.0;
-    let a0 = (k + shrink) * 0.75 + spin;
-    let a1 = (k + grow) * 0.75 + spin + 0.05;
-    (a0, a1)
+/// Tail and head along the spiral (0 outer end, 1 centre), `t` seconds in.
+fn spiral_span(t: f32) -> (f32, f32) {
+    let c = (t / CYCLE).fract();
+    let head = ease::in_out_cubic((c * 2.0).min(1.0));
+    let tail = ease::in_out_cubic((c * 2.0 - 1.0).max(0.0));
+    (tail, head)
 }
 
 /// Circular arc around `c` from angle `a0` to `a1` (radians, either way) as
@@ -197,17 +195,77 @@ fn arc(c: Point, r: f32, a0: f32, a1: f32) -> impl Iterator<Item = Quad> {
     })
 }
 
-/// A ring segment from `a0` to `a1` with round caps, `w` thick.
-fn stroke_arc(c: Point, r: f32, w: f32, a0: f32, a1: f32) -> Path {
-    let (ro, ri, h) = (r + w / 2.0, r - w / 2.0, w / 2.0);
-    let cap = |a: f32| [c[0] + r * a.cos(), c[1] + r * a.sin()];
-    let edges = arc(c, ro, a0, a1)
-        .chain(arc(cap(a1), h, a1, a1 + PI))
-        .chain(arc(c, ri, a1, a0))
-        .chain(arc(cap(a0), h, a0 + PI, a0 + TAU))
-        .collect();
-    Path {
-        contours: vec![edges],
+/// Archimedean spiral of `TURNS` turns fitting a circle of radius `r`,
+/// starting at 12 o'clock and winding clockwise to the centre.
+struct Spiral {
+    c: Point,
+    r: f32,
+}
+
+impl Spiral {
+    /// Gap between turns; the inner end sits half a gap from the centre.
+    fn gap(&self) -> f32 {
+        self.r / (TURNS + 0.5)
+    }
+
+    /// Half the line width at `u`: a hairline outside, most of a gap inside.
+    fn half(&self, u: f32) -> f32 {
+        self.gap() * (0.06 + 0.24 * u)
+    }
+
+    /// Point and unit normal at `u` (0 outer end, 1 inner end).
+    fn at(&self, u: f32) -> (Point, Point) {
+        let (inner, d) = (self.gap() / 2.0, TURNS * TAU);
+        let rho = self.r - (self.r - inner) * u;
+        let a = u * d - PI / 2.0;
+        let (sin, cos) = a.sin_cos();
+        let t = [
+            -(self.r - inner) * cos - rho * d * sin,
+            -(self.r - inner) * sin + rho * d * cos,
+        ];
+        let len = t[0].hypot(t[1]);
+        let p = [self.c[0] + rho * cos, self.c[1] + rho * sin];
+        (p, [-t[1] / len, t[0] / len])
+    }
+
+    /// Edge at `side` (±1) half widths off the line from `u0` to `u1`, as
+    /// quadratics through each piece's midpoint.
+    fn edge(&self, side: f32, u0: f32, u1: f32) -> impl Iterator<Item = Quad> + '_ {
+        let e = move |u: f32| {
+            let (p, n) = self.at(u);
+            let h = side * self.half(u);
+            [p[0] + n[0] * h, p[1] + n[1] * h]
+        };
+        let n = ((u1 - u0).abs() * TURNS * 16.0).ceil().max(1.0) as usize;
+        let step = (u1 - u0) / n as f32;
+        (0..n).map(move |i| {
+            let u = u0 + step * i as f32;
+            let (a, m, b) = (e(u), e(u + step / 2.0), e(u + step));
+            let ctrl = [
+                2.0 * m[0] - (a[0] + b[0]) / 2.0,
+                2.0 * m[1] - (a[1] + b[1]) / 2.0,
+            ];
+            [a, ctrl, b]
+        })
+    }
+
+    /// The line from `u0` to `u1` with round caps.
+    fn stroke(&self, u0: f32, u1: f32) -> Path {
+        let cap = |u: f32| {
+            let (p, n) = self.at(u);
+            (p, n[1].atan2(n[0]), self.half(u))
+        };
+        let ((p0, a0, h0), (p1, a1, h1)) = (cap(u0), cap(u1));
+        // Each cap turns from one edge to the other through the line's end.
+        let edges = self
+            .edge(1.0, u0, u1)
+            .chain(arc(p1, h1, a1, a1 - PI))
+            .chain(self.edge(-1.0, u1, u0))
+            .chain(arc(p0, h0, a0 + PI, a0))
+            .collect();
+        Path {
+            contours: vec![edges],
+        }
     }
 }
 
@@ -225,13 +283,14 @@ impl Widget for Spinner {
         let (now, r) = (cx.now, cx.rect);
         let s = cx.state.get::<ProgressState>();
         let t = now.saturating_duration_since(*s.start.get_or_insert(now));
-        let (a0, a1) = arc_span(t.as_secs_f32());
-        let w = self.size / 9.0;
-        let c = [r.x + r.w / 2.0, r.y + r.h / 2.0];
-        // Turn 0 at 12 o'clock.
-        let rad = |turns: f32| turns * TAU - PI / 2.0;
-        let path = stroke_arc(c, (self.size - w) / 2.0, w, rad(a0), rad(a1));
-        cx.path(&path, self.color);
+        let (u0, u1) = spiral_span(t.as_secs_f32());
+        let spiral = Spiral {
+            c: [r.x + r.w / 2.0, r.y + r.h / 2.0],
+            r: self.size / 2.0 - 0.5,
+        };
+        if u1 - u0 > 1e-3 {
+            cx.path(&spiral.stroke(u0, u1), self.color);
+        }
         cx.request_frame();
     }
 }
@@ -241,22 +300,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spinner_arc_is_continuous_across_cycles() {
-        let (e, d) = (1e-3, 1e-4);
-        let (b0, b1) = arc_span(CYCLE - d);
-        let (n0, n1) = arc_span(CYCLE + d);
-        assert!((b0 - n0).abs() < e && (b1 - n1).abs() < e);
-        let (a0, a1) = arc_span(CYCLE * 0.5);
-        assert!(a1 - a0 > 0.75, "fully grown at half cycle");
+    fn spiral_draws_in_then_retracts() {
+        assert_eq!(spiral_span(0.0), (0.0, 0.0), "starts empty");
+        assert_eq!(spiral_span(CYCLE * 0.5), (0.0, 1.0), "drawn to the centre");
+        let (t0, t1) = spiral_span(CYCLE * 0.75);
+        assert!(t0 > 0.0 && t1 == 1.0, "retracts from the outer end");
+        let (e0, e1) = spiral_span(CYCLE - 1e-4);
+        assert!(e1 - e0 < 1e-3, "gone before the next cycle");
     }
 
     #[test]
-    fn stroked_arc_closes() {
-        let p = stroke_arc([0.0, 0.0], 10.0, 2.0, 0.0, 2.0);
-        let q = &p.contours[0];
+    fn spiral_stroke_closes() {
+        let s = Spiral {
+            c: [0.0, 0.0],
+            r: 20.0,
+        };
+        let q = &s.stroke(0.1, 0.9).contours[0];
         for (a, b) in q.iter().zip(q.iter().cycle().skip(1)) {
             let gap = (a[2][0] - b[0][0]).hypot(a[2][1] - b[0][1]);
-            assert!(gap < 1e-4, "gap {gap}");
+            assert!(gap < 1e-3, "gap {gap}");
         }
+        assert!(q.len() < 200, "{} curves", q.len());
     }
 }

@@ -18,11 +18,18 @@ use crate::render::{Color, Rect, Scene};
 #[derive(Clone, Copy)]
 pub struct Font(pub &'static [u8]);
 
+// The bytes themselves are statics: only a reference to a static item has
+// one address in every crate; a const's data is copied per crate using it.
+static DEJAVU: [u8; include_bytes!("../assets/DejaVuSans.ttf").len()] =
+    *include_bytes!("../assets/DejaVuSans.ttf");
+static DEJAVU_BOLD: [u8; include_bytes!("../assets/DejaVuSans-Bold.ttf").len()] =
+    *include_bytes!("../assets/DejaVuSans-Bold.ttf");
+
 impl Font {
     /// Bundled DejaVu Sans; also the fallback for chars a font lacks.
-    pub const DEFAULT: Font = Font(include_bytes!("../assets/DejaVuSans.ttf"));
+    pub const DEFAULT: Font = Font(&DEJAVU);
     /// Bundled DejaVu Sans Bold.
-    pub const BOLD: Font = Font(include_bytes!("../assets/DejaVuSans-Bold.ttf"));
+    pub const BOLD: Font = Font(&DEJAVU_BOLD);
 }
 
 impl Hash for Font {
@@ -635,3 +642,4 @@ mod tests {
         assert!(hole.iter().flatten().all(|p| p == &hole[0][0]));
     }
 }
+

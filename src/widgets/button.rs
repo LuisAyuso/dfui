@@ -1,8 +1,10 @@
+use std::any::Any;
 use std::time::Duration;
 
 use taffy::{AlignItems, JustifyContent, LengthPercentage, Style};
 
 use super::Styled;
+use super::label::Emphasis;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Shadow};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
@@ -54,9 +56,12 @@ pub struct Button {
     color: Color,
     radius: f32,
     flat: bool,
+    /// Labels inside turn bold with the press.
+    emphasis: Emphasis,
 }
 
 /// Tappable box around `child`; `on_click` runs on a release inside it.
+/// Text in it morphs to bold while pressed.
 pub fn button(child: impl Into<Element>) -> Button {
     Button {
         child: [child.into()],
@@ -75,6 +80,7 @@ pub fn button(child: impl Into<Element>) -> Button {
         color: Color::hex(0x3b6fe0),
         radius: 8.0,
         flat: false,
+        emphasis: Emphasis::default(),
     }
 }
 
@@ -118,6 +124,9 @@ impl Widget for Button {
     fn children(&self) -> &[Element] {
         &self.child
     }
+    fn provide(&self) -> Option<&dyn Any> {
+        Some(&self.emphasis)
+    }
     fn paint(&self, cx: &mut PaintCx) {
         let now = cx.now;
         let s = cx.state.get::<ButtonState>();
@@ -125,6 +134,7 @@ impl Widget for Button {
         s.hover.to(flag(s.tap.hovered), now, FADE, ease::out_cubic);
         s.press.to(flag(s.tap.pressed), now, FADE, ease::out_cubic);
         let (hover, press) = (s.hover.get(now), s.press.get(now));
+        self.emphasis.0.set(press);
         if s.hover.running(now) || s.press.running(now) {
             cx.request_frame();
         }

@@ -5,7 +5,8 @@ use taffy::util::ResolveOrZero;
 use taffy::{AvailableSpace, LengthPercentage, Size, Style};
 
 use super::Styled;
-use crate::anim::{Animated, Lerp, Morph, ease};
+use super::label::weight;
+use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::text::{Font, Text};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
@@ -159,30 +160,8 @@ impl Segmented {
     }
 
     /// A tab's label at weight `t`, centered in its slot.
-    fn tab_label(&self, cx: &mut PaintCx, l: &str, t: f32, (x, w): (f32, f32), y: f32) {
-        let color = MUTED.lerp(self.accent, t);
-        if t <= 0.0 || t >= 1.0 {
-            let font = if t >= 1.0 { Font::BOLD } else { Font::DEFAULT };
-            let lw = cx.text.layout(l, font, SIZE, None).width;
-            cx.text(l, font, SIZE, color, None, (x + (w - lw) / 2.0, y));
-            return;
-        }
-        // Each glyph's outline morphs between the weights, and the glyphs
-        // slide between the two spacings.
-        let a = cx.text.caret_stops(l, Font::DEFAULT, SIZE);
-        let b = cx.text.caret_stops(l, Font::BOLD, SIZE);
-        let lw = a[a.len() - 1].lerp(b[b.len() - 1], t);
-        let (x0, base) = (x + (w - lw) / 2.0, y + cx.text.ascent(Font::DEFAULT, SIZE));
-        for (i, ch) in l.chars().enumerate() {
-            let regular = cx.glyph_path(Font::DEFAULT, ch, SIZE);
-            let bold = cx.glyph_path(Font::BOLD, ch, SIZE);
-            if let (Some(p), Some(q)) = (regular, bold) {
-                let glyph = Morph::new(&p, &q)
-                    .at(t)
-                    .offset(x0 + a[i].lerp(b[i], t), base);
-                cx.path(&glyph, color);
-            }
-        }
+    fn tab_label(&self, cx: &mut PaintCx, l: &str, t: f32, slot: (f32, f32), y: f32) {
+        weight(cx, l, SIZE, MUTED.lerp(self.accent, t), t, slot, y);
     }
 }
 
