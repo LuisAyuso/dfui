@@ -221,8 +221,7 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
       on a virtual clock (`Bench::advance`/`settle`), animations as frame
       strips, compared against PNGs from the reference machine.
       `DFUI_BLESS=1 cargo test --test golden` rewrites them.
-- [ ] Goldens for scroll, icon button, image; fold the demo's `#[ignore]`
-      snapshot tests into them.
+- [ ] Fold the demo's `#[ignore]` snapshot tests into the goldens.
 - [ ] Release signing config for real distribution (debug keystore via
       `CARGO_APK_RELEASE_KEYSTORE` today).
 - [ ] cargo-apk is deprecated and capped at NDK platform 35; evaluate

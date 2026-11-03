@@ -8,11 +8,13 @@ use std::time::Duration;
 use dfui::anim::Morph;
 use dfui::taffy::{AvailableSpace, Size};
 use dfui::widgets::{
-    Overlay, Shown, Styled, bottom_sheet, button, column, dialog, drawer, dropdown, overlays,
-    progress, radio, row, segmented, slider, snackbar, spacer, spinner, stacked_progress, tabs,
-    text, text_input, toggle, tooltip, wait_bar,
+    Overlay, Shown, Styled, bottom_sheet, button, column, container, dialog, drawer, dropdown,
+    icon, icon_button, image, overlays, progress, radio, row, scroll, segmented, slider, snackbar,
+    spacer, spinner, stacked_progress, tabs, text, text_input, toggle, tooltip, wait_bar,
 };
-use dfui::{App, Bench, Color, Element, Event, Font, PaintCx, Text, Widget};
+use dfui::{
+    App, Bench, Bitmap, Color, Element, Event, Font, PaintCx, Path, Rect, Shape, Text, Widget,
+};
 use image::{Rgba, RgbaImage};
 
 const SCALE: f32 = 2.0;
@@ -389,4 +391,136 @@ fn glyph_weights_morph() {
         image::imageops::replace(&mut sheet, s, (col * w) as i64, (row * h) as i64);
     }
     check("glyph_weights", &sheet);
+}
+
+/// A five-pointed star in a 24×24 box.
+fn star() -> Shape {
+    let points: Vec<_> = (0..10)
+        .map(|i| {
+            let r = if i % 2 == 0 { 11.0 } else { 4.5 };
+            let a = std::f32::consts::PI * (i as f32 / 5.0 - 0.5);
+            [12.0 + r * a.cos(), 12.5 + r * a.sin()]
+        })
+        .collect();
+    Shape::new(Path::polygon(&points), Rect::new(0.0, 0.0, 24.0, 24.0))
+}
+
+#[test]
+fn icon_button_springs_back() {
+    let v = || {
+        row([
+            icon_button(&star())
+                .size(32.0)
+                .color(Color::hex(0xf5a524))
+                .on_click(|_| {})
+                .into(),
+            icon(&star()).size(12.0).into(),
+            icon(&star()).size(48.0).color(Color::hex(0x6b7080)).into(),
+        ])
+        .gap(8.0)
+        .align(dfui::taffy::AlignItems::CENTER)
+        .padding(8.0)
+        .into()
+    };
+    let mut b = bench(v, (160.0, 68.0));
+    let mut frames = vec![b.shot(SCALE)];
+    b.event(Event::PointerDown { x: 30.0, y: 34.0 });
+    b.settle();
+    frames.push(b.shot(SCALE));
+    b.event(Event::PointerUp { x: 30.0, y: 34.0 });
+    // The spring passes the icon's size before settling back.
+    frames.extend(film(&mut b, &[60, 160, 280]));
+    b.settle();
+    frames.push(b.shot(SCALE));
+    check("icon_button", &strip(&frames));
+}
+
+fn rows() -> Element {
+    let row = |i: usize| -> Element {
+        let bg = if i.is_multiple_of(2) {
+            Color::hex(0xe8eefc)
+        } else {
+            Color::WHITE
+        };
+        container(text(format!("Row {i}")))
+            .bg(bg)
+            .padding_xy(12.0, 8.0)
+            .into()
+    };
+    column([scroll(column((1..=30).map(row))).fill().into()])
+        .fill()
+        .into()
+}
+
+#[test]
+fn scroll_wheel_and_fling() {
+    let mut b = bench(rows, (160.0, 200.0));
+    let mut frames = vec![b.shot(SCALE)];
+    b.event(Event::Wheel {
+        x: 80.0,
+        y: 100.0,
+        dy: 100.0,
+    });
+    b.settle();
+    frames.push(b.shot(SCALE));
+    // A quick upward drag, released mid-motion: it keeps going, slowing down.
+    b.event(Event::PointerDown { x: 80.0, y: 160.0 });
+    for y in [150.0, 130.0, 110.0, 90.0] {
+        b.advance(Duration::from_millis(16));
+        b.event(Event::PointerMove { x: 80.0, y });
+    }
+    b.event(Event::PointerUp { x: 80.0, y: 90.0 });
+    frames.push(b.shot(SCALE));
+    frames.extend(film(&mut b, &[150]));
+    b.settle();
+    frames.push(b.shot(SCALE));
+    // Wheeling far past the end stops at the last row.
+    b.event(Event::Wheel {
+        x: 80.0,
+        y: 100.0,
+        dy: 5000.0,
+    });
+    b.settle();
+    frames.push(b.shot(SCALE));
+    check("scroll", &strip(&frames));
+}
+
+/// 32×32: a hue gradient, a checker in one corner and a transparent hole.
+fn bitmap() -> Bitmap {
+    let mut px = Vec::with_capacity(32 * 32 * 4);
+    for y in 0..32u32 {
+        for x in 0..32u32 {
+            let p = if (x as i32 - 22).pow(2) + (y as i32 - 22).pow(2) < 36 {
+                [0, 0, 0, 0]
+            } else if x < 10 && y < 10 {
+                let c = if (x / 2 + y / 2) % 2 == 0 { 20 } else { 235 };
+                [c, c, c, 255]
+            } else {
+                [(x * 8) as u8, (y * 8) as u8, 160, 255]
+            };
+            px.extend(p);
+        }
+    }
+    Bitmap::from_rgba8(32, 32, px)
+}
+
+#[test]
+fn images_scaled_rounded_tinted() {
+    // Over a colored backdrop, so the hole and the fade show what's under them.
+    let v = || {
+        row([
+            image(bitmap()).into(),
+            image(bitmap()).width(96.0).radius(16.0).into(),
+            image(bitmap())
+                .width(64.0)
+                .tint(Color::WHITE.alpha(0.5))
+                .into(),
+        ])
+        .gap(8.0)
+        .padding(8.0)
+        .align(dfui::taffy::AlignItems::FLEX_START)
+        .bg(Color::hex(0xf5a524))
+        .into()
+    };
+    check("image", &bench(v, (232.0, 112.0)).shot(SCALE));
 }
