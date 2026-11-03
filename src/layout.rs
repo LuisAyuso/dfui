@@ -12,7 +12,7 @@ use taffy::{
 use crate::render::Rect;
 use crate::runtime::task::Tasks;
 use crate::text::Text;
-use crate::widget::{BuildCx, Element, Layer, Scope, State, Widget};
+use crate::widget::{BuildCx, Element, Layer, Placement, Scope, State, Widget};
 
 pub(crate) struct Node<'a> {
     pub w: &'a dyn Widget,
@@ -396,22 +396,39 @@ pub(crate) fn place(
             clip,
             content: m.content,
         };
-        let mut area = placed[i].rect;
-        if nodes[i].w.layer() == Some(Layer::Parent) {
-            let r = placed[i].rect;
+        let r = placed[i].rect;
+        let mut at = Placement {
+            clip: r,
+            rest: r,
+            anchor: r,
+        };
+        let rest = nodes[i].w.layer().and_then(|layer| {
             let rest = children(nodes, i)
                 .map(|c| measured[c].rect)
                 .map(|c| Rect::new(r.x + c.x, r.y + c.y, c.w, c.h))
-                .reduce(|a, b| a.union(&b));
-            if let Some(rest) = rest {
+                .reduce(|a, b| a.union(&b))?;
+            Some((layer, rest))
+        });
+        match (rest, nodes[i].parent) {
+            (Some((Layer::Parent, rest)), Some(p)) => {
                 let (sx, sy) = fit(placed[0].rect, r, rest);
-                area = Rect::new(rest.x + sx, rest.y + sy, rest.w, rest.h);
-                (shifts[i], rests[i]) = ((sx, sy), Some(area));
+                let rest = Rect::new(rest.x + sx, rest.y + sy, rest.w, rest.h);
+                at = Placement {
+                    clip: rest,
+                    rest,
+                    anchor: placed[p].rect,
+                };
+                (shifts[i], rests[i]) = ((sx, sy), Some(rest));
             }
+            (Some((_, rest)), _) => {
+                at.rest = rest;
+                at.anchor = placed[0].rect;
+            }
+            (None, _) => {}
         }
         offsets[i] = nodes[i]
             .w
-            .scroll(states.entry(nodes[i].id).or_default(), area, now);
+            .scroll(states.entry(nodes[i].id).or_default(), at, now);
     }
     placed
 }

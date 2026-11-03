@@ -107,16 +107,17 @@ fn damage_after<A: App>(
     rt: &mut Runtime<A>,
     events: impl IntoIterator<Item = Event>,
 ) -> Option<Rect> {
-    let t = *rt.clock.get_or_insert_with(Instant::now);
+    let t = task::now();
+    task::set_clock(Some(t));
     let (a, na) = rt.scene(&mut false);
     for ev in events {
         rt.dispatch(ev);
     }
     // Transitions start at the first paint after the event; a second paint
     // a second later shows them settled.
-    rt.clock = Some(t + Duration::from_secs(1));
+    task::set_clock(Some(t + Duration::from_secs(1)));
     rt.scene(&mut false);
-    rt.clock = Some(t + Duration::from_secs(2));
+    task::set_clock(Some(t + Duration::from_secs(2)));
     let (b, nb) = rt.scene(&mut false);
     damage(&a, &na, &b, &nb)
 }
@@ -315,10 +316,10 @@ fn layers_float_above_and_take_input_first() {
     rt.viewport = (200.0, 200.0);
     rt.insets = [20.0, 0.0, 10.0, 0.0];
     let t = Instant::now();
-    rt.clock = Some(t);
+    task::set_clock(Some(t));
     rt.relayout();
     // Past the dialog's slide in.
-    rt.clock = Some(t + Duration::from_secs(1));
+    task::set_clock(Some(t + Duration::from_secs(1)));
     rt.reposition();
     // Pre-order: stateful, column, dialog, sink, card, ok, its text,
     // scroll, anchor column, +, its text, popup, sink, popup content.
@@ -371,7 +372,7 @@ fn controller_animates_overlays_out_then_removes_them() {
     let mut rt = Runtime::new(Host);
     rt.viewport = (200.0, 200.0);
     let t = Instant::now();
-    rt.clock = Some(t);
+    task::set_clock(Some(t));
     rt.relayout();
     let tap = |rt: &mut Runtime<Host>, x: f32, y: f32| {
         rt.dispatch(Event::PointerDown { x, y });
@@ -382,7 +383,7 @@ fn controller_animates_overlays_out_then_removes_them() {
     // dialog, sink, card, x, its text.
     assert_eq!(rt.ids.len(), 10);
     assert!(rt.placed[7].rect.y >= 200.0, "starts below the window");
-    rt.clock = Some(t + Duration::from_secs(1));
+    task::set_clock(Some(t + Duration::from_secs(1)));
     rt.reposition();
     assert!(rt.placed[7].rect.y < 200.0, "slid in");
 
@@ -391,9 +392,9 @@ fn controller_animates_overlays_out_then_removes_them() {
     tap(&mut rt, 5.0, 5.0);
     assert_eq!(rt.ids.len(), 16, "a closing overlay lets input through");
 
-    let due = task::fire_timers(Instant::now()).expect("removal timer");
-    std::thread::sleep(due.saturating_duration_since(Instant::now()));
-    task::fire_timers(Instant::now());
+    let due = task::fire_timers(task::now()).expect("removal timer");
+    task::set_clock(Some(due));
+    task::fire_timers(due);
     assert!(rt.drive());
     assert_eq!(rt.ids.len(), 4 + 2 + 6, "the first builds nothing");
 }
@@ -497,11 +498,11 @@ fn tooltip_shows_on_long_press_and_lingers() {
     rt.viewport = (200.0, 200.0);
     let t = Instant::now();
     let ms = Duration::from_millis;
-    rt.clock = Some(t);
+    task::set_clock(Some(t));
     rt.relayout();
     let tip = rt.placed.len() - 1;
     let at = |rt: &mut Runtime<Tip>, d: u64| {
-        rt.clock = Some(t + ms(d));
+        task::set_clock(Some(t + ms(d)));
         rt.reposition();
         rt.placed[tip].rect.y.abs() < 1e5
     };
@@ -550,7 +551,7 @@ fn closed_dropdown_menu_lets_taps_through() {
     let mut rt = Runtime::new(PickApp);
     rt.viewport = (200.0, 300.0);
     let t = Instant::now();
-    rt.clock = Some(t);
+    task::set_clock(Some(t));
     rt.relayout();
     let tap = |rt: &mut Runtime<PickApp>, x: f32, y: f32| {
         rt.dispatch(Event::PointerDown { x, y });
@@ -566,7 +567,7 @@ fn closed_dropdown_menu_lets_taps_through() {
         "no closed menu in the way"
     );
     tap(&mut rt, field.x + 5.0, field.y + 5.0);
-    rt.clock = Some(t + Duration::from_secs(1));
+    task::set_clock(Some(t + Duration::from_secs(1)));
     rt.reposition();
     tap(&mut rt, x, y);
     let s = root::<Pick, _>(&mut rt);
@@ -679,7 +680,7 @@ fn transitions_request_frames_until_settled() {
     rt.relayout();
     let t = Instant::now();
     let frame_at = |ms: u64, rt: &mut Runtime<Counter>| {
-        rt.clock = Some(t + Duration::from_millis(ms));
+        task::set_clock(Some(t + Duration::from_millis(ms)));
         let mut frame = false;
         rt.scene(&mut frame);
         frame
@@ -784,7 +785,7 @@ fn caret_blinks_on_timed_wakeups() {
     rt.relayout();
     let t = Instant::now();
     let paint_at = |ms: u64, rt: &mut Runtime<Field>| {
-        rt.clock = Some(t + Duration::from_millis(ms));
+        task::set_clock(Some(t + Duration::from_millis(ms)));
         let mut frame = false;
         let n = rt.scene(&mut frame).0.len();
         assert!(!frame, "a blink never asks for every frame");
@@ -814,16 +815,16 @@ fn released_drag_flings_and_settles_at_the_edge() {
     let at = |ms: u64| t + Duration::from_millis(ms);
     let offset = |rt: &Runtime<Long>| -rt.placed[3].rect.y;
     let paint_at = |ms: u64, rt: &mut Runtime<Long>| {
-        rt.clock = Some(at(ms));
+        task::set_clock(Some(at(ms)));
         let mut frame = false;
         rt.scene(&mut frame);
         frame
     };
     // Drag up 80px over 64ms: 1250 px/s.
-    rt.clock = Some(at(0));
+    task::set_clock(Some(at(0)));
     rt.dispatch(Event::PointerDown { x: 50.0, y: 150.0 });
     for i in 1..=4 {
-        rt.clock = Some(at(16 * i));
+        task::set_clock(Some(at(16 * i)));
         let y = 150.0 - 20.0 * i as f32;
         rt.dispatch(Event::PointerMove { x: 50.0, y });
     }
@@ -843,11 +844,11 @@ fn released_drag_flings_and_settles_at_the_edge() {
     assert_eq!(offset(&rt), 300.0);
 
     // A drag that pauses before lifting doesn't fling.
-    rt.clock = Some(at(3000));
+    task::set_clock(Some(at(3000)));
     rt.dispatch(Event::PointerDown { x: 50.0, y: 50.0 });
-    rt.clock = Some(at(3016));
+    task::set_clock(Some(at(3016)));
     rt.dispatch(Event::PointerMove { x: 50.0, y: 100.0 });
-    rt.clock = Some(at(3300));
+    task::set_clock(Some(at(3300)));
     rt.dispatch(Event::PointerUp { x: 50.0, y: 100.0 });
     assert!(!paint_at(3300, &mut rt));
     assert_eq!(offset(&rt), 250.0);
@@ -1047,7 +1048,7 @@ fn icon_button_shrinks_while_pressed_and_overshoots_on_release() {
     rt.relayout();
     let t = Instant::now();
     let width = |rt: &mut Runtime<Tapper>, ms: u64| {
-        rt.clock = Some(t + Duration::from_millis(ms));
+        task::set_clock(Some(t + Duration::from_millis(ms)));
         let (scene, _) = rt.scene(&mut false);
         scene.instances[1].rect[2]
     };
@@ -1055,7 +1056,7 @@ fn icon_button_shrinks_while_pressed_and_overshoots_on_release() {
     rt.dispatch(Event::PointerDown { x: 20.0, y: 20.0 });
     width(&mut rt, 10);
     assert!(width(&mut rt, 200) < rest * 0.85, "pressed");
-    rt.clock = Some(t + Duration::from_millis(200));
+    task::set_clock(Some(t + Duration::from_millis(200)));
     rt.dispatch(Event::PointerUp { x: 20.0, y: 20.0 });
     width(&mut rt, 210);
     assert!(width(&mut rt, 420) > rest * 1.04, "springs past its size");

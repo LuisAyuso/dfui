@@ -1,6 +1,6 @@
 //! Futures and streams owned by widgets, polled on the UI thread.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -128,12 +128,23 @@ impl Notifier {
 thread_local! {
     /// Pending `sleep` deadlines on the UI thread.
     static TIMERS: RefCell<Vec<(Instant, Waker)>> = const { RefCell::new(Vec::new()) };
+    /// Fixed frame time for tests; the wall clock otherwise.
+    static CLOCK: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+/// Frame time: the wall clock unless a test fixed it.
+pub(crate) fn now() -> Instant {
+    CLOCK.get().unwrap_or_else(Instant::now)
+}
+
+pub(crate) fn set_clock(t: Option<Instant>) {
+    CLOCK.set(t);
 }
 
 /// Completes after `d`, on every platform including the web. Driven by the
 /// dfui event loop, so await it in builder sources, not on another runtime.
 pub fn sleep(d: Duration) -> Sleep {
-    Sleep(Instant::now() + d)
+    Sleep(now() + d)
 }
 
 pub struct Sleep(Instant);
@@ -142,7 +153,7 @@ impl Future for Sleep {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> task::Poll<()> {
-        if Instant::now() >= self.0 {
+        if now() >= self.0 {
             return task::Poll::Ready(());
         }
         TIMERS.with_borrow_mut(|t| {

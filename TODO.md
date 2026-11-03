@@ -159,7 +159,11 @@ Widgets:
       anchor's other side (or shift sideways) to stay in the window; tooltips
       show on a long press and linger; anchored popups hide with their
       anchor when it is scrolled away.
-- [ ] A flipped dropdown menu still unrolls downward.
+- [x] Slides clear the window by the content's own distance (bottom
+      sheets and snackbars were off-screen for most of their motion), and a
+      flipped dropdown menu unrolls out of its field (`Widget::scroll` gets a
+      `Placement`: clip, resting box, anchor).
+- [ ] `bottom_sheet` rounds its corners against the window's bottom edge.
 
 ## Text
 
@@ -207,7 +211,12 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
 
 ## Tooling
 
-- [ ] Golden-image tests on `dfui::snapshot` (currently eyeballed, `#[ignore]`).
+- [x] Golden-image tests (`tests/golden.rs`): widgets rendered offscreen
+      on a virtual clock (`Bench::advance`/`settle`), animations as frame
+      strips, compared against PNGs from the reference machine.
+      `DFUI_BLESS=1 cargo test --test golden` rewrites them.
+- [ ] Goldens for scroll, icon button, image; fold the demo's `#[ignore]`
+      snapshot tests into them.
 - [ ] Release signing config for real distribution (debug keystore via
       `CARGO_APK_RELEASE_KEYSTORE` today).
 - [ ] cargo-apk is deprecated and capped at NDK platform 35; evaluate

@@ -3,8 +3,7 @@ use web_time::Instant;
 
 use super::Styled;
 use crate::kinetic::Drag;
-use crate::render::Rect;
-use crate::widget::{Element, Event, EventCx, PaintCx, State, Widget};
+use crate::widget::{Element, Event, EventCx, PaintCx, Placement, State, Widget};
 
 #[derive(Default)]
 struct ScrollState {
@@ -60,7 +59,7 @@ impl Widget for Scroll {
     fn children(&self) -> &[Element] {
         &self.child
     }
-    fn scroll(&self, state: &mut State, _: Rect, now: Instant) -> Option<(f32, f32)> {
+    fn scroll(&self, state: &mut State, _: Placement, now: Instant) -> Option<(f32, f32)> {
         let s = state.get::<ScrollState>();
         if let Some(o) = s.drag.fling(now, s.max) {
             s.offset = o;

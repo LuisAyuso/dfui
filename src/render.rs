@@ -1036,12 +1036,19 @@ pub(crate) struct Offscreen {
 
 impl Offscreen {
     pub(crate) fn new(size: (u32, u32)) -> Offscreen {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
-            .expect("no GPU adapter");
+        // Vulkan loaders and drivers (NVIDIA's) crash creating instances on
+        // several threads at once, as parallel tests do.
+        static SETUP: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let gpu = pollster::block_on(Gpu::new(&adapter, format));
+        let gpu = {
+            let _setup = SETUP.lock().unwrap_or_else(|e| e.into_inner());
+            let instance = wgpu::Instance::new(
+                wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+            );
+            let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+                .expect("no GPU adapter");
+            pollster::block_on(Gpu::new(&adapter, format))
+        };
         let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
             size: wgpu::Extent3d {

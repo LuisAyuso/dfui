@@ -79,6 +79,19 @@ impl Element {
     }
 }
 
+/// Boxes `Widget::scroll` works from, logical px.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Placement {
+    /// What children are clipped to: the widget's box, or for a
+    /// `Layer::Parent` widget the box its children rest in, moved to stay in
+    /// the window.
+    pub clip: Rect,
+    /// Where a layer's children rest before scrolling; `clip` otherwise.
+    pub rest: Rect,
+    /// A layer's anchor: its parent's box, or the window; `clip` otherwise.
+    pub anchor: Rect,
+}
+
 /// What a layer widget is laid out over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layer {
@@ -132,10 +145,9 @@ pub trait Widget {
         0
     }
 
-    /// Children are clipped to this widget's `rect` and shifted by the
-    /// returned offset, as of frame time `now`. A `Layer::Parent` widget gets
-    /// the box its children rest in instead, moved to stay in the window.
-    fn scroll(&self, _state: &mut State, _rect: Rect, _now: Instant) -> Option<(f32, f32)> {
+    /// Children are clipped to `at.clip` and shifted by the returned offset,
+    /// as of frame time `now`.
+    fn scroll(&self, _state: &mut State, _at: Placement, _now: Instant) -> Option<(f32, f32)> {
         None
     }
 

@@ -1,19 +1,23 @@
 use std::time::Duration;
 
+use web_time::Instant;
+
 use crate::App;
 use crate::render::{Offscreen, Rect, Scene, damage, render_offscreen};
 use crate::text::Text;
 use crate::widget::Event;
 
-use super::Runtime;
+use super::{Runtime, task};
 
-/// CPU side of frames for benchmarks: rebuild, layout, paint and damage diff,
-/// through the real runtime but without a window or GPU.
+/// CPU side of frames for benchmarks and golden tests: rebuild, layout, paint
+/// and damage diff, through the real runtime but without a window, on a
+/// virtual clock that only moves through `advance` and `settle`.
 #[doc(hidden)]
 pub struct Bench<A: App>(Runtime<A>);
 
 impl<A: App> Bench<A> {
     pub fn new(app: A, viewport: (f32, f32)) -> Self {
+        task::set_clock(Some(Instant::now()));
         let mut rt = Runtime::new(app);
         rt.viewport = viewport;
         rt.relayout();
@@ -50,6 +54,54 @@ impl<A: App> Bench<A> {
 
     pub fn event(&mut self, ev: Event) {
         self.0.dispatch(ev);
+    }
+
+    /// Moves the clock forward by `d`, through every frame, wake and timer
+    /// due on the way, as a window would.
+    pub fn advance(&mut self, d: Duration) {
+        let end = task::now() + d;
+        while let Some(t) = self.next_event().filter(|&t| t < end) {
+            self.step_to(t);
+        }
+        self.step_to(end);
+    }
+
+    /// Advances until no frame, wake or timer is pending.
+    pub fn settle(&mut self) {
+        for _ in 0..10_000 {
+            let Some(t) = self.next_event() else { return };
+            self.step_to(t);
+        }
+        panic!("still animating after 10000 frames");
+    }
+
+    /// Paints, then returns when the next frame (60 Hz while animating), wake or timer is due.
+    fn next_event(&mut self) -> Option<Instant> {
+        let mut frame = false;
+        self.0.scene(&mut frame);
+        let now = task::now();
+        match frame {
+            true => Some(now + Duration::from_micros(16_667)),
+            false => self.0.wake.into_iter().chain(task::fire_timers(now)).min(),
+        }
+    }
+
+    fn step_to(&mut self, t: Instant) {
+        task::set_clock(Some(t));
+        task::fire_timers(t);
+        self.0.woken();
+        self.0.reposition();
+    }
+
+    /// Renders the current frame offscreen at `scale` physical px per logical px.
+    pub fn shot(&mut self, scale: f32) -> image::RgbaImage {
+        let rt = &mut self.0;
+        let size = (
+            (rt.viewport.0 * scale).round() as u32,
+            (rt.viewport.1 * scale).round() as u32,
+        );
+        let (scene, _) = rt.scene(&mut false);
+        render_offscreen(&[(&scene, None)], &mut rt.text, size, scale)
     }
 }
 

@@ -20,7 +20,7 @@ pub use taffy;
 pub use text::{Font, Text, TextLayout};
 pub use web_time::Instant;
 pub use widget::{
-    BuildCx, Element, Event, EventCx, Handle, Key, Layer, PaintCx, Scope, State, Widget,
+    BuildCx, Element, Event, EventCx, Handle, Key, Layer, PaintCx, Placement, Scope, State, Widget,
 };
 
 /// Root of the UI. State lives in `stateful` widgets and in external sources

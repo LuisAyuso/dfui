@@ -69,8 +69,6 @@ pub(crate) struct Runtime<A: App> {
     wake: Option<Instant>,
     /// A widget asked for placement to rerun before the next paint.
     place: bool,
-    /// Fixed frame time for tests; the wall clock otherwise.
-    clock: Option<Instant>,
     /// Hidden windows don't animate; presents would be throttled anyway.
     occluded: bool,
     focused: Option<u64>,
@@ -152,7 +150,6 @@ impl<A: App> Runtime<A> {
             next_frame: None,
             wake: None,
             place: false,
-            clock: None,
             occluded: false,
             focused: None,
             mods: ModifiersState::empty(),
@@ -171,7 +168,7 @@ impl<A: App> Runtime<A> {
     }
 
     fn now(&self) -> Instant {
-        self.clock.unwrap_or_else(Instant::now)
+        task::now()
     }
 
     fn scale(&self) -> f32 {

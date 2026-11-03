@@ -11,9 +11,11 @@ use super::{
     stateful, text,
 };
 use crate::anim::{Animated, ease};
-use crate::render::{Color, Rect, Shadow};
-use crate::runtime::task::sleep;
-use crate::widget::{Element, Event, EventCx, Handle, Layer, PaintCx, Scope, State, Widget};
+use crate::render::{Color, Shadow};
+use crate::runtime::task::{self, sleep};
+use crate::widget::{
+    Element, Event, EventCx, Handle, Layer, PaintCx, Placement, Scope, State, Widget,
+};
 
 type Handler = Box<dyn Fn(&mut EventCx)>;
 type OnChange = Rc<dyn Fn(&mut EventCx, usize)>;
@@ -64,7 +66,8 @@ pub struct Overlay {
     scrim: Option<Color>,
     on_dismiss: Option<Handler>,
     show: Show,
-    /// Where the content slides in from, in overlay sizes; `None` pops.
+    /// Unit direction the content slides out toward, clearing the clip;
+    /// `None` pops.
     slide: Option<(f32, f32)>,
     closing: bool,
 }
@@ -187,7 +190,7 @@ impl Widget for Overlay {
     fn children(&self) -> &[Element] {
         &self.child
     }
-    fn scroll(&self, state: &mut State, rect: Rect, now: Instant) -> Option<(f32, f32)> {
+    fn scroll(&self, state: &mut State, at: Placement, now: Instant) -> Option<(f32, f32)> {
         let s = state.get::<OverlayState>();
         let first = s.since.is_none();
         let since = *s.since.get_or_insert(now);
@@ -204,16 +207,33 @@ impl Widget for Overlay {
                 Show::For(d) => now < since + d,
             };
         // Hidden content is scrolled out of the overlay's clip.
-        let Some((dx, dy)) = self.slide else {
+        let Some((dx, mut dy)) = self.slide else {
             return (!s.shown).then_some((0.0, 1e6));
         };
+        // Flipped above its anchor, a popup unrolls the other way.
+        if self.layer == Layer::Parent && at.rest.y < at.anchor.y {
+            dy = -dy;
+        }
         if first {
             s.t.to(0.0, now, MOTION, ease::out_cubic);
         }
         let target = if s.shown { 1.0 } else { 0.0 };
         s.t.to(target, now, MOTION, ease::out_cubic);
         let k = 1.0 - s.t.get(now);
-        (k > 0.0).then_some((-dx * k * rect.w, -dy * k * rect.h))
+        // Just clear of the clip still leaves the shadow in it.
+        if k >= 1.0 {
+            return Some((-dx * 1e6, -dy * 1e6));
+        }
+        // How far the content travels along the slide to clear the clip.
+        let (c, r) = (at.clip, at.rest);
+        let reach = |d: f32, lo: f32, hi: f32, start: f32, end: f32| match d {
+            d if d > 0.0 => hi - start,
+            d if d < 0.0 => end - lo,
+            _ => 0.0,
+        };
+        let w = reach(dx, c.x, c.x + c.w, r.x, r.x + r.w);
+        let h = reach(dy, c.y, c.y + c.h, r.y, r.y + r.h);
+        (k > 0.0).then_some((-dx * k * w, -dy * k * h))
     }
     fn paint(&self, cx: &mut PaintCx) {
         let now = cx.now;
@@ -400,7 +420,7 @@ impl Shown {
     pub fn close(self, cx: &mut EventCx) {
         let key = self.key;
         cx.update(self.h, move |o: &mut Overlays| {
-            let now = Instant::now();
+            let now = task::now();
             let Some(e) = o.entries.iter_mut().find(|e| e.key == key && !e.closing) else {
                 return;
             };
@@ -434,7 +454,7 @@ impl Handle<Overlays> {
     pub fn show(self, cx: &mut EventCx, build: impl Fn(Shown) -> Overlay + 'static) {
         let h = self;
         cx.update(self, move |o: &mut Overlays| {
-            let now = Instant::now();
+            let now = task::now();
             // Removed ones linger until the next show; they build nothing.
             o.entries.retain(|e| e.until.is_none_or(|u| u > now));
             let key = o.next;
@@ -475,7 +495,7 @@ fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
     let (build, closing, key, until) = (e.build.clone(), e.closing, e.key, e.until);
     let timer = move |_: Scope| async move {
         match until {
-            Some(u) => sleep(u.saturating_duration_since(Instant::now())).await,
+            Some(u) => sleep(u.saturating_duration_since(task::now())).await,
             None => std::future::pending().await,
         }
     };
@@ -495,7 +515,7 @@ fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
     let Some(from) = e.from else {
         return shown().key(key);
     };
-    let queue = move |_: Scope| sleep(from.saturating_duration_since(Instant::now()));
+    let queue = move |_: Scope| sleep(from.saturating_duration_since(task::now()));
     let wait = move |snap: &Snapshot<Option<()>>| match snap.done {
         true => shown(),
         false => column([]).into(),
@@ -601,7 +621,7 @@ mod tests {
 
     #[test]
     fn closing_a_snackbar_pulls_the_queue_forward() {
-        let now = Instant::now();
+        let now = task::now();
         let s = Duration::from_secs;
         let timed = |key, from, until| Entry {
             key,
