@@ -30,6 +30,7 @@ fn main() { dfui::run(Counter); }
 - `docs/tree.md` — the flattened node list and its id cache
 - `docs/async-and-state.md` — study: external/async state and the web port
 - `docs/state-management.md` — study: state architectures across UI frameworks
+- `docs/data-models.md` — list and tree models, virtualized lists, tables and trees
 - `TODO.md` — roadmap and current performance baseline
 
 ## Running

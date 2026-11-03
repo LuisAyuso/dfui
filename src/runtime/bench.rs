@@ -79,6 +79,7 @@ impl<A: App> Bench<A> {
     fn next_event(&mut self) -> Option<Instant> {
         let mut frame = false;
         self.0.scene(&mut frame);
+        self.0.rebuild_if_due();
         let now = task::now();
         match frame {
             true => Some(now + Duration::from_micros(16_667)),

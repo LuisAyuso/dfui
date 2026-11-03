@@ -10,6 +10,7 @@ mod container;
 mod icon;
 mod image;
 mod label;
+mod list;
 mod overlay;
 mod progress;
 mod provide;
@@ -18,8 +19,10 @@ mod scroll;
 mod segmented;
 mod slider;
 mod stateful;
+mod table;
 mod text_input;
 mod toggle;
+mod tree;
 
 use taffy::{
     AlignItems, Dimension, FlexWrap, JustifyContent, LengthPercentage, LengthPercentageAuto, Size,
@@ -32,6 +35,7 @@ pub use container::{Container, column, container, row, spacer};
 pub use icon::{Icon, icon, icon_button};
 pub use image::{Image, image};
 pub use label::{Label, text};
+pub use list::{List, list};
 pub use overlay::{
     Dropdown, Overlay, Overlays, Shown, bottom_sheet, dialog, drawer, dropdown, overlay, overlays,
     popup, snackbar, tooltip,
@@ -43,8 +47,10 @@ pub use scroll::{Scroll, scroll};
 pub use segmented::{Segmented, segmented, tabs};
 pub use slider::{Slider, slider};
 pub use stateful::{Stateful, stateful};
+pub use table::{Column, TableSort, table};
 pub use text_input::{TextInput, text_input};
 pub use toggle::{Toggle, toggle};
+pub use tree::{Expanded, tree_view};
 
 /// Flex-layout modifiers shared by every widget that owns a `Style`.
 pub trait Styled: Sized {

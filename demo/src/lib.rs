@@ -1,11 +1,12 @@
 use std::time::{Duration, Instant};
 
 use dfui::anim::{Lerp, Morph, ease};
+use dfui::model::{Keyed, Row, Tree};
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
-    Snapshot, Styled, button, column, container, future_builder, image, progress, provide, radio,
-    row, scroll, segmented, slider, spacer, spinner, stacked_progress, stateful, stream_builder,
-    tabs, text, text_input, toggle, wait_bar,
+    Column, Snapshot, Styled, button, column, container, future_builder, image, list, progress,
+    provide, radio, row, scroll, segmented, slider, spacer, spinner, stacked_progress, stateful,
+    stream_builder, table, tabs, text, text_input, toggle, tree_view, wait_bar,
 };
 use dfui::{
     Animated, App, Bitmap, Color, Element, EventCx, Font, Handle, PaintCx, Path, Rect, Scope,
@@ -35,7 +36,9 @@ impl App for Demo {
 /// App-wide UI state, owned by the root `stateful`.
 struct Screen {
     count: i32,
-    items: Vec<u32>,
+    items: Vec<Item>,
+    /// List, table or tree, on the Cards page.
+    cards_view: usize,
     bench: bool,
     playing: bool,
     tab: usize,
@@ -45,7 +48,8 @@ impl Default for Screen {
     fn default() -> Self {
         Screen {
             count: 0,
-            items: (1..=12).collect(),
+            items: (1..=12).map(Item).collect(),
+            cards_view: 0,
             bench: false,
             playing: true,
             tab: 0,
@@ -87,9 +91,15 @@ impl Screen {
             4 => jobs(),
             _ => gallery(),
         };
-        let mut body = scroll(container(page).padding(4.0)).grow(1.0);
-        // Zero basis, so the page's height doesn't push the screen past the window.
-        body.style_mut().flex_basis = Dimension::length(0.0);
+        // The Cards page scrolls itself, virtualized.
+        let body: Element = if self.tab == 3 {
+            container(page).padding(4.0).fill().into()
+        } else {
+            let mut body = scroll(container(page).padding(4.0)).grow(1.0);
+            // Zero basis, so the page's height doesn't push the screen past the window.
+            body.style_mut().flex_basis = Dimension::length(0.0);
+            body.into()
+        };
         column([
             header.into(),
             tabs(PAGES, self.tab)
@@ -97,7 +107,7 @@ impl Screen {
                 .on_change(move |cx, i| cx.update(h, move |s: &mut Screen| s.tab = i))
                 .into(),
             // Keyed per page so each keeps its own scroll offset.
-            Element::from(body).key(self.tab as u64),
+            body.key(self.tab as u64),
         ])
         .padding(20.0)
         .gap(16.0)
@@ -225,16 +235,174 @@ impl Screen {
     }
 
     fn cards(&self, h: Handle<Screen>) -> Element {
-        let add = button(text("Add card").color(Color::WHITE))
-            .on_click(on(h, |s| s.items.push(s.items.last().map_or(1, |n| n + 1))))
+        let next = |s: &Screen| s.items.iter().map(|i| i.0).max().unwrap_or(0) + 1;
+        let add = button(text("Add").color(Color::WHITE))
+            .on_click(on(h, move |s| {
+                let n = next(s);
+                s.items.insert(0, Item(n));
+            }))
             .color(Color::hex(0x2f9e6a));
-        column(
-            std::iter::once(add.into()).chain(self.items.iter().map(|&n| card(n, h).key(n as u64))),
-        )
-        .align(AlignItems::STRETCH)
-        .gap(12.0)
-        .into()
+        let many = button(text("+100").color(INK))
+            .on_click(on(h, move |s| {
+                let n = next(s);
+                s.items.extend((n..n + 100).map(Item));
+            }))
+            .color(Color::hex(0xe8e9ef));
+        let shuffle = button(text("Shuffle").color(INK))
+            .on_click(on(h, |s| {
+                // Deterministic shuffle: a fixed stride through the list.
+                let n = s.items.len();
+                let stride = (1..n)
+                    .rev()
+                    .find(|k| gcd(*k, n) == 1 && *k < n * 2 / 3)
+                    .unwrap_or(1);
+                s.items = (0..n).map(|i| s.items[i * stride % n].clone()).collect();
+            }))
+            .color(Color::hex(0xe8e9ef));
+        let views = segmented(["List", "Table", "Tree"], self.cards_view)
+            .on_change(move |cx, i| cx.update(h, move |s: &mut Screen| s.cards_view = i));
+        let controls = row([add.into(), many.into(), shuffle.into()])
+            .gap(8.0)
+            .wrap();
+        let items = self.items.clone();
+        let body: Element = match self.cards_view {
+            0 => list(items, move |it: &Item| {
+                container(card(it.0, h)).padding_xy(0.0, 6.0)
+            })
+            .fill()
+            .into(),
+            1 => panel_fill(
+                table(
+                    items,
+                    vec![
+                        Column::new("#", |it: &Item| text(it.0.to_string()).color(INK))
+                            .width(64.0)
+                            .sort_by(|a: &Item, b| a.0.cmp(&b.0)),
+                        Column::new("Name", |it: &Item| text(it.name()).color(INK))
+                            .sort_by(|a: &Item, b| a.name().cmp(&b.name())),
+                        Column::new("Size", |it: &Item| {
+                            text(format!("{} kB", it.size())).color(MUTED)
+                        })
+                        .width(96.0)
+                        .sort_by(|a: &Item, b| a.size().cmp(&b.size())),
+                        Column::new("", move |it: &Item| remove(it.0, h)).width(64.0),
+                    ],
+                )
+                .fill()
+                .into(),
+            ),
+            _ => panel_fill(
+                tree_view(groups(&items), move |node: &Node, _: &Row| -> Element {
+                    match node {
+                        Node::Group(g, count) => row([
+                            container(spacer())
+                                .bg(Color::hex(CHIPS[*g]))
+                                .radius(6.0)
+                                .width(12.0)
+                                .height(12.0)
+                                .into(),
+                            text(format!("{} ({count})", GROUPS[*g])).color(INK).into(),
+                        ])
+                        .align(AlignItems::CENTER)
+                        .gap(10.0)
+                        .padding_xy(0.0, 12.0)
+                        .into(),
+                        Node::Card(n) => row([
+                            text(Item(*n).name()).color(INK).grow(1.0).into(),
+                            remove(*n, h),
+                        ])
+                        .align(AlignItems::CENTER)
+                        .padding_xy(0.0, 4.0)
+                        .into(),
+                    }
+                })
+                .fill()
+                .into(),
+            ),
+        };
+        column([views.into(), controls.into(), body])
+            .gap(12.0)
+            .fill()
+            .into()
     }
+}
+
+/// One card: a number, keyed by it, with data derived from it for the table.
+#[derive(Clone)]
+struct Item(u32);
+
+impl Keyed for Item {
+    fn key(&self) -> u64 {
+        self.0 as u64
+    }
+}
+
+impl Item {
+    fn name(&self) -> String {
+        const WORDS: [&str; 8] = [
+            "Amber", "Birch", "Cobalt", "Dune", "Ember", "Fjord", "Garnet", "Haze",
+        ];
+        format!("{} {}", WORDS[self.0 as usize * 5 % 8], self.0)
+    }
+    fn size(&self) -> u32 {
+        self.0 * 37 % 100 + 4
+    }
+}
+
+const GROUPS: [&str; 3] = ["Small", "Medium", "Large"];
+
+/// Tree rows: a size group with its card count, or a card.
+#[derive(Clone)]
+enum Node {
+    Group(usize, usize),
+    Card(u32),
+}
+
+impl Keyed for Node {
+    fn key(&self) -> u64 {
+        match self {
+            // Above any card number.
+            Node::Group(g, _) => u64::MAX - *g as u64,
+            Node::Card(n) => *n as u64,
+        }
+    }
+}
+
+/// Cards grouped by size.
+fn groups(items: &[Item]) -> Tree<Node> {
+    let group = |it: &Item| (it.size() as usize * 3 / 104).min(2);
+    let mut t = Tree::new();
+    for g in 0..3 {
+        let count = items.iter().filter(|it| group(it) == g).count();
+        let key = t.push(None, Node::Group(g, count));
+        for it in items.iter().filter(|it| group(it) == g) {
+            t.push(Some(key), Node::Card(it.0));
+        }
+    }
+    t
+}
+
+fn gcd(a: usize, b: usize) -> usize {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+/// A "×" that removes card `n`.
+fn remove(n: u32, root: Handle<Screen>) -> Element {
+    button(text("×").size(20.0).color(INK))
+        .on_click(on(root, move |s| s.items.retain(|i| i.0 != n)))
+        .color(Color::hex(0xe8e9ef))
+        .flat()
+        .into()
+}
+
+/// White panel that takes the space left, for tables and trees.
+fn panel_fill(body: Element) -> Element {
+    container(body)
+        .bg(Color::WHITE)
+        .border(1.0, Color::hex(0xdfe1e8))
+        .padding(1.0)
+        .fill()
+        .into()
 }
 
 /// External state: a job runner the app owns. Each job runs on its own
@@ -795,10 +963,7 @@ fn card(n: u32, root: Handle<Screen>) -> Element {
                 .on_click(move |cx| cx.update(h, |open: &mut bool| *open = !*open))
                 .color(Color::hex(0xe8e9ef))
                 .into(),
-            button(text("×").size(20.0).color(INK))
-                .on_click(on(root, move |s| s.items.retain(|&i| i != n)))
-                .color(Color::hex(0xe8e9ef))
-                .into(),
+            remove(n, root),
         ])
         .align(AlignItems::CENTER)
         .gap(14.0)

@@ -47,8 +47,8 @@ State and async:
       tree position, so switching tabs drops the hidden page's state (e.g.
       its scroll offset).
 - [ ] Frequent background updates (download progress at 2 Hz) rebuild the
-      whole tree, including a list of hundreds of rows; see "Partial
-      rebuild (CPU)" and the virtualized list below.
+      whole tree; with `list` only the rows near the viewport are built.
+      See "Partial rebuild (CPU)".
 
 Layout:
 
@@ -86,7 +86,14 @@ Widgets:
 - [x] Progress: `progress(v)`, `stacked_progress` (several fractions in
       one bar, smaller on top), `wait_bar()` and `spinner()` for waits of
       unknown length.
-- [ ] Virtualized list: build and lay out only the visible rows.
+- [x] Virtualized list: `list(model, row)` over a `ListModel` builds only
+      the rows near the viewport, keeps the first visible row in place by
+      key, and slides rows in, out and to new places (`docs/data-models.md`).
+- [x] `table` (sortable columns) and `tree_view` (`TreeModel`, flattened
+      into rows) on top of it.
+- [ ] Data model follow-ups: selection by key, filter adapters, lazy tree
+      children, paged remote data, horizontal virtualization for wide
+      tables; ghosts of removed rows still take taps.
 - [ ] List row: title, subtitle, trailing actions.
 - [ ] Image fit modes and a placeholder (also under Image follow-ups);
       apps downscale covers themselves for lack of mipmaps.
@@ -132,8 +139,9 @@ Widgets:
       1992, dynamic programming) would replace it.
 - [ ] Morphs across topology changes (O → C): an unpaired hole shrinks to
       its centre but can leave the outer contour on the way, showing as fill.
-- [ ] Layout animations (size/position, list insert/remove): need a rebuild
-      or relayout per frame while running.
+- [ ] Layout animations (size/position): need a rebuild or relayout per
+      frame while running. List inserts, removals and moves animate
+      without one (FLIP offsets).
 - [x] Timed wakeups (`PaintCx::request_frame_at`): the caret blink sleeps
       between toggles instead of painting every frame.
 - [ ] Theming: shared colors/sizes instead of per-widget constants.
@@ -151,7 +159,7 @@ Widgets:
       stopping at the edges; re-placed per frame via `request_placement`.
 - [ ] Horizontal scroll; overscroll bounce/glow; a press that catches a
       fling still reaches the widget under it.
-- [ ] Widget library: checkbox, switch, slider, list, tabs.
+- [ ] Widget library: checkbox.
 - [x] Layers: widgets that float above the tree outside its layout
       (`Widget::layer`); `dialog`, `drawer`, `bottom_sheet`, `snackbar`,
       `tooltip`, `dropdown`.

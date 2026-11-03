@@ -151,6 +151,11 @@ pub trait Widget {
         None
     }
 
+    /// Whether children moved by `scroll` are clipped to this widget's box.
+    fn clips(&self) -> bool {
+        true
+    }
+
     fn paint(&self, _cx: &mut PaintCx) {}
 
     /// Pointer events reach a widget while the pointer is over it, once more
@@ -227,9 +232,18 @@ pub struct PaintCx<'a> {
     pub(crate) frame: &'a mut bool,
     pub(crate) wake: &'a mut Option<Instant>,
     pub(crate) place: &'a mut bool,
+    pub(crate) rebuild: &'a mut bool,
 }
 
 impl PaintCx<'_> {
+    /// Rebuild the tree after this frame, for widgets that build their
+    /// children from what is on screen (a virtualized list scrolled past
+    /// the rows it built).
+    pub fn request_rebuild(&mut self) {
+        *self.frame = true;
+        *self.rebuild = true;
+    }
+
     /// Paint again next frame, for animations or live readouts.
     pub fn request_frame(&mut self) {
         *self.frame = true;

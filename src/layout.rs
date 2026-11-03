@@ -383,7 +383,7 @@ pub(crate) fn place(
                 let pr = placed[p].rect;
                 let (dx, dy) = offsets[p].unwrap_or((0.0, 0.0));
                 let (sx, sy) = shifts[p];
-                let clip = if offsets[p].is_some() {
+                let clip = if offsets[p].is_some() && nodes[p].w.clips() {
                     placed[p].clip.intersect(&rests[p].unwrap_or(pr))
                 } else {
                     placed[p].clip

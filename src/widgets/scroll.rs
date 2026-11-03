@@ -6,11 +6,11 @@ use crate::kinetic::Drag;
 use crate::widget::{Element, Event, EventCx, PaintCx, Placement, State, Widget};
 
 #[derive(Default)]
-struct ScrollState {
-    offset: f32,
+pub(crate) struct ScrollState {
+    pub offset: f32,
     /// Largest offset, from the last event's layout.
-    max: f32,
-    drag: Drag,
+    pub max: f32,
+    pub drag: Drag,
 }
 
 /// Vertical scroll view; drag (touch, flings on release) or wheel. Children are clipped.
@@ -72,38 +72,47 @@ impl Widget for Scroll {
         }
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
-        let max = (cx.content.height - cx.rect.h).max(0.0);
-        let hit = |x, y| cx.rect.contains(x, y) && cx.clip.contains(x, y);
-        let now = cx.now;
-        let s = cx.state.get::<ScrollState>();
-        s.max = max;
-        let (mut capture, mut redraw, mut stop) = (false, false, false);
-        match *ev {
-            // ponytail: a press that catches a fling also reaches the widget under it.
-            Event::PointerDown { x, y } if hit(x, y) => s.drag.down(y, s.offset, now),
-            Event::PointerMove { y, .. } => {
-                if let Some(o) = s.drag.moved(y, now) {
-                    s.offset = o.clamp(0.0, max);
-                    (capture, redraw) = (true, true);
-                }
+        drag_scroll(ev, cx, |st| st.get::<ScrollState>());
+    }
+}
+
+/// Wheel, drag and fling for a vertical scroller whose `ScrollState` `get` finds.
+pub(crate) fn drag_scroll(
+    ev: &Event,
+    cx: &mut EventCx,
+    get: impl FnOnce(&mut State) -> &mut ScrollState,
+) {
+    let max = (cx.content.height - cx.rect.h).max(0.0);
+    let hit = |x, y| cx.rect.contains(x, y) && cx.clip.contains(x, y);
+    let now = cx.now;
+    let s = get(cx.state);
+    s.max = max;
+    let (mut capture, mut redraw, mut stop) = (false, false, false);
+    match *ev {
+        // ponytail: a press that catches a fling also reaches the widget under it.
+        Event::PointerDown { x, y } if hit(x, y) => s.drag.down(y, s.offset, now),
+        Event::PointerMove { y, .. } => {
+            if let Some(o) = s.drag.moved(y, now) {
+                s.offset = o.clamp(0.0, max);
+                (capture, redraw) = (true, true);
             }
-            Event::PointerUp { y, .. } => redraw = s.drag.up(y, s.offset, now),
-            Event::Cancel => s.drag.cancel(),
-            Event::Wheel { x, y, dy } if hit(x, y) => {
-                s.drag.stop();
-                s.offset = (s.offset + dy).clamp(0.0, max);
-                (redraw, stop) = (true, true);
-            }
-            _ => {}
         }
-        if capture {
-            cx.capture();
+        Event::PointerUp { y, .. } => redraw = s.drag.up(y, s.offset, now),
+        Event::Cancel => s.drag.cancel(),
+        Event::Wheel { x, y, dy } if hit(x, y) => {
+            s.drag.stop();
+            s.offset = (s.offset + dy).clamp(0.0, max);
+            (redraw, stop) = (true, true);
         }
-        if redraw {
-            cx.request_redraw();
-        }
-        if stop {
-            cx.stop();
-        }
+        _ => {}
+    }
+    if capture {
+        cx.capture();
+    }
+    if redraw {
+        cx.request_redraw();
+    }
+    if stop {
+        cx.stop();
     }
 }

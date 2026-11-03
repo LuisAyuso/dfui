@@ -69,6 +69,8 @@ pub(crate) struct Runtime<A: App> {
     wake: Option<Instant>,
     /// A widget asked for placement to rerun before the next paint.
     place: bool,
+    /// A widget asked for a rebuild after the last paint.
+    rebuild_due: bool,
     /// Hidden windows don't animate; presents would be throttled anyway.
     occluded: bool,
     focused: Option<u64>,
@@ -150,6 +152,7 @@ impl<A: App> Runtime<A> {
             next_frame: None,
             wake: None,
             place: false,
+            rebuild_due: false,
             occluded: false,
             focused: None,
             mods: ModifiersState::empty(),
@@ -192,6 +195,15 @@ impl<A: App> Runtime<A> {
         self.tasks.retain(|id, _| live.contains(id));
         if self.focused.is_some_and(|id| !live.contains(&id)) {
             self.set_focus(None);
+        }
+    }
+
+    /// Runs a rebuild a widget asked for while painting.
+    fn rebuild_if_due(&mut self) {
+        if std::mem::take(&mut self.rebuild_due) {
+            self.rebuild();
+            self.drive();
+            self.relayout();
         }
     }
 
@@ -511,6 +523,7 @@ impl<A: App> Runtime<A> {
         let start = Instant::now();
         let mut frame = false;
         let (scene, spans) = self.scene(&mut frame);
+        self.rebuild_if_due();
         // Empty when nothing changed: the retained frame is reused as is.
         let damage = self
             .prev
@@ -583,6 +596,7 @@ impl<A: App> Runtime<A> {
                 frame: &mut *frame,
                 wake: &mut self.wake,
                 place: &mut self.place,
+                rebuild: &mut self.rebuild_due,
             });
             spans.push((n.id, start..scene.len()));
         }

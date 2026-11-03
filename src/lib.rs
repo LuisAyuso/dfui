@@ -3,6 +3,7 @@
 pub mod anim;
 pub mod kinetic;
 mod layout;
+pub mod model;
 mod outline;
 pub mod path;
 mod render;
