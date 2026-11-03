@@ -585,6 +585,10 @@ impl<A: App> Runtime<A> {
         for &i in &self.order {
             let (n, p) = (&nodes[i], &self.placed[i]);
             let start = scene.len();
+            if culled(p.rect, p.clip) {
+                spans.push((n.id, start..start));
+                continue;
+            }
             n.w.paint(&mut PaintCx {
                 now,
                 rect: p.rect,
@@ -603,6 +607,18 @@ impl<A: App> Runtime<A> {
         self.text.end_frame();
         (scene, spans)
     }
+}
+
+/// How far past its box a widget may draw, e.g. a shadow's blur and offset.
+const OVERDRAW: f32 = 48.0;
+
+/// Whether nothing `rect` paints can show through `clip`, so its paint is skipped.
+// ponytail: fixed overdraw margin; a per-widget paint bound if something draws farther out.
+fn culled(rect: Rect, clip: Rect) -> bool {
+    let m = OVERDRAW;
+    let grown = Rect::new(rect.x - m, rect.y - m, rect.w + 2.0 * m, rect.h + 2.0 * m);
+    let v = grown.intersect(&clip);
+    v.w <= 0.0 || v.h <= 0.0
 }
 
 fn pointer_at(ev: &Event) -> Option<(f32, f32)> {

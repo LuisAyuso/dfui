@@ -651,6 +651,32 @@ impl App for Long {
     }
 }
 
+struct Tall;
+
+impl App for Tall {
+    fn view(&self) -> Element {
+        let rows = (0..100).map(|_| column([]).height(50.0).bg(Color::BLACK).into());
+        column([scroll(column(rows)).grow(1.0).into()]).into()
+    }
+}
+
+#[test]
+fn rows_outside_the_scroll_clip_are_not_painted() {
+    let mut rt = Runtime::new(Tall);
+    rt.viewport = (100.0, 200.0);
+    rt.relayout();
+    let painted = |rt: &mut Runtime<Tall>| rt.scene(&mut false).0.len();
+    // Background plus the rows within the clip and its overdraw margin.
+    assert_eq!(painted(&mut rt), 1 + 5);
+    rt.dispatch(Event::Wheel {
+        x: 10.0,
+        y: 10.0,
+        dy: 2000.0,
+    });
+    let (scene, _) = rt.scene(&mut false);
+    assert_eq!(scene.len(), 1 + 6, "rows scrolled into view paint");
+}
+
 #[test]
 fn wheel_scroll_moves_content_without_relayout() {
     let mut rt = Runtime::new(Long);

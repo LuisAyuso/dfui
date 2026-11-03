@@ -213,6 +213,9 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
 - [x] Cheaper shadows: drawn as a ring around the opaque shape on top of
       them (`gpu/cards_10` 156 → 133 µs desktop; no measurable change on
       the Pixel 10a in A/B runs).
+- [x] Paint culling: nodes whose box (plus a 48px overdraw margin for
+      shadows) is outside their clip aren't painted. 1000 cards: edit frame
+      12.1 → 8.5 ms, scroll frame 4.6 → 1.2 ms (desktop).
 - [ ] Upload only newly added glyph data (all outlines re-uploaded today).
 - [x] Flatten once per rebuild: ids cached, other passes re-walk the tree
       (`docs/tree.md`). Pointer move −57%, scroll frame −21% at 1000 cards.
