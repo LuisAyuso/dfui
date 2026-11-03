@@ -169,7 +169,8 @@ Widgets:
       sheets and snackbars were off-screen for most of their motion), and a
       flipped dropdown menu unrolls out of its field (`Widget::scroll` gets a
       `Placement`: clip, resting box, anchor).
-- [ ] `bottom_sheet` rounds its corners against the window's bottom edge.
+- [x] `bottom_sheet` runs past the window's bottom edge, so only its top
+      corners show rounded.
 
 ## Text
 

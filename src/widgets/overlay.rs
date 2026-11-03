@@ -365,7 +365,12 @@ pub fn drawer(child: impl Into<Element>) -> Overlay {
 
 /// Modal panel along the bottom edge, full width.
 pub fn bottom_sheet(child: impl Into<Element>) -> Overlay {
-    let mut o = overlay(card(child))
+    // Runs a radius past the window's bottom edge, whose clip squares off
+    // the bottom corners.
+    let mut panel = card(child);
+    panel.style_mut().padding.bottom = taffy::LengthPercentage::length(24.0 + 16.0);
+    panel.style_mut().margin.bottom = LengthPercentageAuto::length(-16.0);
+    let mut o = overlay(panel)
         .modal(SCRIM)
         .justify(JustifyContent::FLEX_END);
     o.slide = Some((0.0, 1.0));
