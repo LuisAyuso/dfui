@@ -620,6 +620,24 @@ mod tests {
     }
 
     #[test]
+    fn weights_morph_corner_to_corner() {
+        let t = Text::default();
+        let a = t.glyph_path(Font::DEFAULT, 'n', 100.0).unwrap();
+        let b = t.glyph_path(Font::BOLD, 'n', 100.0).unwrap();
+        let m = crate::anim::Morph::new(&a, &b);
+        let (from, to) = (m.at(0.0), m.at(1.0));
+        // Stem bottoms stay on the baseline, so they stay flat throughout.
+        let on_base = |p: &[f32; 2]| p[1].abs() < 1e-3;
+        for (p, q) in from.contours[0].iter().zip(&to.contours[0]) {
+            assert_eq!(on_base(&p[0]), on_base(&q[0]), "{:?} -> {:?}", p[0], q[0]);
+        }
+        assert_eq!(
+            from.contours[0].iter().filter(|q| on_base(&q[0])).count(),
+            4
+        );
+    }
+
+    #[test]
     fn glyphs_morph_contour_by_contour() {
         let t = Text::default();
         let o = t.glyph_path(Font::DEFAULT, 'O', 40.0).unwrap();
@@ -642,4 +660,3 @@ mod tests {
         assert!(hole.iter().flatten().all(|p| p == &hole[0][0]));
     }
 }
-

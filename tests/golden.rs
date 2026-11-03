@@ -5,12 +5,14 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use dfui::anim::Morph;
+use dfui::taffy::{AvailableSpace, Size};
 use dfui::widgets::{
     Overlay, Shown, Styled, bottom_sheet, button, column, dialog, drawer, dropdown, overlays,
     progress, radio, row, segmented, slider, snackbar, spacer, spinner, stacked_progress, tabs,
     text, text_input, toggle, tooltip, wait_bar,
 };
-use dfui::{App, Bench, Color, Element, Event};
+use dfui::{App, Bench, Color, Element, Event, Font, PaintCx, Text, Widget};
 use image::{Rgba, RgbaImage};
 
 const SCALE: f32 = 2.0;
@@ -331,4 +333,60 @@ fn spinner_cycle() {
     let mut b = bench(|| padded(spinner().size(96.0)), (112.0, 112.0));
     let at: Vec<u64> = (0..8).map(|i| i * 250).collect();
     check("spinner", &strip(&film(&mut b, &at)));
+}
+
+/// `chars` regular, halfway to bold, and bold, one row each.
+struct Weights(&'static str);
+
+const GLYPH: f32 = 36.0;
+const CELL: f32 = 44.0;
+
+impl Widget for Weights {
+    fn measure(&self, _: Size<Option<f32>>, _: Size<AvailableSpace>, _: &Text) -> Size<f32> {
+        Size {
+            width: CELL * self.0.chars().count() as f32,
+            height: CELL * 3.0,
+        }
+    }
+    fn paint(&self, cx: &mut PaintCx) {
+        let r = cx.rect;
+        for (i, ch) in self.0.chars().enumerate() {
+            let (a, b) = (
+                cx.glyph_path(Font::DEFAULT, ch, GLYPH).unwrap(),
+                cx.glyph_path(Font::BOLD, ch, GLYPH).unwrap(),
+            );
+            let m = Morph::new(&a, &b);
+            for (row, t) in [0.0, 0.5, 1.0].into_iter().enumerate() {
+                let (x, y) = (r.x + CELL * i as f32 + 4.0, r.y + CELL * (row as f32 + 0.8));
+                cx.path(&m.at(t).offset(x, y), Color::BLACK);
+            }
+        }
+    }
+}
+
+impl App for Weights {
+    fn view(&self) -> Element {
+        padded(Element::new(Weights(self.0)))
+    }
+}
+
+#[test]
+fn glyph_weights_morph() {
+    // A frame's budget of transient curves fits only a few glyphs in three weights.
+    let all: Vec<char> = ('a'..='z').chain('A'..='Z').chain('0'..='9').collect();
+    let shots: Vec<RgbaImage> = all
+        .chunks(6)
+        .map(|c| {
+            let s: &'static str = c.iter().collect::<String>().leak();
+            Bench::new(Weights(s), (CELL * 6.0 + 16.0, CELL * 3.0 + 16.0)).shot(SCALE)
+        })
+        .collect();
+    let (w, h) = shots[0].dimensions();
+    let rows = shots.len().div_ceil(2) as u32;
+    let mut sheet = RgbaImage::from_pixel(w * 2, h * rows, Rgba([255; 4]));
+    for (i, s) in shots.iter().enumerate() {
+        let (col, row) = (i as u32 % 2, i as u32 / 2);
+        image::imageops::replace(&mut sheet, s, (col * w) as i64, (row * h) as i64);
+    }
+    check("glyph_weights", &sheet);
 }

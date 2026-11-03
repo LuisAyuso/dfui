@@ -114,11 +114,14 @@ impl<T: Lerp + PartialEq> Animated<T> {
 /// Morph between two `Path`s, e.g. two glyphs. Each contour pairs with the
 /// nearest one (by centre) of the other path that winds the same way, so
 /// outlines meet outlines and holes meet holes whatever order the fonts list
-/// them in; one without a partner shrinks to its centre. Within a pair, the contour
-/// with fewer segments has them cut (which keeps its shape) into as many
-/// pieces as needed to match the other, the longest pieces first, and the
-/// pairing starts at the offset with the least travel. Each segment's points
-/// then travel to its partner's. Both paths must be wound the same way.
+/// them in; one without a partner shrinks to its centre. Paired contours with
+/// as many corners (e.g. a glyph in two weights) pair corner to corner, and
+/// the stretches between corners are matched like whole contours otherwise:
+/// the side with fewer segments has them cut (which keeps its shape) into as
+/// many pieces as needed, the longest pieces first. Without matching corners,
+/// a whole contour is cut that way and the pairing starts at the offset with
+/// the least travel. Each segment's points then travel to its partner's.
+/// Both paths must be wound the same way.
 pub struct Morph {
     from: Path,
     to: Path,
@@ -129,6 +132,7 @@ impl Morph {
         let (mut a, mut b) = (Path::default(), Path::default());
         for pair in pairs(from, to) {
             let (x, y) = match pair {
+                (Some(x), Some(y)) if let Some(p) = anchored(x, y) => p,
                 (Some(x), Some(y)) if x.len() <= y.len() => (split(x, y), y.clone()),
                 (Some(x), Some(y)) => (x.clone(), split(y, x)),
                 (Some(x), None) => (x.clone(), collapse(x)),
@@ -209,14 +213,16 @@ fn piece(q: &Quad, t0: f32, t1: f32) -> Quad {
     [blossom(t0, t0), blossom(t0, t1), blossom(t1, t1)]
 }
 
-/// `few` cut into `many.len()` segments, rotated to pair index-for-index
-/// with `many`.
-fn split(few: &[Quad], many: &[Quad]) -> Vec<Quad> {
-    let dist = |a: Point, b: Point| ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt();
+fn dist(a: Point, b: Point) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
+/// `few` cut into `n` segments, the longest first.
+fn cut(few: &[Quad], n: usize) -> Vec<Quad> {
     // Rough arc length: between the chord and the control polygon.
     let len = |q: &Quad| (dist(q[0], q[1]) + dist(q[1], q[2]) + dist(q[0], q[2])) / 2.0;
     let mut cuts = vec![1usize; few.len()];
-    for _ in few.len()..many.len() {
+    for _ in few.len()..n {
         let longest = (0..few.len())
             .max_by(|&a, &b| {
                 (len(&few[a]) / cuts[a] as f32).total_cmp(&(len(&few[b]) / cuts[b] as f32))
@@ -224,13 +230,67 @@ fn split(few: &[Quad], many: &[Quad]) -> Vec<Quad> {
             .unwrap();
         cuts[longest] += 1;
     }
-    let pieces: Vec<Quad> = few
-        .iter()
+    few.iter()
         .zip(&cuts)
         .flat_map(|(q, &k)| {
             (0..k).map(move |i| piece(q, i as f32 / k as f32, (i + 1) as f32 / k as f32))
         })
-        .collect();
+        .collect()
+}
+
+/// Indices of the segments that start at a corner: where the outline turns
+/// by more than about 30°.
+fn corners(c: &[Quad]) -> Vec<usize> {
+    let unit = |a: Point, b: Point| {
+        let d = dist(a, b).max(f32::MIN_POSITIVE);
+        [(b[0] - a[0]) / d, (b[1] - a[1]) / d]
+    };
+    // A line's control point sits on an end; its tangent is the chord.
+    let end = |q: &Quad| unit(if q[1] == q[2] { q[0] } else { q[1] }, q[2]);
+    let start = |q: &Quad| unit(q[0], if q[0] == q[1] { q[2] } else { q[1] });
+    let n = c.len();
+    (0..n)
+        .filter(|&i| {
+            let (a, b) = (end(&c[(i + n - 1) % n]), start(&c[i]));
+            a[0] * b[0] + a[1] * b[1] < 0.87
+        })
+        .collect()
+}
+
+/// `x` and `y` cut to pair corner to corner, at the corner offset with the
+/// least travel, if they have as many corners.
+fn anchored(x: &[Quad], y: &[Quad]) -> Option<(Contour, Contour)> {
+    let (cx, cy) = (corners(x), corners(y));
+    let k = cx.len();
+    if k == 0 || k != cy.len() {
+        return None;
+    }
+    let travel = |r: usize| -> f32 {
+        (0..k)
+            .map(|i| dist(x[cx[i]][0], y[cy[(i + r) % k]][0]).powi(2))
+            .sum()
+    };
+    let r = (0..k).min_by(|&a, &b| travel(a).total_cmp(&travel(b)))?;
+    // The segments from corner `i` up to the next one, wrapping.
+    let run = |c: &[Quad], at: &[usize], i: usize| -> Vec<Quad> {
+        let (s, e) = (at[i], at[(i + 1) % at.len()]);
+        let n = (e + c.len() - s - 1) % c.len() + 1;
+        (0..n).map(|j| c[(s + j) % c.len()]).collect()
+    };
+    let (mut a, mut b) = (Vec::new(), Vec::new());
+    for i in 0..k {
+        let (p, q) = (run(x, &cx, i), run(y, &cy, (i + r) % k));
+        let n = p.len().max(q.len());
+        a.extend(cut(&p, n));
+        b.extend(cut(&q, n));
+    }
+    Some((a, b))
+}
+
+/// `few` cut into `many.len()` segments, rotated to pair index-for-index
+/// with `many`.
+fn split(few: &[Quad], many: &[Quad]) -> Vec<Quad> {
+    let pieces = cut(few, many.len());
     let m = many.len();
     let travel = |r: usize| -> f32 {
         let d = |a: &Quad, b: &Quad| (0..3).map(|i| dist(a[i], b[i]).powi(2)).sum::<f32>();
@@ -332,6 +392,31 @@ mod tests {
             let d = ((q[2][0] - q[0][0]).powi(2) + (q[2][1] - q[0][1]).powi(2)).sqrt();
             assert!((d - 1.0).abs() < 1e-5, "{q:?}");
         }
+    }
+
+    #[test]
+    fn corners_pair_with_corners() {
+        // Same corners, but the big square has its bottom edge in three
+        // pieces, which the fallback would pair off around the contour.
+        let small = Path::polygon(&[[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]);
+        let big = Path::polygon(&[
+            [-3.0, -3.0],
+            [-1.0, -3.0],
+            [1.0, -3.0],
+            [3.0, -3.0],
+            [3.0, 3.0],
+            [-3.0, 3.0],
+        ]);
+        let mid = Morph::new(&small, &big).at(0.5).contours.remove(0);
+        let starts: Vec<Point> = mid.iter().map(|q| q[0]).collect();
+        for c in [[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]] {
+            assert!(starts.contains(&c), "{c:?} in {starts:?}");
+        }
+        assert!(
+            starts
+                .iter()
+                .all(|p| p[0].abs() == 2.0 || p[1].abs() == 2.0)
+        );
     }
 
     #[test]
