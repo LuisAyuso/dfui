@@ -489,7 +489,7 @@ pub fn overlays<E: Into<Element>>(
 ) -> Stateful<Overlays> {
     stateful(move |s: &Overlays, h| {
         let shown = s.entries.iter().map(move |e| entry(e, h));
-        column(std::iter::once(content(h).into()).chain(shown)).grow(1.0)
+        column(std::iter::once(content(h).into()).chain(shown)).fill()
     })
 }
 
