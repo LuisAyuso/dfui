@@ -207,9 +207,14 @@ fn input<A: App>(rt: &mut Runtime<A>, app: &AndroidApp, ev: &InputEvent) -> Inpu
 fn char_of(app: &AndroidApp, k: &KeyEvent) -> Option<char> {
     let ctrl = ndk_sys::AMETA_CTRL_ON | ndk_sys::AMETA_CTRL_LEFT_ON | ndk_sys::AMETA_CTRL_RIGHT_ON;
     let meta = MetaState(k.meta_state().0 & !ctrl);
-    let map = app.device_key_character_map(k.device_id()).ok()?;
-    match map.get(k.key_code(), meta).ok()? {
-        KeyMapChar::Unicode(c) => Some(c),
-        _ => None,
-    }
+    let lookup = |device: i32| {
+        let map = app.device_key_character_map(device).ok()?;
+        match map.get(k.key_code(), meta).ok()? {
+            KeyMapChar::Unicode(c) => Some(c),
+            _ => None,
+        }
+    };
+    // Some physical keyboards (the emulator's host keyboard among them) map to nothing; the
+    // virtual keyboard's map (-1) always exists and covers the standard keys.
+    lookup(k.device_id()).or_else(|| lookup(-1))
 }
