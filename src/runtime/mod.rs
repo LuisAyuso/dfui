@@ -508,15 +508,16 @@ impl<A: App> Runtime<A> {
 
     /// Returns whether focus changed.
     fn set_focus(&mut self, id: Option<u64>) -> bool {
-        if self.focused == id {
-            return false;
-        }
+        let changed = self.focused != id;
         self.focused = id;
         // ponytail: IME only drives the Android soft keyboard; desktop composition (CJK) needs Ime::Preedit handling.
-        if let Some(r) = &self.renderer {
+        // Tapping the focused input again brings back a keyboard the user dismissed.
+        if (changed || id.is_some())
+            && let Some(r) = &self.renderer
+        {
             r.window().set_ime(id.is_some());
         }
-        true
+        changed
     }
 
     fn paint(&mut self) {
