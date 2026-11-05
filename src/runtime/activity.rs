@@ -55,11 +55,13 @@ impl Host for Window {
         self.redraw.set(true);
     }
     fn set_ime(&self, on: bool) {
-        if on {
-            self.app.show_soft_input(true);
-        } else {
-            self.app.hide_soft_input(true);
-        }
+        let app = self.app.clone();
+        // On the Java UI thread: showing the keyboard animates the window, and requests from other
+        // threads get cancelled. Explicit, since Android ignores implicit ones once the user hid it.
+        self.app.run_on_java_main_thread(Box::new(move || match on {
+            true => app.show_soft_input(false),
+            false => app.hide_soft_input(true),
+        }));
     }
 }
 
