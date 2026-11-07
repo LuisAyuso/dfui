@@ -101,6 +101,95 @@ Widgets:
       with usvg, turns strokes into fills and draws them as `Shape`s; dfui
       itself stays free of an SVG parser.
 
+## Findings from a second app
+
+From building bbteam (a Blood Bowl team manager on Android and Linux: card
+deck, forms, a two-column game log, bottom sheets, dialogs, an image picker).
+
+Bugs found and fixed:
+
+- [x] Soft keyboard never opened: `set_ime` called `show_soft_input` from
+      the render thread and Android cancelled every request
+      (`onCancelled at PHASE_CLIENT_APPLY_ANIMATION`). It now runs on the
+      Java UI thread, and the request is explicit (implicit ones are
+      ignored once the user has hidden the keyboard).
+- [x] Tapping the already-focused input didn't bring back a keyboard the
+      user dismissed: `set_focus` only asked for it on a focus change.
+- [x] Letters typed on some physical keyboards (the emulator's host
+      keyboard) were dropped: their key character map gives no character,
+      so only Backspace and arrows arrived. Falls back to the virtual
+      keyboard's map.
+- [x] `overlays()` wrapped its content in `grow(1.0)` instead of `fill()`,
+      so no `scroll` inside an overlays host ever scrolled: it grew to its
+      whole content and pushed the widgets after it off screen.
+
+Android:
+
+- [ ] The keyboard connects to the decor view with `inputType=0`: Gboard in
+      hardware-keyboard mode shows its floating toolbar for stock apps but
+      nothing for a dfui app. An editor view (`onCheckIsTextEditor`,
+      `onCreateInputConnection`) would fix this and the input type hints
+      (see Text); check where IME `commitText` then goes.
+- [ ] Image picking needs app Java: an activity method that starts
+      `ACTION_GET_CONTENT`, copies the result to app storage and calls a
+      native method, which only resolves if the activity runs
+      `System.loadLibrary` in a static initializer (NativeActivity loads the
+      library itself). Offer `dfui::android::pick_image` or document the
+      pattern; on desktop the app shells out to `zenity`.
+
+Layout and scrolling:
+
+- [ ] Programmatic scrolling: a log that should follow its newest line
+      can't, since a scroll's offset isn't reachable from outside. A
+      `stick_to_end()` option or a scroll controller.
+- [ ] A `scroll` with `shrink(1.0)` still won't shrink below its content
+      without `min_height(0.0)` (flexbox's automatic minimum). Default a
+      scroll's minimum size to 0, or say so in its docs next to `fill()`.
+- [ ] Equal-width buttons in a row need `.width(0.0).grow(1.0)`; a
+      helper or a docs example.
+- [ ] Height-for-width leaves: a card whose height follows its width needed
+      a custom `Widget::measure`; an aspect/height-for-width modifier would
+      cover it.
+
+Widgets:
+
+- [ ] Disabled buttons: no enabled flag or greyed style, so every action
+      button is wrapped in an `action_if(on, ..)` helper that swaps colors
+      and drops the handler. Same for `icon_button`.
+- [ ] `icon_button`'s 10px padding makes grids of icons sparse (16 roster
+      slots wrapped onto three rows); and an inert slot drawn with `icon`
+      is a different size from the buttons beside it. Expose the padding
+      in the docs, or an inert `icon_button`.
+- [ ] Confirm dialog: every destructive action builds the same dialog
+      (title, body, Cancel, OK). A `confirm(ov, title, body, ok, on_ok)`.
+- [ ] Back handling for app screens: apps keep a screen enum and a leaf
+      widget that catches `Event::Back`. At least a public `on_back(f)`;
+      maybe a navigation stack.
+- [ ] `dropdown` with many options (30 races) runs off the window: the menu
+      needs a maximum height and a scroll.
+- [ ] Chips: skill, injury and status chips are hand-made containers
+      (text, background, radius, padding). A `chip(label)` widget, and a
+      tappable `choice_chip`.
+- [ ] Badge: a count on a corner of another widget (SPP on a number
+      circle) is painted by hand. A `badge(child, label)`.
+- [ ] Numeric text input: no number mode or maximum length (a one-digit
+      field keeps only the last digit typed, by hand). Ties into the input
+      type hints.
+- [ ] `stateful` state is `Default`-only, so a form editing existing data
+      stores `Option`s that fall back to the data. A `stateful` with an
+      initial value.
+- [ ] The card stack (fold/unfold, kinetic scroll, shadows on the card
+      above) is now copied in two apps: worth a dfui widget with a
+      card-painting callback.
+- [ ] Color helpers: `mix`/`lighten`/`darken` (fields are public, so apps
+      write them inline).
+
+Theming:
+
+- [ ] `dialog`, `bottom_sheet` and `dropdown` are white with dark text on a
+      dark app: content inside them must use dark ink and its own key
+      colors. Part of Theming.
+
 ## Design studies (need discussion before code)
 
 - [x] Global state management: messages removed; `provide` injects
