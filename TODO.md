@@ -142,31 +142,31 @@ Layout and scrolling:
 - [ ] Programmatic scrolling: a log that should follow its newest line
       can't, since a scroll's offset isn't reachable from outside. A
       `stick_to_end()` option or a scroll controller.
-- [ ] A `scroll` with `shrink(1.0)` still won't shrink below its content
-      without `min_height(0.0)` (flexbox's automatic minimum). Default a
-      scroll's minimum size to 0, or say so in its docs next to `fill()`.
-- [ ] Equal-width buttons in a row need `.width(0.0).grow(1.0)`; a
-      helper or a docs example.
+- [x] A `scroll` with `shrink(1.0)` shrinks below its content on taffy 0.15
+      without `min_height(0.0)`. The trap left is a column between the window
+      and the scroll without `.fill()`: it grows to the content, as `scroll`'s
+      docs say.
+- [x] Equal-width buttons in a row need `.width(0.0).grow(1.0)`; `fill()`
+      on each already does it, and its docs say so.
 - [ ] Height-for-width leaves: a card whose height follows its width needed
       a custom `Widget::measure`; an aspect/height-for-width modifier would
       cover it.
 
 Widgets:
 
-- [ ] Disabled buttons: no enabled flag or greyed style, so every action
-      button is wrapped in an `action_if(on, ..)` helper that swaps colors
-      and drops the handler. Same for `icon_button`.
+- [x] Disabled buttons: `button(..).enabled(false)` dims and ignores input.
+      Same for `icon_button`.
 - [ ] `icon_button`'s 10px padding makes grids of icons sparse (16 roster
       slots wrapped onto three rows); and an inert slot drawn with `icon`
       is a different size from the buttons beside it. Expose the padding
       in the docs, or an inert `icon_button`.
 - [ ] Confirm dialog: every destructive action builds the same dialog
       (title, body, Cancel, OK). A `confirm(ov, title, body, ok, on_ok)`.
-- [ ] Back handling for app screens: apps keep a screen enum and a leaf
-      widget that catches `Event::Back`. At least a public `on_back(f)`;
-      maybe a navigation stack.
-- [ ] `dropdown` with many options (30 races) runs off the window: the menu
-      needs a maximum height and a scroll.
+- [x] Back handling for app screens: a public `on_back(f)`. A navigation
+      stack is still open if a third app wants one.
+- [x] `dropdown` with many options (30 races) runs off the window: the menu
+      scrolls past a maximum height. It doesn't open at the selected option
+      yet; that needs programmatic scrolling.
 - [ ] Chips: skill, injury and status chips are hand-made containers
       (text, background, radius, padding). A `chip(label)` widget, and a
       tappable `choice_chip`.

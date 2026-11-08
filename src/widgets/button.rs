@@ -56,6 +56,7 @@ pub struct Button {
     color: Color,
     radius: f32,
     flat: bool,
+    enabled: bool,
     /// Labels inside turn bold with the press.
     emphasis: Emphasis,
 }
@@ -80,6 +81,7 @@ pub fn button(child: impl Into<Element>) -> Button {
         color: Color::hex(0x3b6fe0),
         radius: 8.0,
         flat: false,
+        enabled: true,
         emphasis: Emphasis::default(),
     }
 }
@@ -101,6 +103,11 @@ impl Button {
     /// No drop shadow, e.g. for items in a list.
     pub fn flat(mut self) -> Self {
         self.flat = true;
+        self
+    }
+    /// When false the button is dimmed and ignores input; it keeps its size.
+    pub fn enabled(mut self, on: bool) -> Self {
+        self.enabled = on;
         self
     }
 }
@@ -131,10 +138,12 @@ impl Widget for Button {
         let now = cx.now;
         let s = cx.state.get::<ButtonState>();
         let flag = |b: bool| if b { 1.0 } else { 0.0 };
-        s.hover.to(flag(s.tap.hovered), now, FADE, ease::out_cubic);
-        s.press.to(flag(s.tap.pressed), now, FADE, ease::out_cubic);
+        let (hovered, pressed) = (s.tap.hovered && self.enabled, s.tap.pressed && self.enabled);
+        s.hover.to(flag(hovered), now, FADE, ease::out_cubic);
+        s.press.to(flag(pressed), now, FADE, ease::out_cubic);
         let (hover, press) = (s.hover.get(now), s.press.get(now));
         self.emphasis.0.set(press);
+        self.emphasis.1.set(!self.enabled);
         if s.hover.running(now) || s.press.running(now) {
             cx.request_frame();
         }
@@ -144,9 +153,9 @@ impl Widget for Button {
             r: c.r * k,
             g: c.g * k,
             b: c.b * k,
-            a: c.a,
+            a: if self.enabled { c.a } else { c.a * 0.4 },
         };
-        if press < 1.0 && !self.flat {
+        if press < 1.0 && !self.flat && self.enabled {
             let sh = Shadow {
                 color: Color::BLACK.alpha(0.25 * (1.0 - press)),
                 offset: (0.0, 2.0),
@@ -157,6 +166,10 @@ impl Widget for Button {
         cx.fill(cx.rect, self.radius, fill);
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
+        if !self.enabled {
+            cx.state.get::<ButtonState>().tap = Tap::default();
+            return;
+        }
         let mut tap = std::mem::take(&mut cx.state.get::<ButtonState>().tap);
         let before = (tap.pressed, tap.hovered);
         let fire = tap.event(ev, cx);

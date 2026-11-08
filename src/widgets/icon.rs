@@ -37,6 +37,7 @@ pub struct Icon {
     size: f32,
     color: Color,
     on_click: Option<Handler>,
+    enabled: bool,
     style: Style,
 }
 
@@ -47,6 +48,7 @@ pub fn icon(shape: &Shape) -> Icon {
         size: 24.0,
         color: Color::BLACK,
         on_click: None,
+        enabled: true,
         style: Style::default(),
     }
 }
@@ -68,6 +70,11 @@ impl Icon {
     }
     pub fn on_click(mut self, f: impl Fn(&mut EventCx) + 'static) -> Self {
         self.on_click = Some(Box::new(f));
+        self
+    }
+    /// When false the icon is dimmed and ignores input; it keeps its size.
+    pub fn enabled(mut self, on: bool) -> Self {
+        self.enabled = on;
         self
     }
 }
@@ -97,7 +104,7 @@ impl Widget for Icon {
     fn paint(&self, cx: &mut PaintCx) {
         let (now, r) = (cx.now, cx.rect);
         let s = cx.state.get::<IconState>();
-        if s.tap.pressed {
+        if s.tap.pressed && self.enabled {
             s.scale.to(PRESSED, now, PRESS, ease::out_cubic);
         } else {
             s.scale.to(1.0, now, RELEASE, spring);
@@ -110,9 +117,18 @@ impl Widget for Icon {
         let side = self.size * k;
         let (cx0, cy0) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
         let box_ = Rect::new(cx0 - side / 2.0, cy0 - side / 2.0, side, side);
-        cx.shape(&self.shape, box_, self.color);
+        let c = self.color;
+        cx.shape(
+            &self.shape,
+            box_,
+            if self.enabled { c } else { c.alpha(c.a * 0.4) },
+        );
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
+        if !self.enabled {
+            cx.state.get::<IconState>().tap = Tap::default();
+            return;
+        }
         let Some(f) = &self.on_click else { return };
         let mut tap = std::mem::take(&mut cx.state.get::<IconState>().tap);
         let before = tap.pressed;

@@ -7,7 +7,7 @@ use taffy::{
 use web_time::Instant;
 
 use super::{
-    Container, Snapshot, Stateful, Styled, button, column, container, future_builder, row,
+    Container, Snapshot, Stateful, Styled, button, column, container, future_builder, row, scroll,
     stateful, text,
 };
 use crate::anim::{Animated, ease};
@@ -28,6 +28,9 @@ const MOTION: Duration = Duration::from_millis(250);
 /// after the finger lifts.
 const LONG_PRESS: Duration = Duration::from_millis(500);
 const LINGER: Duration = Duration::from_millis(1500);
+
+// ponytail: fixed, so a window shorter than this still clips the menu; bound it by the space left if that bites.
+const MENU_MAX_HEIGHT: f32 = 320.0;
 
 const SCRIM: Color = Color::BLACK.alpha(0.4);
 const INK: Color = Color::hex(0x1d2030);
@@ -528,6 +531,29 @@ fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
     Element::from(future_builder((key, from), queue, wait)).key(key)
 }
 
+/// Runs `f` on Escape or the Android back button, unless an overlay takes it
+/// first, and keeps the app open. Leave it out where Back should exit.
+pub struct OnBack(Handler);
+
+pub fn on_back(f: impl Fn(&mut EventCx) + 'static) -> OnBack {
+    OnBack(Box::new(f))
+}
+
+impl From<OnBack> for Element {
+    fn from(w: OnBack) -> Self {
+        Element::new(w)
+    }
+}
+
+impl Widget for OnBack {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
+        if let Event::Back = ev {
+            (self.0)(cx);
+            cx.stop();
+        }
+    }
+}
+
 /// Shows `tip` above `child` while the pointer is over it.
 pub fn tooltip(child: impl Into<Element>, tip: impl Into<String>) -> Container {
     let tip = container(text(tip).size(13.0).color(Color::WHITE))
@@ -603,7 +629,7 @@ impl From<Dropdown> for Element {
                         })
                         .into()
                 });
-                let list = column(items)
+                let list = column([scroll(column(items)).max_height(MENU_MAX_HEIGHT).into()])
                     .bg(Color::WHITE)
                     .radius(8.0)
                     .padding(4.0)

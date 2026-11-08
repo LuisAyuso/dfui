@@ -11,10 +11,10 @@ use crate::render::Color;
 use crate::text::{Font, Text};
 use crate::widget::{BuildCx, Element, PaintCx, Widget};
 
-/// How far toward bold an ancestor wants its labels, 0..=1; a button sets
-/// it to its press before its children paint.
+/// How far toward bold an ancestor wants its labels, 0..=1, and whether to
+/// dim them; a button sets these before its children paint.
 #[derive(Clone, Default)]
-pub(crate) struct Emphasis(pub Rc<Cell<f32>>);
+pub(crate) struct Emphasis(pub Rc<Cell<f32>>, pub Rc<Cell<bool>>);
 
 #[derive(Default)]
 struct LabelState {
@@ -114,6 +114,8 @@ impl Widget for Label {
         let (r, s, c) = (cx.rect, self.size, self.color);
         let st = cx.state.get::<LabelState>();
         let t = st.emphasis.as_ref().map_or(0.0, |e| e.0.get());
+        let dim = st.emphasis.as_ref().is_some_and(|e| e.1.get());
+        let c = if dim { c.alpha(c.a * 0.5) } else { c };
         let regular = std::ptr::eq(self.font.0, Font::DEFAULT.0);
         if t > 0.0 && regular && self.max_lines.is_none() && !self.text.contains('\n') {
             return weight(cx, &self.text, s, c, t, (r.x, r.w), r.y);

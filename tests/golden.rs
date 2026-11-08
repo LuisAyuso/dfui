@@ -209,6 +209,21 @@ fn progress_bars() {
 }
 
 #[test]
+fn disabled_button_is_dimmed() {
+    let v = || {
+        padded(
+            row([
+                button(text("On")).into(),
+                button(text("Off")).enabled(false).into(),
+            ])
+            .gap(8.0),
+        )
+    };
+    let mut b = bench(v, (160.0, 60.0));
+    check("button_disabled", &b.shot(SCALE));
+}
+
+#[test]
 fn dropdown_opens() {
     let v = || padded(dropdown(["Apple", "Banana", "Cherry"], 1));
     let mut b = bench(v, (160.0, 196.0));

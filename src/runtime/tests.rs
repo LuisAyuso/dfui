@@ -10,8 +10,8 @@ use crate::path::{Path, Shape};
 use crate::text::Font;
 use crate::widget::{Scope, Widget};
 use crate::widgets::{
-    Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon_button, overlays,
-    popup, provide, radio, row, scroll, segmented, slider, snackbar, spacer, stateful,
+    Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon, icon_button, on_back,
+    overlays, popup, provide, radio, row, scroll, segmented, slider, snackbar, spacer, stateful,
     stream_builder, text, text_input, toggle, tooltip, watch,
 };
 
@@ -137,6 +137,121 @@ fn scroll_inside_overlays_keeps_later_widgets_on_screen() {
     rt.relayout();
     let last = rt.placed.last().unwrap().rect;
     assert!(last.y + last.h <= 200.0, "pushed off screen: {last:?}");
+}
+
+struct EqualRow;
+
+impl App for EqualRow {
+    fn view(&self) -> Element {
+        row([
+            button(text("a")).fill().into(),
+            button(text("a longer one")).fill().into(),
+        ])
+        .into()
+    }
+}
+
+#[test]
+fn filling_siblings_in_a_row_get_equal_widths() {
+    let mut rt = Runtime::new(EqualRow);
+    rt.viewport = (300.0, 100.0);
+    rt.relayout();
+    let w: Vec<f32> = rt.placed.iter().map(|p| p.rect.w).collect();
+    assert_eq!((w[1], w[3]), (150.0, 150.0), "{w:?}");
+}
+
+struct Menu;
+
+impl App for Menu {
+    fn view(&self) -> Element {
+        stateful(|&v: &usize, h| {
+            dropdown((0..30).map(|i| i.to_string()), v)
+                .on_change(move |cx, i| cx.update(h, move |s: &mut usize| *s = i))
+        })
+        .into()
+    }
+}
+
+#[test]
+fn long_dropdown_scrolls_to_its_last_option() {
+    let mut rt = Runtime::new(Menu);
+    rt.viewport = (200.0, 800.0);
+    let t = Instant::now();
+    task::set_clock(Some(t));
+    rt.relayout();
+    rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+    task::set_clock(Some(t + Duration::from_secs(1)));
+    rt.reposition();
+    let menu = rt.placed.iter().find(|p| p.rect.h == 320.0).unwrap().rect;
+    let (x, y) = (menu.x + 10.0, menu.y + menu.h - 10.0);
+    rt.dispatch(Event::PointerDown { x, y });
+    for dy in [50.0, 5000.0] {
+        rt.dispatch(Event::PointerMove { x, y: y - dy });
+    }
+    rt.dispatch(Event::PointerUp { x, y: y - 5000.0 });
+    assert_eq!(*root::<usize, _>(&mut rt), 0, "a drag doesn't choose");
+    rt.dispatch(Event::PointerDown { x, y });
+    rt.dispatch(Event::PointerUp { x, y });
+    task::set_clock(None);
+    assert_eq!(*root::<usize, _>(&mut rt), 29);
+}
+
+struct Disabled;
+
+impl App for Disabled {
+    fn view(&self) -> Element {
+        stateful(|_: &i32, h| {
+            let bump = move |cx: &mut EventCx| cx.update(h, |n: &mut i32| *n += 1);
+            column([
+                button(text("+"))
+                    .enabled(false)
+                    .on_click(bump)
+                    .height(40.0)
+                    .into(),
+                icon(&Shape::new(
+                    Path::polygon(&[[0.0, 0.0], [24.0, 0.0], [0.0, 24.0]]),
+                    Rect::new(0.0, 0.0, 24.0, 24.0),
+                ))
+                .enabled(false)
+                .on_click(bump)
+                .into(),
+            ])
+        })
+        .into()
+    }
+}
+
+#[test]
+fn disabled_button_and_icon_ignore_taps() {
+    let mut rt = Runtime::new(Disabled);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    for y in [10.0, 50.0] {
+        rt.dispatch(Event::PointerDown { x: 10.0, y });
+        rt.dispatch(Event::PointerUp { x: 10.0, y });
+    }
+    assert_eq!(*root::<i32, _>(&mut rt), 0);
+}
+
+struct BackCounter;
+
+impl App for BackCounter {
+    fn view(&self) -> Element {
+        stateful(|_: &i32, h| {
+            column([on_back(move |cx| cx.update(h, |n: &mut i32| *n += 1)).into()])
+        })
+        .into()
+    }
+}
+
+#[test]
+fn on_back_runs_and_keeps_the_app_open() {
+    let mut rt = Runtime::new(BackCounter);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    assert!(rt.dispatch(Event::Back), "handled, so Android doesn't exit");
+    assert_eq!(*root::<i32, _>(&mut rt), 1);
 }
 
 fn damage_after<A: App>(

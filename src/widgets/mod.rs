@@ -37,8 +37,8 @@ pub use image::{Image, image};
 pub use label::{Label, text};
 pub use list::{List, list};
 pub use overlay::{
-    Dropdown, Overlay, Overlays, Shown, bottom_sheet, dialog, drawer, dropdown, overlay, overlays,
-    popup, snackbar, tooltip,
+    Dropdown, OnBack, Overlay, Overlays, Shown, bottom_sheet, dialog, drawer, dropdown, on_back,
+    overlay, overlays, popup, snackbar, tooltip,
 };
 pub use progress::{Progress, Spinner, progress, spinner, stacked_progress, wait_bar};
 pub use provide::{Provide, provide};
@@ -98,9 +98,14 @@ pub trait Styled: Sized {
         self.style_mut().min_size.height = LengthPercentageAuto::length(h);
         self
     }
+    fn max_height(mut self, h: f32) -> Self {
+        self.style_mut().max_size.height = LengthPercentageAuto::length(h);
+        self
+    }
     /// Takes the space left along the parent's main axis, and no more: unlike
     /// `grow(1.0)`, the content's size doesn't push the parent. Use it on
-    /// every flex box between the window and a `scroll`.
+    /// every flex box between the window and a `scroll`. In a row, siblings
+    /// that all `fill` get equal widths, whatever their content.
     fn fill(mut self) -> Self {
         let s = self.style_mut();
         s.flex_grow = 1.0;
