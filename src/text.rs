@@ -77,6 +77,14 @@ pub struct TextLayout {
     pub height: f32,
 }
 
+/// A word shaped once at size 1; positions scale with the font size.
+struct ShapedWord {
+    text: String,
+    glyphs: Vec<PositionedGlyph>,
+    clusters: Vec<(usize, f32)>,
+    advance: f32,
+}
+
 struct Cached {
     text: String,
     layout: Rc<TextLayout>,
@@ -91,6 +99,9 @@ pub struct Text {
     /// Shape plans are costly to build; one per font, script and direction.
     plans: RefCell<Vec<(FaceId, Rc<ShapePlan>)>>,
     buffer: RefCell<Option<Buffer>>,
+    /// Shaped words by hash of (face, word).
+    // ponytail: cleared whole at WORD_CACHE entries; LRU if apps cycle through more words than that.
+    words: RefCell<HashMap<u64, Rc<ShapedWord>>>,
     glyphs: HashMap<(FaceId, GlyphId), Option<Glyph>>,
     /// `Shape`s by content, stored like glyphs in units of the view's larger side.
     shapes: HashMap<u64, StoredShape>,
@@ -108,6 +119,7 @@ impl Default for Text {
             faces: RefCell::default(),
             plans: RefCell::default(),
             buffer: RefCell::default(),
+            words: RefCell::default(),
             glyphs: HashMap::new(),
             shapes: HashMap::new(),
             frame: 0,
@@ -133,6 +145,7 @@ fn line_box(f: &Face, size: f32) -> (f32, f32, f32) {
 
 /// Painted frames a shape survives without being drawn.
 const SHAPE_GRACE: u64 = 600;
+const WORD_CACHE: usize = 4096;
 
 impl Text {
     /// Frees the frame-scoped outlines; the runtime calls this before painting.
@@ -205,9 +218,8 @@ impl Text {
         f.glyph_metrics().h_advance(g) * size / f.units_per_em() as f32
     }
 
-    /// Shapes `word` (no spaces or newlines), appending its glyphs from x = 0
-    /// and the (byte, x) where each cluster starts; returns its advance.
-    /// Chars `face` lacks are shaped with the default font.
+    /// Appends `word` (no spaces or newlines) at `size` from x = 0, and the
+    /// (byte, x) where each cluster starts; returns its advance.
     fn word(
         &self,
         face: FaceId,
@@ -216,6 +228,38 @@ impl Text {
         glyphs: &mut Vec<PositionedGlyph>,
         clusters: &mut Vec<(usize, f32)>,
     ) -> f32 {
+        let w = self.shaped(face, word);
+        glyphs.extend(w.glyphs.iter().map(|g| PositionedGlyph {
+            face: g.face,
+            id: g.id,
+            x: g.x * size,
+            y: g.y * size,
+        }));
+        clusters.extend(w.clusters.iter().map(|&(b, x)| (b, x * size)));
+        w.advance * size
+    }
+
+    fn shaped(&self, face: FaceId, word: &str) -> Rc<ShapedWord> {
+        let mut h = DefaultHasher::new();
+        (face, word).hash(&mut h);
+        let key = h.finish();
+        if let Some(w) = self.words.borrow().get(&key)
+            && w.text == word
+        {
+            return w.clone();
+        }
+        let w = Rc::new(self.shape_word(face, word));
+        let mut words = self.words.borrow_mut();
+        if words.len() >= WORD_CACHE {
+            words.clear();
+        }
+        words.insert(key, w.clone());
+        w
+    }
+
+    /// Shapes `word` at size 1. Chars `face` lacks use the default font.
+    fn shape_word(&self, face: FaceId, word: &str) -> ShapedWord {
+        let (mut glyphs, mut clusters) = (Vec::new(), Vec::new());
         let faces = self.faces.borrow();
         // ponytail: fallback picks a font per char, so a mark can split from its base.
         let pick = |c: char| {
@@ -246,7 +290,7 @@ impl Text {
                 ShapeOptions::new().plan(Some(&plan)),
             )
             .expect("shape with a matching plan");
-            let s = size / font.units_per_em() as f32;
+            let s = 1.0 / font.units_per_em() as f32;
             for (info, pos) in b.glyph_infos().iter().zip(b.glyph_positions()) {
                 let byte = start + info.cluster as usize;
                 if clusters.last().is_none_or(|&(c, _)| c != byte) {
@@ -263,7 +307,12 @@ impl Text {
             b.clear();
             *buf = Some(b);
         }
-        x
+        ShapedWord {
+            text: word.to_owned(),
+            glyphs,
+            clusters,
+            advance: x,
+        }
     }
 
     fn plan(&self, face: FaceId, font: &Face, b: &Buffer) -> Rc<ShapePlan> {
@@ -582,6 +631,17 @@ mod tests {
         let all = Rect::new(0.0, 0.0, 100.0, 100.0);
         t.draw_shape(shape, all, Color::BLACK, all, &mut scene);
         scene
+    }
+
+    #[test]
+    fn shaped_words_are_reused_and_scale_with_the_size() {
+        let t = Text::default();
+        let small = t.layout("alpha beta", Font::DEFAULT, 10.0, None);
+        let words = t.words.borrow().len();
+        assert_eq!(words, 2);
+        let big = t.layout("beta alpha", Font::DEFAULT, 20.0, None);
+        assert_eq!(t.words.borrow().len(), words, "no word shaped again");
+        assert!((big.width - small.width * 2.0).abs() <= 2.0);
     }
 
     #[test]

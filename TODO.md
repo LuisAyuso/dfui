@@ -14,9 +14,9 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [ ] Text input follow-ups: desktop IME composition, multi-line,
       keyboard-aware insets on Android, Android system clipboard and touch
       selection handles.
-- [ ] Faster outline text: store curves inline in each band list (drop the
-      index indirection, one fewer dependent load per curve). Re-measure with
-      the Bench screen.
+- [x] Rejected after measuring: curves inline in each band list, to drop one
+      dependent load per curve. Text wall 113 → 109 µs on desktop, 3.41 ms
+      unchanged on the Pixel 10a, for ASCII outlines growing 89 → 253 KB.
 - [x] Status bar icon color: dark icons over a light `App::background`
       (API 30+).
 
@@ -320,8 +320,10 @@ repeated on the phone; lists and text input have no bench.
 
 - [x] Cache text layouts per (text, size, width), evicted after an unused
       frame. Cut frame CPU ~82%.
-- [ ] Cheaper layout misses (changing text: typing, counters): cache shaped
-      words, since each word is shaped on its own.
+- [x] Cheaper layout misses: shaped words are cached at size 1, so changing
+      text only shapes what's new (changing label 7.9 → 2.2 µs desktop, 6.7 → 2.5 µs Pixel 10a).
+- [ ] Word cache limits: it caps entries (4096) but not bytes, so skip very
+      long words; add a test for the clear when full.
 - [x] Run the benches on the phone (`scripts/android-bench.sh`): partial
       frame ~44× cheaper than full on Mali. Still unmeasured in the real
       app: canvas copy and `LoadOp::Load` bandwidth.

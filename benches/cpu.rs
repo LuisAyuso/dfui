@@ -25,6 +25,21 @@ fn text_layout(c: &mut Criterion) {
             BatchSize::PerIteration,
         )
     });
+    // A label that changes every frame: only one word is new.
+    let mut n = 0u64;
+    let changing = Text::default();
+    c.bench_function("text/layout_changing_word", |b| {
+        b.iter(|| {
+            n += 1;
+            changing.end_frame();
+            changing.layout(
+                &format!("The quick brown fox jumps over the lazy dog {n} times today"),
+                Font::DEFAULT,
+                16.0,
+                Some(300.0),
+            )
+        })
+    });
     c.bench_function("text/layout_paragraph_cached", |b| {
         b.iter(|| t.layout(PARAGRAPH, Font::DEFAULT, 15.0, Some(320.0)))
     });
