@@ -172,8 +172,12 @@ pub struct State(Option<Box<dyn Any>>);
 
 impl State {
     pub fn get<T: Default + 'static>(&mut self) -> &mut T {
+        self.get_or_insert_with(T::default)
+    }
+
+    pub(crate) fn get_or_insert_with<T: 'static>(&mut self, init: impl FnOnce() -> T) -> &mut T {
         if !self.0.as_ref().is_some_and(|b| b.is::<T>()) {
-            self.0 = Some(Box::new(T::default()));
+            self.0 = Some(Box::new(init()));
         }
         self.0.as_mut().unwrap().downcast_mut().unwrap()
     }
@@ -413,9 +417,13 @@ impl EventCx<'_> {
     }
 
     /// Modify a stateful widget's state after this event; its subtree is rebuilt.
-    pub fn update<S: Default + 'static>(&mut self, h: Handle<S>, f: impl FnOnce(&mut S) + 'static) {
-        self.updates
-            .push((h.id, Box::new(move |st: &mut State| f(st.get::<S>()))));
+    pub fn update<S: 'static>(&mut self, h: Handle<S>, f: impl FnOnce(&mut S) + 'static) {
+        let apply = move |st: &mut State| {
+            if let Some(s) = st.0.as_mut().and_then(|b| b.downcast_mut()) {
+                f(s);
+            }
+        };
+        self.updates.push((h.id, Box::new(apply)));
     }
 
     /// Route all pointer events to this widget until pointer up; others get `Cancel`.

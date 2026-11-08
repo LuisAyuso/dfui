@@ -7,6 +7,7 @@ use std::sync::{Arc, Weak};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
+use crate::anim::Lerp;
 use crate::text::Text;
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -49,6 +50,21 @@ impl Color {
 
     pub const fn alpha(self, a: f32) -> Color {
         Color { a, ..self }
+    }
+
+    /// `self` at `t` 0, `to` at `t` 1, blended per channel, alpha included.
+    pub fn mix(self, to: Color, t: f32) -> Color {
+        self.lerp(to, t)
+    }
+
+    /// Moves `t` of the way to white, keeping alpha.
+    pub fn lighten(self, t: f32) -> Color {
+        self.mix(Color::WHITE.alpha(self.a), t)
+    }
+
+    /// Moves `t` of the way to black, keeping alpha.
+    pub fn darken(self, t: f32) -> Color {
+        self.mix(Color::BLACK.alpha(self.a), t)
     }
 
     fn rgba(self) -> [f32; 4] {
@@ -1186,6 +1202,16 @@ pub(crate) fn render_offscreen(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn color_helpers_blend_and_keep_alpha() {
+        let c = Color::hex(0x336699).alpha(0.5);
+        assert_eq!(c.mix(Color::BLACK, 0.0), c);
+        assert_eq!(c.mix(Color::BLACK, 1.0), Color::BLACK);
+        assert_eq!(c.lighten(1.0), Color::WHITE.alpha(0.5));
+        assert_eq!(c.darken(1.0), Color::BLACK.alpha(0.5));
+        assert!((c.darken(0.5).g - c.g / 2.0).abs() < 1e-6);
+    }
 
     fn solid(c: Color) -> Scene {
         let mut s = Scene::default();

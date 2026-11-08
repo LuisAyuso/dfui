@@ -487,6 +487,49 @@ impl Handle<Overlays> {
     }
 }
 
+impl Handle<Overlays> {
+    /// Asks before an action: a dialog with `title`, `body`, Cancel and `ok`.
+    /// `on_ok` runs as the dialog closes.
+    pub fn confirm(
+        self,
+        cx: &mut EventCx,
+        title: impl Into<String>,
+        body: impl Into<String>,
+        ok: impl Into<String>,
+        on_ok: impl Fn(&mut EventCx) + 'static,
+    ) {
+        let (title, body, ok): (String, String, String) = (title.into(), body.into(), ok.into());
+        let on_ok = Rc::new(on_ok);
+        self.show(cx, move |me| {
+            let on_ok = on_ok.clone();
+            dialog(
+                column([
+                    text(title.clone()).size(20.0).into(),
+                    text(body.clone()).size(14.0).color(Role::Muted).into(),
+                    row([
+                        button(text("Cancel").color(Role::Ink))
+                            .color(Role::Surface)
+                            .flat()
+                            .on_click(move |cx| me.close(cx))
+                            .into(),
+                        button(text(ok.clone()))
+                            .flat()
+                            .on_click(move |cx| {
+                                me.close(cx);
+                                on_ok(cx);
+                            })
+                            .into(),
+                    ])
+                    .gap(8.0)
+                    .justify(JustifyContent::FLEX_END)
+                    .into(),
+                ])
+                .gap(12.0),
+            )
+        });
+    }
+}
+
 /// Hosts `content` and the overlays its handlers show through the handle.
 pub fn overlays<E: Into<Element>>(
     content: impl Fn(Handle<Overlays>) -> E + 'static,

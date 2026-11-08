@@ -6,6 +6,7 @@
 
 mod builder;
 mod button;
+mod chip;
 mod container;
 mod icon;
 mod image;
@@ -31,6 +32,7 @@ use taffy::{
 
 pub use builder::{Builder, Seen, Snapshot, future_builder, stream_builder, watch};
 pub use button::{Button, button};
+pub use chip::{badge, chip, choice_chip};
 pub use container::{Container, column, container, row, spacer};
 pub use icon::{Icon, icon, icon_button};
 pub use image::{Image, image};
@@ -46,7 +48,7 @@ pub use radio::{Radio, radio};
 pub use scroll::{Scroll, scroll};
 pub use segmented::{Segmented, segmented, tabs};
 pub use slider::{Slider, slider};
-pub use stateful::{Stateful, stateful};
+pub use stateful::{Stateful, stateful, stateful_with};
 pub use table::{Column, TableSort, table};
 pub use text_input::{TextInput, text_input};
 pub use toggle::{Toggle, toggle};

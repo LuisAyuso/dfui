@@ -9,6 +9,8 @@
 //! modal one) slides it out and removes it once the animation ends. A
 //! snackbar closes itself after four seconds.
 //!
+//! `ov.confirm(cx, title, body, ok, on_ok)` asks before a destructive action.
+//!
 //! A `dropdown` and a `tooltip` own their popup, so they need no host.
 //! `overlay(child)` (covers the window) and `popup(child)` (below its parent)
 //! are the building blocks underneath.
@@ -18,7 +20,7 @@ use dfui::widgets::{
     Overlay, Overlays, Shown, Styled, bottom_sheet, button, column, dialog, drawer, dropdown,
     overlays, row, snackbar, stateful, text, tooltip,
 };
-use dfui::{Color, Element, Handle};
+use dfui::{Color, Element, EventCx, Handle};
 
 fn panel(title: &str, me: Shown) -> Element {
     column([
@@ -43,6 +45,12 @@ fn content(ov: Handle<Overlays>) -> Element {
                 open("Dialog", |me| dialog(panel("A dialog", me))),
                 open("Drawer", |me| drawer(panel("A drawer", me))),
                 open("Sheet", |me| bottom_sheet(panel("A bottom sheet", me))),
+                button(text("Delete").color(Color::WHITE))
+                    .on_click(move |cx| {
+                        let done = move |cx: &mut EventCx| ov.show(cx, |_| snackbar("Deleted"));
+                        ov.confirm(cx, "Delete it?", "This can't be undone.", "Delete", done);
+                    })
+                    .into(),
             ])
             .gap(8.0)
             .wrap()

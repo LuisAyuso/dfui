@@ -12,6 +12,7 @@ use pulldown_cmark::{Options, Parser, html};
 const WIDGETS: &[&str] = &[
     "text",
     "button",
+    "chip",
     "icon",
     "layout",
     "scroll",

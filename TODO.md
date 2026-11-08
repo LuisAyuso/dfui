@@ -160,28 +160,22 @@ Widgets:
       slots wrapped onto three rows); and an inert slot drawn with `icon`
       is a different size from the buttons beside it. Expose the padding
       in the docs, or an inert `icon_button`.
-- [ ] Confirm dialog: every destructive action builds the same dialog
-      (title, body, Cancel, OK). A `confirm(ov, title, body, ok, on_ok)`.
+- [x] Confirm dialog: `ov.confirm(cx, title, body, ok, on_ok)`.
 - [x] Back handling for app screens: a public `on_back(f)`. A navigation
       stack is still open if a third app wants one.
 - [x] `dropdown` with many options (30 races) runs off the window: the menu
       scrolls past a maximum height and opens at the selected option.
-- [ ] Chips: skill, injury and status chips are hand-made containers
-      (text, background, radius, padding). A `chip(label)` widget, and a
-      tappable `choice_chip`.
-- [ ] Badge: a count on a corner of another widget (SPP on a number
-      circle) is painted by hand. A `badge(child, label)`.
+- [x] Chips: `chip(label)` and a tappable `choice_chip(label, selected)`.
+- [x] Badge: `badge(child, label)`, a count over a corner of another widget.
 - [ ] Numeric text input: no number mode or maximum length (a one-digit
       field keeps only the last digit typed, by hand). Ties into the input
       type hints.
-- [ ] `stateful` state is `Default`-only, so a form editing existing data
-      stores `Option`s that fall back to the data. A `stateful` with an
-      initial value.
+- [x] `stateful_with(init, build)`: state from an initial value, for forms
+      over existing data; it needn't be `Default`.
 - [ ] The card stack (fold/unfold, kinetic scroll, shadows on the card
       above) is now copied in two apps: worth a dfui widget with a
       card-painting callback.
-- [ ] Color helpers: `mix`/`lighten`/`darken` (fields are public, so apps
-      write them inline).
+- [x] Color helpers: `Color::mix`, `lighten` and `darken`.
 
 Theming:
 

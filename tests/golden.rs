@@ -8,9 +8,10 @@ use std::time::Duration;
 use dfui::anim::Morph;
 use dfui::taffy::{AvailableSpace, Size};
 use dfui::widgets::{
-    Overlay, Shown, Styled, bottom_sheet, button, column, container, dialog, drawer, dropdown,
-    icon, icon_button, image, overlays, progress, provide, radio, row, scroll, segmented, slider,
-    snackbar, spacer, spinner, stacked_progress, tabs, text, text_input, toggle, tooltip, wait_bar,
+    Overlay, Shown, Styled, badge, bottom_sheet, button, chip, choice_chip, column, container,
+    dialog, drawer, dropdown, icon, icon_button, image, overlays, progress, provide, radio, row,
+    scroll, segmented, slider, snackbar, spacer, spinner, stacked_progress, stateful,
+    stateful_with, tabs, text, text_input, toggle, tooltip, wait_bar,
 };
 use dfui::{
     App, Bench, Bitmap, Color, Element, Event, Font, PaintCx, Path, Rect, Role, Shape, Text, Theme,
@@ -593,4 +594,70 @@ fn images_scaled_rounded_tinted() {
         .into()
     };
     check("image", &bench(v, (232.0, 112.0)).image(SCALE));
+}
+
+#[test]
+fn chips_and_badges() {
+    let v = || {
+        padded(
+            row([
+                chip("Block").into(),
+                choice_chip("Dodge", true).into(),
+                choice_chip("Guard", false).into(),
+                choice_chip("Off", false).enabled(false).into(),
+                badge(button(text("Team")), "3").into(),
+                badge(button(text("Log")), "128").into(),
+            ])
+            .gap(10.0)
+            .align(dfui::taffy::AlignItems::CENTER),
+        )
+    };
+    check("chips", &bench(v, (440.0, 64.0)).image(SCALE));
+}
+
+#[test]
+fn stateful_with_starts_from_its_value() {
+    struct Form(u32);
+    let v = || {
+        padded(stateful_with(
+            || Form(41),
+            |f: &Form, h| {
+                button(text(format!("{}", f.0)))
+                    .on_click(move |cx| cx.update(h, |f: &mut Form| f.0 += 1))
+            },
+        ))
+    };
+    let mut b = bench(v, (120.0, 56.0));
+    let mut frames = vec![b.image(SCALE)];
+    tap(&mut b, 40.0, 24.0);
+    b.settle();
+    frames.push(b.image(SCALE));
+    check("stateful_with", &strip(&frames));
+}
+
+#[test]
+fn confirm_runs_on_ok_only() {
+    let v = || -> Element {
+        overlays(|ov| {
+            stateful(move |n: &u32, h| {
+                button(text(format!("Deleted {n}"))).on_click(move |cx| {
+                    let done = move |cx: &mut dfui::EventCx| cx.update(h, |n: &mut u32| *n += 1);
+                    ov.confirm(cx, "Delete it?", "This can't be undone.", "Delete", done);
+                })
+            })
+        })
+        .into()
+    };
+    let mut b = bench(v, (280.0, 240.0));
+    let mut frames = Vec::new();
+    // Cancel, then the confirming button.
+    for (x, y) in [(95.0, 150.0), (190.0, 150.0)] {
+        tap(&mut b, 20.0, 20.0);
+        b.settle();
+        frames.push(b.image(SCALE));
+        tap(&mut b, x, y);
+        b.settle();
+        frames.push(b.image(SCALE));
+    }
+    check("confirm", &strip(&frames));
 }
