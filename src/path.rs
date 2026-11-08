@@ -51,6 +51,27 @@ pub(crate) struct ShapeData {
 }
 
 impl Shape {
+    /// A shape written by the `svg2path` tool, usually `include_bytes!`d.
+    /// Panics on anything else: these are assets bundled with the app.
+    pub fn from_bytes(bytes: &[u8]) -> Shape {
+        let body = bytes.strip_prefix(b"DFP1").expect("not a dfui path");
+        let mut words = body.as_chunks::<4>().0.iter().copied();
+        let mut next = || words.next().expect("truncated dfui path");
+        let num = f32::from_le_bytes;
+        let count = |w| u32::from_le_bytes(w) as usize;
+        let view = Rect::new(num(next()), num(next()), num(next()), num(next()));
+        let lengths: Vec<usize> = (0..count(next())).map(|_| count(next())).collect();
+        let contours = lengths
+            .iter()
+            .map(|&n| {
+                (0..n)
+                    .map(|_| [(); 3].map(|_| [num(next()), num(next())]))
+                    .collect()
+            })
+            .collect();
+        Shape::new(Path { contours }, view)
+    }
+
     /// `path` with `view` as the box that `PaintCx::shape` maps onto its
     /// target rect, like an SVG `viewBox`.
     pub fn new(path: Path, view: Rect) -> Shape {
