@@ -8,15 +8,19 @@ use crate::widget::{Element, Event, EventCx, PaintCx, Placement, State, Widget};
 #[derive(Default)]
 pub(crate) struct ScrollState {
     pub offset: f32,
-    /// Largest offset, from the last event's layout.
+    /// Largest offset, from the last layout.
     pub max: f32,
     pub drag: Drag,
+    /// The `start_at` already applied.
+    start: Option<f32>,
 }
 
 /// Vertical scroll view; drag (touch, flings on release) or wheel. Children are clipped.
 pub struct Scroll {
     child: [Element; 1],
     style: Style,
+    stick: bool,
+    start: Option<f32>,
 }
 
 /// Vertical scroll view: wheel, drag and fling, clipping `child` to its box.
@@ -37,6 +41,23 @@ pub fn scroll(child: impl Into<Element>) -> Scroll {
             scrollbar_width: 0.0,
             ..Style::default()
         },
+        stick: false,
+        start: None,
+    }
+}
+
+impl Scroll {
+    /// Follows the end as content grows, e.g. for a log. Scrolling away stops
+    /// that until the user scrolls back to the end.
+    pub fn stick_to_end(mut self) -> Self {
+        self.stick = true;
+        self
+    }
+    /// Jumps to this fraction of the range, 0 top to 1 bottom, whenever the
+    /// value changes; the user scrolls freely after that.
+    pub fn start_at(mut self, fraction: f32) -> Self {
+        self.start = Some(fraction);
+        self
     }
 }
 
@@ -59,11 +80,22 @@ impl Widget for Scroll {
     fn children(&self) -> &[Element] {
         &self.child
     }
-    fn scroll(&self, state: &mut State, _: Placement, now: Instant) -> Option<(f32, f32)> {
+    fn scroll(&self, state: &mut State, at: Placement, now: Instant) -> Option<(f32, f32)> {
         let s = state.get::<ScrollState>();
         if let Some(o) = s.drag.fling(now, s.max) {
             s.offset = o;
         }
+        let max = (at.content.height - at.clip.h).max(0.0);
+        if self.stick && s.offset >= s.max - 1.0 {
+            s.offset = max;
+        }
+        if self.start != s.start {
+            if let Some(f) = self.start {
+                s.offset = max * f;
+            }
+            s.start = self.start;
+        }
+        s.max = max;
         Some((0.0, s.offset))
     }
     fn paint(&self, cx: &mut PaintCx) {

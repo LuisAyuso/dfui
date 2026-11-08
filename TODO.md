@@ -139,9 +139,9 @@ Android:
 
 Layout and scrolling:
 
-- [ ] Programmatic scrolling: a log that should follow its newest line
-      can't, since a scroll's offset isn't reachable from outside. A
-      `stick_to_end()` option or a scroll controller.
+- [x] Programmatic scrolling: `scroll(..).stick_to_end()` follows a log's
+      newest line and `start_at(fraction)` jumps. A controller that scrolls
+      to a given widget is still open if an app needs one.
 - [x] A `scroll` with `shrink(1.0)` shrinks below its content on taffy 0.15
       without `min_height(0.0)`. The trap left is a column between the window
       and the scroll without `.fill()`: it grows to the content, as `scroll`'s
@@ -165,8 +165,7 @@ Widgets:
 - [x] Back handling for app screens: a public `on_back(f)`. A navigation
       stack is still open if a third app wants one.
 - [x] `dropdown` with many options (30 races) runs off the window: the menu
-      scrolls past a maximum height. It doesn't open at the selected option
-      yet; that needs programmatic scrolling.
+      scrolls past a maximum height and opens at the selected option.
 - [ ] Chips: skill, injury and status chips are hand-made containers
       (text, background, radius, padding). A `chip(label)` widget, and a
       tappable `choice_chip`.

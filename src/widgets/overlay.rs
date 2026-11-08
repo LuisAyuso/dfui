@@ -609,6 +609,7 @@ impl From<Dropdown> for Element {
             .color(Color::hex(0xe8e9ef))
             .on_click(set(!open));
             let menu = {
+                let last = labels.len().saturating_sub(1);
                 let items = labels.iter().enumerate().map(|(i, l)| {
                     let f = on_change.clone();
                     let bg = if i == selected {
@@ -629,7 +630,12 @@ impl From<Dropdown> for Element {
                         })
                         .into()
                 });
-                let list = column([scroll(column(items)).max_height(MENU_MAX_HEIGHT).into()])
+                let mut options = scroll(column(items)).max_height(MENU_MAX_HEIGHT);
+                if open {
+                    // Linear in the index, which keeps the selected row in view.
+                    options = options.start_at(selected as f32 / last.max(1) as f32);
+                }
+                let list = column([options.into()])
                     .bg(Color::WHITE)
                     .radius(8.0)
                     .padding(4.0)

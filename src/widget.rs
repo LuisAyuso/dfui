@@ -90,6 +90,8 @@ pub struct Placement {
     pub rest: Rect,
     /// A layer's anchor: its parent's box, or the window; `clip` otherwise.
     pub anchor: Rect,
+    /// Extent of the children, for a scroller's range.
+    pub content: Size<f32>,
 }
 
 /// What a layer widget is laid out over.

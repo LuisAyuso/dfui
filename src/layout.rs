@@ -401,6 +401,7 @@ pub(crate) fn place(
             clip: r,
             rest: r,
             anchor: r,
+            content: m.content,
         };
         let rest = nodes[i].w.layer().and_then(|layer| {
             let rest = children(nodes, i)
@@ -417,6 +418,7 @@ pub(crate) fn place(
                     clip: rest,
                     rest,
                     anchor: placed[p].rect,
+                    content: m.content,
                 };
                 (shifts[i], rests[i]) = ((sx, sy), Some(rest));
             }

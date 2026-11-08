@@ -254,6 +254,68 @@ fn on_back_runs_and_keeps_the_app_open() {
     assert_eq!(*root::<i32, _>(&mut rt), 1);
 }
 
+struct Log;
+
+impl App for Log {
+    fn view(&self) -> Element {
+        stateful(|&extra: &f32, _| scroll(spacer().height(1000.0 + extra)).stick_to_end()).into()
+    }
+}
+
+#[test]
+fn stick_to_end_follows_until_scrolled_away() {
+    let mut rt = Runtime::new(Log);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    let grow = |rt: &mut Runtime<Log>| {
+        *root::<f32, _>(rt) += 100.0;
+        rt.rebuild();
+        rt.relayout();
+        let last = rt.placed.last().unwrap().rect;
+        last.y + last.h
+    };
+    let wheel = |rt: &mut Runtime<Log>, dy| {
+        rt.dispatch(Event::Wheel {
+            x: 10.0,
+            y: 10.0,
+            dy,
+        });
+    };
+    assert_eq!(grow(&mut rt), 200.0, "follows");
+    wheel(&mut rt, -50.0);
+    assert_eq!(grow(&mut rt), 350.0, "stays where the user went");
+    wheel(&mut rt, 1e5);
+    assert_eq!(grow(&mut rt), 200.0, "follows again");
+}
+
+struct SelectedMenu;
+
+impl App for SelectedMenu {
+    fn view(&self) -> Element {
+        dropdown((0..30).map(|i| i.to_string()), 25).into()
+    }
+}
+
+#[test]
+fn long_dropdown_opens_at_the_selected_option() {
+    let mut rt = Runtime::new(SelectedMenu);
+    rt.viewport = (200.0, 800.0);
+    let t = Instant::now();
+    task::set_clock(Some(t));
+    rt.relayout();
+    rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+    task::set_clock(Some(t + Duration::from_secs(1)));
+    rt.reposition();
+    task::set_clock(None);
+    let k = rt.placed.iter().position(|p| p.rect.h == 320.0).unwrap();
+    let (menu, row) = (rt.placed[k].rect, rt.placed[k + 2 + 2 * 25].rect);
+    assert!(
+        row.y >= menu.y && row.y + row.h <= menu.y + menu.h,
+        "{row:?} outside {menu:?}"
+    );
+}
+
 fn damage_after<A: App>(
     rt: &mut Runtime<A>,
     events: impl IntoIterator<Item = Event>,
