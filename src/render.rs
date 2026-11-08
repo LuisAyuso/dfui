@@ -90,6 +90,22 @@ impl Rect {
     }
 }
 
+/// A rendered frame: sRGB RGBA8, row-major.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Pixels {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+#[cfg(test)]
+impl Pixels {
+    fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        let i = ((y * self.width + x) * 4) as usize;
+        self.rgba[i..i + 4].try_into().unwrap()
+    }
+}
+
 /// Immutable RGBA8 pixels, cheap to clone and safe to build on any thread.
 /// Decoding is up to the app; the GPU copy lives until the last clone drops.
 #[derive(Clone)]
@@ -1103,7 +1119,7 @@ impl Offscreen {
     }
 
     /// Reads the target back as sRGB RGBA8.
-    pub(crate) fn read(&self) -> image::RgbaImage {
+    pub(crate) fn read(&self) -> Pixels {
         let gpu = &self.gpu;
         let s = self.target.size();
         let (w, h) = (s.width, s.height);
@@ -1139,12 +1155,16 @@ impl Offscreen {
             .poll(wgpu::PollType::wait_indefinitely())
             .expect("poll");
         let data = buf.slice(..).get_mapped_range().expect("mapped range");
-        let mut img = image::RgbaImage::new(w, h);
+        let mut rgba = vec![0; (w * h * 4) as usize];
         for y in 0..h {
             let src = &data[(y * row) as usize..][..(w * 4) as usize];
-            img.as_mut()[(y * w * 4) as usize..][..(w * 4) as usize].copy_from_slice(src);
+            rgba[(y * w * 4) as usize..][..(w * 4) as usize].copy_from_slice(src);
         }
-        img
+        Pixels {
+            width: w,
+            height: h,
+            rgba,
+        }
     }
 }
 
@@ -1155,7 +1175,7 @@ pub(crate) fn render_offscreen(
     text: &mut Text,
     size: (u32, u32),
     scale: f32,
-) -> image::RgbaImage {
+) -> Pixels {
     let mut off = Offscreen::new(size);
     for &(scene, scissor) in passes {
         off.draw(scene, text, scale, scissor);
@@ -1180,9 +1200,9 @@ mod tests {
         let (red, blue) = (solid(Color::hex(0xff0000)), solid(Color::hex(0x0000ff)));
         let passes = [(&red, None), (&blue, Some([10, 10, 20, 20]))];
         let img = render_offscreen(&passes, &mut Text::default(), (40, 40), 1.0);
-        assert_eq!(img.get_pixel(5, 5).0, [255, 0, 0, 255]);
-        assert_eq!(img.get_pixel(15, 15).0, [0, 0, 255, 255]);
-        assert_eq!(img.get_pixel(35, 35).0, [255, 0, 0, 255]);
+        assert_eq!(img.pixel(5, 5), [255, 0, 0, 255]);
+        assert_eq!(img.pixel(15, 15), [0, 0, 255, 255]);
+        assert_eq!(img.pixel(35, 35), [255, 0, 0, 255]);
     }
 
     #[test]
@@ -1208,18 +1228,18 @@ mod tests {
             all,
         );
         let img = render_offscreen(&[(&s, None)], &mut Text::default(), (40, 40), 1.0);
-        assert_eq!(img.get_pixel(2, 5).0, [255, 0, 0, 255]);
-        let [r, g, b, _] = img.get_pixel(37, 5).0;
+        assert_eq!(img.pixel(2, 5), [255, 0, 0, 255]);
+        let [r, g, b, _] = img.pixel(37, 5);
         assert!(
             r.abs_diff(127) <= 2 && g.abs_diff(127) <= 2 && b == 255,
             "blended over white"
         );
         assert_eq!(
-            img.get_pixel(20, 17).0,
+            img.pixel(20, 17),
             [0, 0, 0, 255],
             "shape after image covers it"
         );
-        assert_eq!(img.get_pixel(20, 30).0, [255, 255, 255, 255]);
+        assert_eq!(img.pixel(20, 30), [255, 255, 255, 255]);
     }
 
     #[test]

@@ -3,7 +3,7 @@ use std::time::Duration;
 use web_time::Instant;
 
 use crate::App;
-use crate::render::{Offscreen, Rect, Scene, damage, render_offscreen};
+use crate::render::{Offscreen, Pixels, Rect, Scene, damage, render_offscreen};
 use crate::text::Text;
 use crate::widget::Event;
 
@@ -95,7 +95,7 @@ impl<A: App> Bench<A> {
     }
 
     /// Renders the current frame offscreen at `scale` physical px per logical px.
-    pub fn shot(&mut self, scale: f32) -> image::RgbaImage {
+    pub fn shot(&mut self, scale: f32) -> Pixels {
         let rt = &mut self.0;
         let size = (
             (rt.viewport.0 * scale).round() as u32,
@@ -145,7 +145,7 @@ impl GpuBench {
 }
 
 /// Renders one frame of `app` offscreen at `size` physical pixels, e.g. for golden tests.
-pub fn snapshot<A: App>(app: A, size: (u32, u32), scale: f32) -> image::RgbaImage {
+pub fn snapshot<A: App>(app: A, size: (u32, u32), scale: f32) -> Pixels {
     let mut rt = Runtime::new(app);
     rt.viewport = (size.0 as f32 / scale, size.1 as f32 / scale);
     rt.relayout();

@@ -321,6 +321,10 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
       on a virtual clock (`Bench::advance`/`settle`), animations as frame
       strips, compared against PNGs from the reference machine.
       `DFUI_BLESS=1 cargo test --test golden` rewrites them.
+- [x] `tools/svg2path`: converts SVG icons, strokes included, into a compact
+      asset that `Shape::from_bytes` loads, so apps needn't parse SVG at
+      runtime.
+- [x] `image` is a dev-dependency only: `snapshot` returns plain `Pixels`.
 - [ ] Fold the demo's `#[ignore]` snapshot tests into the goldens.
 - [ ] Release signing config for real distribution (debug keystore via
       `CARGO_APK_RELEASE_KEYSTORE` today).

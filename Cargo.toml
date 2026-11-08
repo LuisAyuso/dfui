@@ -8,7 +8,6 @@ license = "WTFPL"
 bytemuck = { version = "1.25.2", features = ["derive"] }
 futures-core = "0.3"
 harfrust = "0.15"
-image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4.34"
 pollster = "1.0.1"
 read-fonts = "0.46"
@@ -43,6 +42,7 @@ arboard = { version = "3.7", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8"
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Small wasm for the docs site's examples.
 [profile.web]

@@ -1020,8 +1020,15 @@ mod tests {
     #[ignore = "needs a GPU; writes target/demo.png for eyeballing"]
     fn snapshot() {
         let img = dfui::snapshot(Demo::default(), (800, 1000), 2.0);
-        img.save(concat!(env!("CARGO_MANIFEST_DIR"), "/../target/demo.png"))
-            .unwrap();
+        save(
+            img,
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../target/demo.png"),
+        );
+    }
+
+    fn save(p: dfui::Pixels, path: &str) {
+        let img = image::RgbaImage::from_raw(p.width, p.height, p.rgba).unwrap();
+        img.save(path).unwrap();
     }
 
     struct Ladder;
@@ -1040,7 +1047,9 @@ mod tests {
     #[ignore = "needs a GPU; writes target/ladder.png"]
     fn ladder() {
         let img = dfui::snapshot(Ladder, (1200, 640), 1.0);
-        img.save(concat!(env!("CARGO_MANIFEST_DIR"), "/../target/ladder.png"))
-            .unwrap();
+        save(
+            img,
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../target/ladder.png"),
+        );
     }
 }

@@ -19,6 +19,17 @@ use dfui::{
 use image::{Rgba, RgbaImage};
 
 const SCALE: f32 = 2.0;
+
+trait Shot {
+    fn image(&mut self, scale: f32) -> RgbaImage;
+}
+
+impl<A: App> Shot for Bench<A> {
+    fn image(&mut self, scale: f32) -> RgbaImage {
+        let p = self.shot(scale);
+        RgbaImage::from_raw(p.width, p.height, p.rgba).unwrap()
+    }
+}
 /// Per-channel difference a pixel may have before it counts as changed.
 const TOLERANCE: u8 = 2;
 
@@ -60,7 +71,7 @@ fn film(b: &mut Bench<View>, at: &[u64]) -> Vec<RgbaImage> {
         .map(|&ms| {
             b.advance(Duration::from_millis(ms - t));
             t = ms;
-            b.shot(SCALE)
+            b.image(SCALE)
         })
         .collect()
 }
@@ -111,20 +122,20 @@ fn check(name: &str, actual: &RgbaImage) {
 #[test]
 fn button_states() {
     let mut b = bench(|| padded(button(text("Button"))), (120.0, 56.0));
-    let rest = b.shot(SCALE);
+    let rest = b.image(SCALE);
     b.event(Event::PointerMove { x: 20.0, y: 20.0 });
     b.settle();
-    let hover = b.shot(SCALE);
+    let hover = b.image(SCALE);
     b.event(Event::PointerDown { x: 20.0, y: 20.0 });
     let mut frames = vec![rest, hover];
     // The label morphs toward bold on the way down.
     frames.extend(film(&mut b, &[30]));
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     b.event(Event::PointerUp { x: 20.0, y: 20.0 });
     frames.extend(film(&mut b, &[30]));
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     check("button", &strip(&frames));
 }
 
@@ -136,7 +147,7 @@ fn toggle_off_on() {
             .padding(8.0)
             .into()
     };
-    check("toggle", &bench(v, (130.0, 50.0)).shot(SCALE));
+    check("toggle", &bench(v, (130.0, 50.0)).image(SCALE));
 }
 
 #[test]
@@ -149,7 +160,7 @@ fn radios() {
         .padding(8.0)
         .into()
     };
-    check("radio", &bench(v, (160.0, 90.0)).shot(SCALE));
+    check("radio", &bench(v, (160.0, 90.0)).image(SCALE));
 }
 
 #[test]
@@ -164,7 +175,7 @@ fn slider_values() {
         .padding(8.0)
         .into()
     };
-    check("slider", &bench(v, (200.0, 130.0)).shot(SCALE));
+    check("slider", &bench(v, (200.0, 130.0)).image(SCALE));
 }
 
 #[test]
@@ -178,7 +189,7 @@ fn segmented_and_tabs() {
         .padding(8.0)
         .into()
     };
-    check("segmented", &bench(v, (240.0, 110.0)).shot(SCALE));
+    check("segmented", &bench(v, (240.0, 110.0)).image(SCALE));
 }
 
 #[test]
@@ -189,7 +200,7 @@ fn text_inputs() {
             .padding(8.0)
             .into()
     };
-    check("text_input", &bench(v, (220.0, 110.0)).shot(SCALE));
+    check("text_input", &bench(v, (220.0, 110.0)).image(SCALE));
 }
 
 #[test]
@@ -221,7 +232,7 @@ fn disabled_button_is_dimmed() {
         )
     };
     let mut b = bench(v, (160.0, 60.0));
-    check("button_disabled", &b.shot(SCALE));
+    check("button_disabled", &b.image(SCALE));
 }
 
 fn night() -> Theme {
@@ -264,18 +275,18 @@ fn a_theme_restyles_widgets_and_their_content() {
         provide(night(), page).into()
     };
     let mut b = bench(v, (200.0, 300.0));
-    check("custom_theme", &b.shot(SCALE));
+    check("custom_theme", &b.image(SCALE));
 }
 
 #[test]
 fn dropdown_opens() {
     let v = || padded(dropdown(["Apple", "Banana", "Cherry"], 1));
     let mut b = bench(v, (160.0, 196.0));
-    let mut frames = vec![b.shot(SCALE)];
+    let mut frames = vec![b.image(SCALE)];
     tap(&mut b, 20.0, 20.0);
     frames.extend(film(&mut b, &[0, 60, 120]));
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     check("dropdown", &strip(&frames));
 }
 
@@ -293,7 +304,7 @@ fn dropdown_flips_above_near_the_bottom() {
     tap(&mut b, 20.0, 176.0);
     let mut frames = film(&mut b, &[0, 60, 120]);
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     check("dropdown_flipped", &strip(&frames));
 }
 
@@ -303,7 +314,7 @@ fn tooltip_on_hover() {
     let mut b = bench(v, (160.0, 100.0));
     b.event(Event::PointerMove { x: 20.0, y: 20.0 });
     b.settle();
-    check("tooltip", &b.shot(SCALE));
+    check("tooltip", &b.image(SCALE));
 }
 
 /// A button at the top left that shows `open`'s overlay.
@@ -326,11 +337,11 @@ fn open_close(view: fn() -> Element, close: (f32, f32)) -> RgbaImage {
     tap(&mut b, 20.0, 20.0);
     let mut frames = film(&mut b, &[0, 60, 120]);
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     tap(&mut b, close.0, close.1);
     frames.extend(film(&mut b, &[60, 120]));
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     strip(&frames)
 }
 
@@ -385,7 +396,7 @@ fn snackbar_shows_then_leaves() {
     tap(&mut b, 20.0, 20.0);
     let mut frames = film(&mut b, &[0, 120, 500, 4100]);
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     check("snackbar", &strip(&frames));
 }
 
@@ -439,7 +450,7 @@ fn glyph_weights_morph() {
         .chunks(6)
         .map(|c| {
             let s: &'static str = c.iter().collect::<String>().leak();
-            Bench::new(Weights(s), (CELL * 6.0 + 16.0, CELL * 3.0 + 16.0)).shot(SCALE)
+            Bench::new(Weights(s), (CELL * 6.0 + 16.0, CELL * 3.0 + 16.0)).image(SCALE)
         })
         .collect();
     let (w, h) = shots[0].dimensions();
@@ -482,15 +493,15 @@ fn icon_button_springs_back() {
         .into()
     };
     let mut b = bench(v, (160.0, 68.0));
-    let mut frames = vec![b.shot(SCALE)];
+    let mut frames = vec![b.image(SCALE)];
     b.event(Event::PointerDown { x: 30.0, y: 34.0 });
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     b.event(Event::PointerUp { x: 30.0, y: 34.0 });
     // The spring passes the icon's size before settling back.
     frames.extend(film(&mut b, &[60, 160, 280]));
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     check("icon_button", &strip(&frames));
 }
 
@@ -514,14 +525,14 @@ fn rows() -> Element {
 #[test]
 fn scroll_wheel_and_fling() {
     let mut b = bench(rows, (160.0, 200.0));
-    let mut frames = vec![b.shot(SCALE)];
+    let mut frames = vec![b.image(SCALE)];
     b.event(Event::Wheel {
         x: 80.0,
         y: 100.0,
         dy: 100.0,
     });
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     // A quick upward drag, released mid-motion: it keeps going, slowing down.
     b.event(Event::PointerDown { x: 80.0, y: 160.0 });
     for y in [150.0, 130.0, 110.0, 90.0] {
@@ -529,10 +540,10 @@ fn scroll_wheel_and_fling() {
         b.event(Event::PointerMove { x: 80.0, y });
     }
     b.event(Event::PointerUp { x: 80.0, y: 90.0 });
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     frames.extend(film(&mut b, &[150]));
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     // Wheeling far past the end stops at the last row.
     b.event(Event::Wheel {
         x: 80.0,
@@ -540,7 +551,7 @@ fn scroll_wheel_and_fling() {
         dy: 5000.0,
     });
     b.settle();
-    frames.push(b.shot(SCALE));
+    frames.push(b.image(SCALE));
     check("scroll", &strip(&frames));
 }
 
@@ -581,5 +592,5 @@ fn images_scaled_rounded_tinted() {
         .bg(Color::hex(0xf5a524))
         .into()
     };
-    check("image", &bench(v, (232.0, 112.0)).shot(SCALE));
+    check("image", &bench(v, (232.0, 112.0)).image(SCALE));
 }
