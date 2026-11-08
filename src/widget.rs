@@ -48,6 +48,9 @@ pub enum Event {
 pub enum Key {
     Backspace,
     Delete,
+    /// Deletes whole graphemes covering this many UTF-16 units before the
+    /// caret, the unit Android keyboards count in.
+    DeleteBefore(usize),
     Left,
     Right,
     Home,

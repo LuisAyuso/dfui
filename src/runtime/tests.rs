@@ -1448,3 +1448,27 @@ fn press_that_catches_a_fling_does_not_focus() {
     rt.dispatch(Event::PointerDown { x: 50.0, y: 100.0 });
     assert_eq!(rt.focused, None);
 }
+
+#[test]
+fn delete_before_counts_utf16_units_and_takes_whole_graphemes() {
+    let mut rt = Runtime::new(Field);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::Text("abe\u{301}\u{1f600}".into()));
+    rt.dispatch(Event::Key(Key::DeleteBefore(2)));
+    assert_eq!(
+        root::<String, _>(&mut rt),
+        "abe\u{301}",
+        "one emoji, two units"
+    );
+    rt.dispatch(Event::Key(Key::DeleteBefore(1)));
+    assert_eq!(
+        root::<String, _>(&mut rt),
+        "ab",
+        "the whole accented letter"
+    );
+    rt.dispatch(Event::Key(Key::DeleteBefore(9)));
+    assert_eq!(root::<String, _>(&mut rt), "", "stops at the start");
+}

@@ -19,10 +19,11 @@ use winit::raw_window_handle::{
 };
 
 use super::Runtime;
+use super::editor::Edit;
 use super::task::{self, LoopWaker};
 use crate::App;
 use crate::render::{Host, Renderer};
-use crate::widget::Event;
+use crate::widget::{Event, Key};
 
 struct Window {
     app: AndroidApp,
@@ -55,14 +56,7 @@ impl Host for Window {
         self.redraw.set(true);
     }
     fn set_ime(&self, on: bool) {
-        let app = self.app.clone();
-        // On the Java UI thread: showing the keyboard animates the window, and requests from other
-        // threads get cancelled. Explicit, since Android ignores implicit ones once the user hid it.
-        self.app.run_on_java_main_thread(Box::new(move || match on {
-            true => app.show_soft_input(false),
-            // Not implicit-only, which leaves an explicitly shown keyboard up.
-            false => app.hide_soft_input(false),
-        }));
+        super::editor::set_visible(&self.app, on);
     }
 }
 
@@ -72,6 +66,7 @@ pub(crate) fn run<A: App>(mut rt: Runtime<A>, app: AndroidApp) {
     rt.waker = w.clone().into();
     rt.loop_waker = Some(w);
     rt.android = Some(app.clone());
+    super::editor::install(&app);
     rt.drive();
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = wgpu::Backends::VULKAN;
@@ -124,6 +119,16 @@ pub(crate) fn run<A: App>(mut rt: Runtime<A>, app: AndroidApp) {
         });
         if let Ok(mut events) = app.input_events_iter() {
             while events.next(|ev| input(&mut rt, &app, ev)) {}
+        }
+        for edit in super::editor::take() {
+            match edit {
+                Edit::Text(s) => {
+                    rt.dispatch(Event::Text(s));
+                }
+                Edit::Delete(units) => {
+                    rt.dispatch(Event::Key(Key::DeleteBefore(units)));
+                }
+            }
         }
         // A wake can arrive as any event, not only `PollEvent::Wake`; missing
         // one would leave the waker pending and silence it for good.

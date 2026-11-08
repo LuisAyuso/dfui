@@ -125,11 +125,14 @@ Bugs found and fixed:
 
 Android:
 
-- [ ] The keyboard connects to the decor view with `inputType=0`: Gboard in
-      hardware-keyboard mode shows its floating toolbar for stock apps but
-      nothing for a dfui app. An editor view (`onCheckIsTextEditor`,
-      `onCreateInputConnection`) would fix this and the input type hints
-      (see Text); check where IME `commitText` then goes.
+- [x] Editor view: `dev.dfui.EditorView` gives the keyboard a real
+      `InputConnection` (`inputType` text, Gboard's toolbar shows). Its dex is
+      embedded and loaded at runtime (`scripts/android-dex.sh`), so apps need
+      no Java or packaging. `commitText` and deletes reach `text_input`.
+- [ ] Editor view follow-ups: pass each field's input type (password, number,
+      email); send the text and selection to the `InputConnection`, so
+      predictions and autocorrect see context (`getTextBeforeCursor` is empty);
+      verify composing on a device with the on-screen keyboard.
 - [ ] Image picking needs app Java: an activity method that starts
       `ACTION_GET_CONTENT`, copies the result to app storage and calls a
       native method, which only resolves if the activity runs

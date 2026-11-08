@@ -289,7 +289,23 @@ impl Widget for TextInput {
             }
             Event::PointerUp { .. } | Event::Cancel => cx.state.get::<Caret>().dragging = false,
             Event::Text(t) => replace(cx, sel, t),
-            Event::Key(Key::Backspace | Key::Delete) if !sel.is_empty() => replace(cx, sel, ""),
+            Event::Key(Key::Backspace | Key::Delete | Key::DeleteBefore(_)) if !sel.is_empty() => {
+                replace(cx, sel, "")
+            }
+            Event::Key(Key::DeleteBefore(units)) => {
+                let (mut left, mut from) = (*units, caret);
+                for &b in bounds.iter().rev().filter(|&&b| b < caret) {
+                    if left == 0 {
+                        break;
+                    }
+                    let gone = self.value[self.byte(b)..self.byte(from)].encode_utf16();
+                    left = left.saturating_sub(gone.count());
+                    from = b;
+                }
+                if from < caret {
+                    replace(cx, from..caret, "");
+                }
+            }
             Event::Key(Key::Backspace) if let Some(p) = prev => replace(cx, p..caret, ""),
             Event::Key(Key::Delete) if let Some(n) = next => replace(cx, caret..n, ""),
             Event::Key(k @ (Key::Left | Key::Right | Key::Home | Key::End)) => {

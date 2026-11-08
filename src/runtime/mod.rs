@@ -22,6 +22,8 @@ pub(crate) mod activity;
 pub mod android;
 mod bench;
 mod clipboard;
+#[cfg(target_os = "android")]
+mod editor;
 // TIMERS is already const; clippy misfires on Android's thread_local expansion.
 #[allow(clippy::missing_const_for_thread_local)]
 pub(crate) mod task;
