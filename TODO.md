@@ -287,6 +287,11 @@ CPU baseline (`cargo bench`, desktop): one frame of rebuild + layout + paint
 + diff costs ~265 µs for 10 cards and scales linearly (~32 µs/card, 32 ms
 for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs cached.
 
+2026-11-08, `be2b81e` against `bedc189` on desktop (alternating runs): no
+regression; every CPU frame bench is within the run-to-run noise (up to ~10%
+at 1000 cards) and `gpu/cards_10` and `gpu/text_wall` are unchanged. Not yet
+repeated on the phone; lists and text input have no bench.
+
 - [x] Cache text layouts per (text, size, width), evicted after an unused
       frame. Cut frame CPU ~82%.
 - [ ] Cheaper layout misses (changing text: typing, counters): cache shaped
@@ -321,6 +326,8 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
       asset that `Shape::from_bytes` loads, so apps needn't parse SVG at
       runtime.
 - [x] `image` is a dev-dependency only: `snapshot` returns plain `Pixels`.
+- [x] Integration tests of usual app patterns, driven by input events
+      (`tests/patterns.rs`).
 - [ ] Fold the demo's `#[ignore]` snapshot tests into the goldens.
 - [ ] Release signing config for real distribution (debug keystore via
       `CARGO_APK_RELEASE_KEYSTORE` today).

@@ -28,6 +28,18 @@ const WIDGETS: &[&str] = &[
     "provide",
     "future_builder",
     "stream_builder",
+    "watch",
+    "image",
+    "list",
+    "table",
+    "tree_view",
+    "dropdown",
+    "tooltip",
+    "dialog",
+    "drawer",
+    "bottom_sheet",
+    "snackbar",
+    "on_back",
 ];
 
 struct Page {
