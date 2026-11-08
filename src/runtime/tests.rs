@@ -103,6 +103,42 @@ fn text_input_edits_only_while_focused() {
     assert_eq!(field(&mut rt), "X");
 }
 
+#[test]
+fn tapping_the_focused_input_requests_the_keyboard_again() {
+    let mut rt = Runtime::new(Field);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    for y in [10.0, 10.0, 190.0, 190.0] {
+        rt.dispatch(Event::PointerDown { x: 10.0, y });
+    }
+    assert_eq!(rt.ime_requests, [true, true, false]);
+}
+
+struct ScrollInOverlays;
+
+impl App for ScrollInOverlays {
+    fn view(&self) -> Element {
+        overlays(|_| {
+            column([
+                scroll(spacer().height(1000.0)).grow(1.0).into(),
+                button(text("after")).height(40.0).into(),
+            ])
+            .fill()
+        })
+        .fill()
+        .into()
+    }
+}
+
+#[test]
+fn scroll_inside_overlays_keeps_later_widgets_on_screen() {
+    let mut rt = Runtime::new(ScrollInOverlays);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    let last = rt.placed.last().unwrap().rect;
+    assert!(last.y + last.h <= 200.0, "pushed off screen: {last:?}");
+}
+
 fn damage_after<A: App>(
     rt: &mut Runtime<A>,
     events: impl IntoIterator<Item = Event>,

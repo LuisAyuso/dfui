@@ -87,6 +87,9 @@ pub(crate) struct Runtime<A: App> {
     insets: Insets,
     #[cfg(target_os = "android")]
     pub(crate) android: Option<crate::AndroidApp>,
+    /// Keyboard requests, since tests have no window to send them to.
+    #[cfg(test)]
+    ime_requests: Vec<bool>,
 }
 
 /// Rolling frame timings, logged every couple of seconds.
@@ -155,6 +158,8 @@ impl<A: App> Runtime<A> {
             rebuild_due: false,
             occluded: false,
             focused: None,
+            #[cfg(test)]
+            ime_requests: Vec::new(),
             mods: ModifiersState::empty(),
             instance: None,
             renderer: None,
@@ -512,10 +517,12 @@ impl<A: App> Runtime<A> {
         self.focused = id;
         // ponytail: IME only drives the Android soft keyboard; desktop composition (CJK) needs Ime::Preedit handling.
         // Tapping the focused input again brings back a keyboard the user dismissed.
-        if (changed || id.is_some())
-            && let Some(r) = &self.renderer
-        {
-            r.window().set_ime(id.is_some());
+        if changed || id.is_some() {
+            #[cfg(test)]
+            self.ime_requests.push(id.is_some());
+            if let Some(r) = &self.renderer {
+                r.window().set_ime(id.is_some());
+            }
         }
         changed
     }
