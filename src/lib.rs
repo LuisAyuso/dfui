@@ -1,4 +1,4 @@
-//! Declarative (Elm-style) UI framework rendered entirely with distance fields.
+//! Declarative UI framework that draws shapes, text and icons analytically in one wgpu shader.
 
 pub mod anim;
 pub mod kinetic;

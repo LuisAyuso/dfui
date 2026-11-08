@@ -6,8 +6,8 @@
 //!
 //! `icon` draws a shape in one color. `icon_button` adds `on_click` and a
 //! touch-sized padding; the icon shrinks while pressed and springs back
-//! past its size on release. dfui doesn't parse SVG files: convert their
-//! paths (strokes included) to a `Path` with a parser such as usvg.
+//! past its size on release. dfui doesn't parse SVG files: `tools/svg2path`
+//! converts them (strokes included) for `Shape::from_bytes`.
 
 use dfui::taffy::AlignItems;
 use dfui::widgets::{Styled, icon, icon_button, row, stateful, text};
@@ -25,8 +25,13 @@ fn star() -> Shape {
     Shape::new(Path::polygon(&points), Rect::new(0.0, 0.0, 24.0, 24.0))
 }
 
+// `view` runs on every rebuild, and each new `Shape` is stored for good.
+thread_local! {
+    static STAR: Shape = star();
+}
+
 fn view() -> Element {
-    let star = star();
+    let star = STAR.with(Shape::clone);
     stateful(move |stars: &u32, h| {
         row([
             icon_button(&star)

@@ -40,7 +40,8 @@ impl Path {
 
 /// A `Path` stored on the GPU once, like a glyph, and drawn into any rect
 /// with `PaintCx::shape`: scaling it costs nothing. Use it for icons and
-/// other shapes drawn every frame; cheap to clone.
+/// other shapes drawn every frame; cheap to clone. Build one and keep it:
+/// each new `Shape` is stored again and never freed.
 #[derive(Clone)]
 pub struct Shape(pub(crate) Rc<ShapeData>);
 

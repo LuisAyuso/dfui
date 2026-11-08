@@ -24,6 +24,7 @@ fn main() { dfui::run(Counter); }
 - `src/` — the framework crate (`dfui`)
 - `demo/` — demo app, desktop binary and Android `cdylib`
 - `site/` — docs site published to GitHub Pages: guide pages and a live example per widget
+- `tools/svg2path/` — converts SVG icons to shapes an app can bundle (see Icons)
 - `docs/architecture.md` — how it fits together
 - `docs/rendering.md` — renderer details and design decisions
 - `docs/glyphs.md` — how text and icons are drawn from outlines (Slug)
@@ -31,6 +32,7 @@ fn main() { dfui::run(Counter); }
 - `docs/async-and-state.md` — study: external/async state and the web port
 - `docs/state-management.md` — study: state architectures across UI frameworks
 - `docs/data-models.md` — list and tree models, virtualized lists, tables and trees
+- `docs/theming.md` — the `Theme`, color roles and how other frameworks do it
 - `TODO.md` — roadmap and current performance baseline
 
 ## Running
@@ -44,6 +46,39 @@ scripts/android-bench.sh gpu       # same benches on the connected phone (or cpu
 ```
 
 `DFUI_SHOW_DAMAGE=1` tints the area redrawn each frame (desktop debugging).
+
+## Icons
+
+dfui has no SVG parser. `svg2path` converts icons ahead of time into `.path`
+files that the app bundles; commit them, and rerun it when an SVG changes.
+
+```sh
+cargo run -p svg2path -- icons/ assets/icons/   # a file or a directory
+cargo install --path tools/svg2path             # for use outside this repo
+```
+
+Build each `Shape` once and keep it, for example in the `App`. Every new
+`Shape` is stored again and never freed, so don't build one in `view`:
+
+```rust
+struct MyApp { close: Shape }
+
+impl App for MyApp {
+    fn view(&self) -> Element {
+        icon_button(&self.close).on_click(|_| {}).into()
+    }
+}
+
+fn main() {
+    let close = Shape::from_bytes(include_bytes!("../assets/icons/close.path"));
+    dfui::run(MyApp { close });
+}
+```
+
+An icon is one shape in one color, set with `.color()`; the SVG's colors are
+dropped. Fills and strokes convert. `<text>` and embedded images are skipped
+without a warning (an SVG of only text gives an empty shape), and a directory
+is read without its subdirectories.
 
 ## Web
 
