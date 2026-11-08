@@ -9,11 +9,12 @@ use dfui::anim::Morph;
 use dfui::taffy::{AvailableSpace, Size};
 use dfui::widgets::{
     Overlay, Shown, Styled, bottom_sheet, button, column, container, dialog, drawer, dropdown,
-    icon, icon_button, image, overlays, progress, radio, row, scroll, segmented, slider, snackbar,
-    spacer, spinner, stacked_progress, tabs, text, text_input, toggle, tooltip, wait_bar,
+    icon, icon_button, image, overlays, progress, provide, radio, row, scroll, segmented, slider,
+    snackbar, spacer, spinner, stacked_progress, tabs, text, text_input, toggle, tooltip, wait_bar,
 };
 use dfui::{
-    App, Bench, Bitmap, Color, Element, Event, Font, PaintCx, Path, Rect, Shape, Text, Widget,
+    App, Bench, Bitmap, Color, Element, Event, Font, PaintCx, Path, Rect, Role, Shape, Text, Theme,
+    Widget,
 };
 use image::{Rgba, RgbaImage};
 
@@ -221,6 +222,49 @@ fn disabled_button_is_dimmed() {
     };
     let mut b = bench(v, (160.0, 60.0));
     check("button_disabled", &b.shot(SCALE));
+}
+
+fn night() -> Theme {
+    Theme {
+        background: Color::hex(0x14130f),
+        surface: Color::hex(0x24211b),
+        ink: Color::hex(0xf4efe2),
+        muted: Color::hex(0xb4ab98),
+        accent: Color::hex(0xe0b44c),
+        on_accent: Color::hex(0x14130f),
+        selected: Color::hex(0x3a3528),
+        track: Color::hex(0x4a463e),
+        outline: Color::hex(0x7a7468),
+        divider: Color::hex(0x3a3528),
+        inverse: Color::hex(0xf4efe2),
+        on_inverse: Color::hex(0x14130f),
+    }
+}
+
+#[test]
+fn a_theme_restyles_widgets_and_their_content() {
+    let v = || {
+        let page = container(
+            column([
+                text("Plain text").into(),
+                button(text("Button")).into(),
+                toggle(false).into(),
+                text_input("Input").into(),
+                dropdown(["Apple", "Banana"], 1).into(),
+                container(column([text("In a dialog").into()]))
+                    .bg(Role::Surface)
+                    .content(Role::Ink)
+                    .padding(8.0)
+                    .into(),
+            ])
+            .gap(8.0),
+        )
+        .bg(Role::Background)
+        .padding(8.0);
+        provide(night(), page).into()
+    };
+    let mut b = bench(v, (200.0, 300.0));
+    check("custom_theme", &b.shot(SCALE));
 }
 
 #[test]

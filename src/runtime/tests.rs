@@ -6,9 +6,10 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
+use crate::Theme;
 use crate::path::{Path, Shape};
 use crate::text::Font;
-use crate::widget::{Scope, Widget};
+use crate::widget::{PaintCx, Scope, Widget};
 use crate::widgets::{
     Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon, icon_button, on_back,
     overlays, popup, provide, radio, row, scroll, segmented, slider, snackbar, spacer, stateful,
@@ -314,6 +315,59 @@ fn long_dropdown_opens_at_the_selected_option() {
         row.y >= menu.y && row.y + row.h <= menu.y + menu.h,
         "{row:?} outside {menu:?}"
     );
+}
+
+#[derive(Clone, Default)]
+struct AccentProbe(Rc<Cell<Color>>);
+
+impl Widget for AccentProbe {
+    fn style(&self) -> taffy::Style {
+        taffy::Style {
+            size: taffy::Size::from_lengths(10.0, 10.0),
+            ..taffy::Style::default()
+        }
+    }
+    fn paint(&self, cx: &mut PaintCx) {
+        self.0.set(cx.theme.accent);
+    }
+}
+
+struct Themed([AccentProbe; 3]);
+
+const APP_ACCENT: Color = Color::hex(0x112233);
+const INNER_ACCENT: Color = Color::hex(0x445566);
+
+impl App for Themed {
+    fn view(&self) -> Element {
+        let [a, b, c] = self.0.clone();
+        let inner = Theme {
+            accent: INNER_ACCENT,
+            ..Theme::default()
+        };
+        column([
+            Element::new(a),
+            provide(inner, column([Element::new(b)])).into(),
+            Element::new(c),
+        ])
+        .into()
+    }
+    fn theme(&self) -> Theme {
+        Theme {
+            accent: APP_ACCENT,
+            ..Theme::default()
+        }
+    }
+}
+
+#[test]
+fn a_provided_theme_applies_only_inside_its_subtree() {
+    let probes: [AccentProbe; 3] = Default::default();
+    let mut rt = Runtime::new(Themed(probes.clone()));
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.scene(&mut false);
+    let seen = probes.map(|p| p.0.get());
+    assert_eq!(seen, [APP_ACCENT, INNER_ACCENT, APP_ACCENT]);
 }
 
 fn damage_after<A: App>(

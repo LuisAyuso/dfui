@@ -9,8 +9,9 @@ use unicode_segmentation::UnicodeSegmentation;
 use web_time::Instant;
 
 use super::Styled;
-use crate::render::{Color, Rect};
+use crate::render::Rect;
 use crate::text::{Font, Text};
+use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, Key, PaintCx, Widget};
 
 type OnChange = Box<dyn Fn(&mut EventCx, String)>;
@@ -34,8 +35,8 @@ pub struct TextInput {
     placeholder: String,
     font: Font,
     size: f32,
-    color: Color,
-    accent: Color,
+    color: Ink,
+    accent: Ink,
     password: bool,
     on_change: Option<OnChange>,
     style: Style,
@@ -48,8 +49,8 @@ pub fn text_input(value: impl Into<String>) -> TextInput {
         placeholder: String::new(),
         font: Font::DEFAULT,
         size: 16.0,
-        color: Color::BLACK,
-        accent: Color::hex(0x3b6fe0),
+        color: Role::Ink.into(),
+        accent: Role::Accent.into(),
         password: false,
         on_change: None,
         style: Style {
@@ -82,12 +83,12 @@ impl TextInput {
         self.size = s;
         self
     }
-    pub fn color(mut self, c: Color) -> Self {
-        self.color = c;
+    pub fn color(mut self, c: impl Into<Ink>) -> Self {
+        self.color = c.into();
         self
     }
-    pub fn accent(mut self, c: Color) -> Self {
-        self.accent = c;
+    pub fn accent(mut self, c: impl Into<Ink>) -> Self {
+        self.accent = c.into();
         self
     }
     /// Shows a dot per char and doesn't copy.
@@ -199,12 +200,13 @@ impl Widget for TextInput {
     }
     fn paint(&self, cx: &mut PaintCx) {
         let r = cx.rect;
+        let (color, accent) = (cx.color(self.color), cx.color(self.accent));
         let (bw, bc) = if cx.focused {
-            (2.0, self.accent)
+            (2.0, accent)
         } else {
-            (1.0, Color::hex(0xc9ccd6))
+            (1.0, cx.theme.outline)
         };
-        cx.fill_bordered(r, 8.0, Color::WHITE, bw, bc);
+        cx.fill_bordered(r, 8.0, cx.theme.surface, bw, bc);
 
         let c = self.content(r);
         let (caret, anchor) = self.caret(cx.state.get::<Caret>());
@@ -214,10 +216,10 @@ impl Widget for TextInput {
             if cx.focused && caret != anchor {
                 let (a, b) = (stops[caret.min(anchor)], stops[caret.max(anchor)]);
                 let sel = Rect::new(c.x + a - shift, c.y, b - a, h);
-                cx.fill(sel, 0.0, self.accent.alpha(0.25));
+                cx.fill(sel, 0.0, accent.alpha(0.25));
             }
             if self.value.is_empty() {
-                let muted = self.color.alpha(0.4);
+                let muted = color.alpha(0.4);
                 cx.text(
                     &self.placeholder,
                     self.font,
@@ -231,7 +233,7 @@ impl Widget for TextInput {
                     &self.shown(),
                     self.font,
                     self.size,
-                    self.color,
+                    color,
                     None,
                     (c.x - shift, c.y),
                 );
@@ -242,7 +244,7 @@ impl Widget for TextInput {
                 let phase = now.saturating_duration_since(start).as_millis() / BLINK.as_millis();
                 if phase.is_multiple_of(2) {
                     let x = c.x + stops[caret] - shift;
-                    cx.fill(Rect::new(x, c.y, 1.5, h), 0.0, self.accent);
+                    cx.fill(Rect::new(x, c.y, 1.5, h), 0.0, accent);
                 }
                 cx.request_frame_at(start + BLINK * (phase as u32 + 1));
             }

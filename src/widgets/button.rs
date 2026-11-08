@@ -7,6 +7,7 @@ use super::Styled;
 use super::label::Emphasis;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Shadow};
+use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
 type Handler = Box<dyn Fn(&mut EventCx)>;
@@ -53,7 +54,7 @@ pub struct Button {
     child: [Element; 1],
     on_click: Option<Handler>,
     style: Style,
-    color: Color,
+    color: Ink,
     radius: f32,
     flat: bool,
     enabled: bool,
@@ -78,11 +79,15 @@ pub fn button(child: impl Into<Element>) -> Button {
             justify_content: JustifyContent::CENTER,
             ..Style::default()
         },
-        color: Color::hex(0x3b6fe0),
+        color: Role::Accent.into(),
         radius: 8.0,
         flat: false,
         enabled: true,
-        emphasis: Emphasis::default(),
+        emphasis: Emphasis(
+            Default::default(),
+            Default::default(),
+            Role::OnAccent.into(),
+        ),
     }
 }
 
@@ -92,8 +97,8 @@ impl Button {
         self.on_click = Some(Box::new(f));
         self
     }
-    pub fn color(mut self, c: Color) -> Self {
-        self.color = c;
+    pub fn color(mut self, c: impl Into<Ink>) -> Self {
+        self.color = c.into();
         self
     }
     pub fn radius(mut self, r: f32) -> Self {
@@ -148,7 +153,7 @@ impl Widget for Button {
             cx.request_frame();
         }
         let k = 1.0.lerp(0.9, hover).lerp(0.75, press);
-        let c = self.color;
+        let c = cx.color(self.color);
         let fill = Color {
             r: c.r * k,
             g: c.g * k,

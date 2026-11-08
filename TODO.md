@@ -81,8 +81,8 @@ Widgets:
 - [x] `tabs` slots sized by their labels (plus a share of the spare width),
       so underline and taps match what's drawn; the selected label morphs
       to bold. Tab bars wider than the window still overflow (clipped).
-- [ ] `tabs`/`segmented` styling: label font, size and colors, and the
-      divider color are fixed for a light theme (see Theming).
+- [ ] `tabs`/`segmented` styling: colors follow the `Theme`; label font and
+      size are still fixed.
 - [x] Progress: `progress(v)`, `stacked_progress` (several fractions in
       one bar, smaller on top), `wait_bar()` and `spinner()` for waits of
       unknown length.
@@ -185,9 +185,8 @@ Widgets:
 
 Theming:
 
-- [ ] `dialog`, `bottom_sheet` and `dropdown` are white with dark text on a
-      dark app: content inside them must use dark ink and its own key
-      colors. Part of Theming.
+- [x] `dialog`, `bottom_sheet` and `dropdown` are white with dark text on a
+      dark app: they now follow the `Theme` (`docs/theming.md`).
 
 ## Design studies (need discussion before code)
 
@@ -232,7 +231,8 @@ Theming:
       without one (FLIP offsets).
 - [x] Timed wakeups (`PaintCx::request_frame_at`): the caret blink sleeps
       between toggles instead of painting every frame.
-- [ ] Theming: shared colors/sizes instead of per-widget constants.
+- [x] Theming: `Theme` of named colors, from `App::theme` or `provide`
+      (`docs/theming.md`). Sizes and fonts are still per-widget.
 - [x] Images: app-decoded `Bitmap`s, a texture and draw each; demo
       gallery downloads from placehold.co.
 - [ ] Image follow-ups: mipmaps, fit modes (contain/cover), a decode

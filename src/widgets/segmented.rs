@@ -9,6 +9,7 @@ use super::label::weight;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::text::{Font, Text};
+use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
 type OnChange = Box<dyn Fn(&mut EventCx, usize)>;
@@ -21,10 +22,6 @@ const SIZE: f32 = 15.0;
 /// (DejaVu Sans Bold is up to ~8 px wider at this size); spare width is
 /// shared out on top.
 const TAB_PAD: f32 = 5.0;
-const INK: Color = Color::hex(0x1d2030);
-const MUTED: Color = Color::hex(0x6b7080);
-const TRACK: Color = Color::hex(0xe8e9ef);
-const DIVIDER: Color = Color::hex(0xdfe1e8);
 
 #[derive(Clone, Copy, PartialEq, Hash)]
 enum Look {
@@ -57,7 +54,7 @@ pub struct Segmented {
     labels: Vec<String>,
     selected: usize,
     look: Look,
-    accent: Color,
+    accent: Ink,
     on_change: Option<OnChange>,
     style: Style,
 }
@@ -71,7 +68,7 @@ pub fn segmented<S: Into<String>>(
         labels: labels.into_iter().map(Into::into).collect(),
         selected,
         look: Look::Segmented,
-        accent: Color::hex(0x3b6fe0),
+        accent: Role::Accent.into(),
         on_change: None,
         style: Style {
             padding: taffy::Rect::length(3.0),
@@ -97,8 +94,8 @@ impl Segmented {
         self.on_change = Some(Box::new(f));
         self
     }
-    pub fn accent(mut self, c: Color) -> Self {
-        self.accent = c;
+    pub fn accent(mut self, c: impl Into<Ink>) -> Self {
+        self.accent = c.into();
         self
     }
 
@@ -161,7 +158,8 @@ impl Segmented {
 
     /// A tab's label at weight `t`, centered in its slot.
     fn tab_label(&self, cx: &mut PaintCx, l: &str, t: f32, slot: (f32, f32), y: f32) {
-        weight(cx, l, SIZE, MUTED.lerp(self.accent, t), t, slot, y);
+        let c = cx.theme.muted.lerp(cx.color(self.accent), t);
+        weight(cx, l, SIZE, c, t, slot, y);
     }
 }
 
@@ -219,7 +217,7 @@ impl Widget for Segmented {
         let (x, w) = (ax.lerp(bx, f), aw.lerp(bw, f));
         match self.look {
             Look::Segmented => {
-                cx.fill(r, 9.0, TRACK);
+                cx.fill(r, 9.0, cx.theme.track);
                 let ind = Rect::new(x, c.y, w, c.h);
                 let sh = Shadow {
                     color: Color::BLACK.alpha(0.15),
@@ -227,11 +225,19 @@ impl Widget for Segmented {
                     blur: 3.0,
                 };
                 cx.shadow(ind, 7.0, sh);
-                cx.fill(ind, 7.0, Color::WHITE);
+                cx.fill(ind, 7.0, cx.theme.surface);
             }
             Look::Tabs => {
-                cx.fill(Rect::new(r.x, r.y + r.h - 1.0, r.w, 1.0), 0.0, DIVIDER);
-                cx.fill(Rect::new(x, r.y + r.h - 3.0, w, 3.0), 1.5, self.accent);
+                cx.fill(
+                    Rect::new(r.x, r.y + r.h - 1.0, r.w, 1.0),
+                    0.0,
+                    cx.theme.divider,
+                );
+                cx.fill(
+                    Rect::new(x, r.y + r.h - 3.0, w, 3.0),
+                    1.5,
+                    cx.color(self.accent),
+                );
             }
         }
         let y = c.y + self.look.pad_y();
@@ -242,7 +248,8 @@ impl Widget for Segmented {
                     Look::Segmented => {
                         let lw = cx.text.layout(l, Font::DEFAULT, SIZE, None).width;
                         let lx = slot.0 + (slot.1 - lw) / 2.0;
-                        cx.text(l, Font::DEFAULT, SIZE, INK, None, (lx, y));
+                        let ink = cx.theme.ink;
+                        cx.text(l, Font::DEFAULT, SIZE, ink, None, (lx, y));
                     }
                 }
             }

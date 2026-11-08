@@ -9,12 +9,14 @@ use super::Styled;
 use crate::anim::{Lerp, Morph};
 use crate::render::Color;
 use crate::text::{Font, Text};
+use crate::theme::Ink;
 use crate::widget::{BuildCx, Element, PaintCx, Widget};
 
-/// How far toward bold an ancestor wants its labels, 0..=1, and whether to
-/// dim them; a button sets these before its children paint.
+/// How far toward bold an ancestor wants its labels, 0..=1, whether to dim
+/// them, and their default color; a button sets the first two before its
+/// children paint.
 #[derive(Clone, Default)]
-pub(crate) struct Emphasis(pub Rc<Cell<f32>>, pub Rc<Cell<bool>>);
+pub(crate) struct Emphasis(pub Rc<Cell<f32>>, pub Rc<Cell<bool>>, pub Ink);
 
 #[derive(Default)]
 struct LabelState {
@@ -25,7 +27,7 @@ pub struct Label {
     text: String,
     font: Font,
     size: f32,
-    color: Color,
+    color: Ink,
     max_lines: Option<usize>,
     style: Style,
 }
@@ -36,7 +38,7 @@ pub fn text(s: impl Into<String>) -> Label {
         text: s.into(),
         font: Font::DEFAULT,
         size: 16.0,
-        color: Color::BLACK,
+        color: Ink::Content,
         max_lines: None,
         style: Style::default(),
     }
@@ -51,8 +53,8 @@ impl Label {
         self.size = s;
         self
     }
-    pub fn color(mut self, c: Color) -> Self {
-        self.color = c;
+    pub fn color(mut self, c: impl Into<Ink>) -> Self {
+        self.color = c.into();
         self
     }
     /// At most `n` lines; cut text ends in "…".
@@ -111,10 +113,18 @@ impl Widget for Label {
         cx.state.get::<LabelState>().emphasis = cx.scope.get::<Emphasis>().cloned();
     }
     fn paint(&self, cx: &mut PaintCx) {
-        let (r, s, c) = (cx.rect, self.size, self.color);
+        let (r, s) = (cx.rect, self.size);
         let st = cx.state.get::<LabelState>();
-        let t = st.emphasis.as_ref().map_or(0.0, |e| e.0.get());
-        let dim = st.emphasis.as_ref().is_some_and(|e| e.1.get());
+        let (t, dim, content) = st
+            .emphasis
+            .as_ref()
+            .map_or((0.0, false, Ink::Content), |e| (e.0.get(), e.1.get(), e.2));
+        let ink = if self.color == Ink::Content {
+            content
+        } else {
+            self.color
+        };
+        let c = cx.color(ink);
         let c = if dim { c.alpha(c.a * 0.5) } else { c };
         let regular = std::ptr::eq(self.font.0, Font::DEFAULT.0);
         if t > 0.0 && regular && self.max_lines.is_none() && !self.text.contains('\n') {

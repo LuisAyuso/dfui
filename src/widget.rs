@@ -228,6 +228,7 @@ pub struct PaintCx<'a> {
     pub rect: Rect,
     pub clip: Rect,
     pub focused: bool,
+    pub theme: &'a crate::Theme,
     pub state: &'a mut State,
     pub(crate) scene: &'a mut Scene,
     pub(crate) text: &'a mut Text,
@@ -238,6 +239,15 @@ pub struct PaintCx<'a> {
 }
 
 impl PaintCx<'_> {
+    /// `ink` in this widget's theme.
+    pub fn color(&self, ink: impl Into<crate::Ink>) -> Color {
+        match ink.into() {
+            crate::Ink::Fixed(c) => c,
+            crate::Ink::Role(r) => self.theme.color(r),
+            crate::Ink::Content => self.theme.ink,
+        }
+    }
+
     /// Rebuild the tree after this frame, for widgets that build their
     /// children from what is on screen (a virtualized list scrolled past
     /// the rows it built).

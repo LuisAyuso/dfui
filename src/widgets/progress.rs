@@ -9,10 +9,9 @@ use crate::anim::{Animated, ease};
 use crate::path::{Path, Point, Quad};
 use crate::render::{Color, Rect};
 use crate::text::Text;
+use crate::theme::{Ink, Role};
 use crate::widget::{Element, PaintCx, Widget};
 
-const ACCENT: Color = Color::hex(0x3b6fe0);
-const TRACK: Color = Color::hex(0xd5d8e0);
 /// How long a determinate bar eases to a new value.
 const STEP: Duration = Duration::from_millis(250);
 /// One sweep of the wait bar.
@@ -32,24 +31,26 @@ struct ProgressState {
 /// none, a segment sweeping across while the length of a wait is unknown.
 pub struct Progress {
     /// Fractions in 0..=1, each with its color.
-    layers: Vec<(f32, Color)>,
-    accent: Color,
-    track: Color,
+    layers: Vec<(f32, Ink)>,
+    accent: Ink,
+    track: Ink,
     style: Style,
 }
 
 /// A bar filled to `value` in 0..=1; changes ease in.
 pub fn progress(value: f32) -> Progress {
-    stacked_progress([(value, ACCENT)])
+    let mut p = wait_bar();
+    p.layers.push((value, Role::Accent.into()));
+    p
 }
 
 /// Several fractions in one bar, e.g. played over buffered, or tasks running
 /// at different speeds. Smaller values are drawn on top, so each shows.
 pub fn stacked_progress(layers: impl IntoIterator<Item = (f32, Color)>) -> Progress {
     Progress {
-        layers: layers.into_iter().collect(),
-        accent: ACCENT,
-        track: TRACK,
+        layers: layers.into_iter().map(|(v, c)| (v, c.into())).collect(),
+        accent: Role::Accent.into(),
+        track: Role::Track.into(),
         style: Style::default(),
     }
 }
@@ -61,15 +62,16 @@ pub fn wait_bar() -> Progress {
 
 impl Progress {
     /// Color of a single-value bar or the wait bar's segment.
-    pub fn accent(mut self, c: Color) -> Self {
+    pub fn accent(mut self, c: impl Into<Ink>) -> Self {
+        let c = c.into();
         self.accent = c;
         if let [(_, color)] = self.layers.as_mut_slice() {
             *color = c;
         }
         self
     }
-    pub fn track(mut self, c: Color) -> Self {
-        self.track = c;
+    pub fn track(mut self, c: impl Into<Ink>) -> Self {
+        self.track = c.into();
         self
     }
 }
@@ -107,7 +109,7 @@ impl Widget for Progress {
     }
     fn paint(&self, cx: &mut PaintCx) {
         let (now, r) = (cx.now, cx.rect);
-        cx.fill(r, r.h / 2.0, self.track);
+        cx.fill(r, r.h / 2.0, cx.color(self.track));
         let s = cx.state.get::<ProgressState>();
         if self.layers.is_empty() {
             let t = now.saturating_duration_since(*s.start.get_or_insert(now));
@@ -116,7 +118,8 @@ impl Widget for Progress {
             // out of the left edge and shrinks into the right one.
             let (tail, head) = (p * p * p, ease::out_cubic(p));
             cx.request_frame();
-            return segment(cx, r, tail, head, self.accent);
+            let accent = cx.color(self.accent);
+            return segment(cx, r, tail, head, accent);
         }
         s.shown.resize_with(self.layers.len(), Animated::default);
         let mut shown = Vec::with_capacity(self.layers.len());
@@ -129,7 +132,8 @@ impl Widget for Progress {
         }
         shown.sort_by(|a, b| b.0.total_cmp(&a.0));
         for (v, color) in shown {
-            segment(cx, r, 0.0, v, color);
+            let c = cx.color(color);
+            segment(cx, r, 0.0, v, c);
         }
     }
 }
@@ -138,7 +142,7 @@ impl Widget for Progress {
 /// centre: it draws in from the outer end, then retracts the same way.
 pub struct Spinner {
     size: f32,
-    color: Color,
+    color: Ink,
     style: Style,
 }
 
@@ -146,7 +150,7 @@ pub struct Spinner {
 pub fn spinner() -> Spinner {
     Spinner {
         size: 24.0,
-        color: ACCENT,
+        color: Role::Accent.into(),
         style: Style::default(),
     }
 }
@@ -156,8 +160,8 @@ impl Spinner {
         self.size = px;
         self
     }
-    pub fn color(mut self, c: Color) -> Self {
-        self.color = c;
+    pub fn color(mut self, c: impl Into<Ink>) -> Self {
+        self.color = c.into();
         self
     }
 }
@@ -289,7 +293,7 @@ impl Widget for Spinner {
             r: self.size / 2.0 - 0.5,
         };
         if u1 - u0 > 1e-3 {
-            cx.path(&spiral.stroke(u0, u1), self.color);
+            cx.path(&spiral.stroke(u0, u1), cx.color(self.color));
         }
         cx.request_frame();
     }

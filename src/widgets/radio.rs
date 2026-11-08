@@ -6,12 +6,12 @@ use super::Styled;
 use super::button::Tap;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect};
+use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
 type Handler = Box<dyn Fn(&mut EventCx)>;
 
 const GROW: Duration = Duration::from_millis(140);
-const RING: Color = Color::hex(0x9a9fb0);
 const DOT: f32 = 20.0;
 const GAP: f32 = 10.0;
 
@@ -27,7 +27,7 @@ struct RadioState {
 pub struct Radio {
     child: [Element; 1],
     selected: bool,
-    accent: Color,
+    accent: Ink,
     on_select: Option<Handler>,
     style: Style,
 }
@@ -37,7 +37,7 @@ pub fn radio(selected: bool, child: impl Into<Element>) -> Radio {
     Radio {
         child: [child.into()],
         selected,
-        accent: Color::hex(0x3b6fe0),
+        accent: Role::Accent.into(),
         on_select: None,
         style: Style {
             padding: taffy::Rect {
@@ -62,8 +62,8 @@ impl Radio {
         self.on_select = Some(Box::new(f));
         self
     }
-    pub fn accent(mut self, c: Color) -> Self {
-        self.accent = c;
+    pub fn accent(mut self, c: impl Into<Ink>) -> Self {
+        self.accent = c.into();
         self
     }
 }
@@ -97,13 +97,14 @@ impl Widget for Radio {
             cx.request_frame();
         }
         let ring = Rect::new(r.x, r.y + (r.h - DOT) / 2.0, DOT, DOT);
-        let c = RING.lerp(self.accent, t);
+        let accent = cx.color(self.accent);
+        let c = cx.theme.outline.lerp(accent, t);
         cx.fill_bordered(ring, DOT / 2.0, Color::TRANSPARENT, 2.0, c);
         let d = 10.0 * t;
         if d > 0.0 {
             let o = (DOT - d) / 2.0;
             let dot = Rect::new(ring.x + o, ring.y + o, d, d);
-            cx.fill(dot, d / 2.0, self.accent);
+            cx.fill(dot, d / 2.0, accent);
         }
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {

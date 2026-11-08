@@ -7,9 +7,9 @@ use super::list::{List, Rows, Thunk};
 use super::{Stateful, Styled, button, container, row, spacer, stateful, text};
 use crate::model::{Row, TreeModel, flatten};
 use crate::render::Color;
+use crate::theme::Role;
 use crate::widget::{Element, Handle};
 
-const INK: Color = Color::hex(0x1d2030);
 const INDENT: f32 = 20.0;
 const TOGGLE: f32 = 36.0;
 
@@ -47,7 +47,7 @@ where
                 button(
                     text(if r.expanded { "▾" } else { "▸" })
                         .size(16.0)
-                        .color(INK),
+                        .color(Role::Ink),
                 )
                 .flat()
                 .color(Color::TRANSPARENT)

@@ -1,56 +1,111 @@
 # Theming
 
-Study of how other UI frameworks handle theming and what dfui should take from
-them. The proposed design is under "Proposed design"; nothing here is built yet.
+How dfui colors its widgets, and how other UI frameworks approach the same
+problem.
 
-## Summary
+## What dfui does
 
-dfui should add a `Theme` of 12 named color roles, inherited through the
-`provide` mechanism it already has. This is the Compose and Flutter model cut
-down to what two real apps use.
+A `Theme` is a plain struct of 12 named colors. Widgets refer to these colors
+by role and resolve them when they paint, so one value restyles everything
+under it. dfui ships a single light default; an application defines its own look
+by building a `Theme`.
 
-- Widgets store a role and resolve it while painting, which sidesteps
-  constructors having no access to the tree.
-- `Theme::light()` stays the default, so existing apps and goldens don't change.
-- A dark app becomes one line: `Theme { accent: GOLD, ..Theme::dark() }`.
-- Skipped for now: typography, per-component themes, tonal palettes and animated
-  switching.
+```rust
+impl App for MyApp {
+    fn view(&self) -> Element { /* ... */ }
+    fn theme(&self) -> Theme {
+        Theme {
+            background: Color::hex(0x14130f),
+            surface: Color::hex(0x24211b),
+            ink: Color::hex(0xf4efe2),
+            accent: Color::hex(0xe0b44c),
+            on_accent: Color::hex(0x14130f),
+            ..Theme::default()
+        }
+    }
+}
+```
 
-Three decisions are still open, listed under "Open questions".
+### Roles
 
-## The problem today
+| Role | Used for | Default |
+| --- | --- | --- |
+| `background` | The window | `0xffffff` |
+| `surface` | Dialogs, sheets, menus, input fields, thumbs | `0xffffff` |
+| `ink` | Text on `background` and `surface` | `0x1d2030` |
+| `muted` | Secondary text | `0x6b7080` |
+| `accent` | Buttons, active controls, focus | `0x3b6fe0` |
+| `on_accent` | Text on `accent` | `0xffffff` |
+| `selected` | The chosen row of a menu | `0xe8eefc` |
+| `track` | Behind sliders, progress bars, segments | `0xd5d8e0` |
+| `outline` | Input borders, unchecked toggles and radios | `0x9a9fb0` |
+| `divider` | Lines in tables and tabs | `0xdfe1e8` |
+| `inverse` | Snackbars and tooltips | `0x323232` |
+| `on_inverse` | Text on `inverse` | `0xffffff` |
 
-dfui's look is spread over 46 lines of hardcoded colors in 13 widget files, all
-assuming a light app. Both real apps are dark, so they work around it at nearly
-every call.
+The default theme's text roles reach the
+[WCAG AA contrast of 4.5:1](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)
+against their backgrounds, and a test holds them to it.
 
-| Finding | Evidence (dfui at `3bd6a18`) |
+### Setting colors
+
+Color setters such as `.color()`, `.bg()`, `.border()` and `.accent()` take
+anything that converts into an `Ink`:
+
+```rust
+pub enum Ink { Fixed(Color), Role(Role), Content }
+
+button(text("Delete")).color(Color::hex(0xc0392b)); // one fixed color
+container(body).bg(Role::Surface);                  // follows the theme
+```
+
+`Ink::Content` is the default for `text` and `icon`. It uses the color meant to
+contrast with what surrounds the widget: `on_accent` inside a button, or
+whatever a container declares with `.content(..)`. With no such ancestor it is
+the theme's `ink`.
+
+### Scope
+
+The theme comes from `App::theme`. `provide` replaces it for a subtree, using
+the same mechanism as any other provided value:
+
+```rust
+provide(Theme { accent: red, ..Theme::default() }, panel)
+```
+
+`App::theme` is read every frame, like `App::background`, whose default is the
+theme's `background`. Application-specific colors need no theme support: an app
+can `provide` a struct of its own and read it through `Scope`.
+
+### How a color reaches the screen
+
+Constructors such as `button()` and the closure of `stateful` run outside the
+tree, so they can't look up an inherited value. Widgets therefore store an `Ink`
+and resolve it at paint time:
+
+1. Before painting, the runtime walks the nodes in pre-order. Each node takes
+   its parent's theme, or the `Theme` it provides.
+2. `PaintCx::theme` gives each widget its resolved theme, and `PaintCx::color`
+   turns an `Ink` into a `Color`.
+3. Hover, press and disabled looks are derived from the resolved color.
+
+### What is left out
+
+| Omitted | Reason |
 | --- | --- |
-| Accent has no single source | `0x3b6fe0` is written separately in `button`, `toggle`, `slider`, `radio`, `segmented`, `text_input` and `progress` |
-| Ink has no single source | `INK = 0x1d2030` is declared four times: `segmented`, `table`, `tree`, `overlay` |
-| Overlays are locked to white | `dialog`, `bottom_sheet` and `dropdown` paint white with dark text, inside dark apps |
-| Some colors can't be overridden | `tabs` and `segmented` expose no color for label, track or divider |
-| Only the window background is app-level | `App::background()` is the one theme-like hook |
+| Built-in dark or other presets | Applications supply their own theme |
+| Following the system dark setting | A theme is an explicit choice of the application |
+| Fonts, spacing, corner radius | Colors only so far; each can become a field |
+| Per-component themes | `.color()` on the widget covers individual overrides |
+| Generated palettes | A theme is exactly the colors it lists |
+| Animated theme changes | A new theme applies on the next frame |
 
-The cost shows in the apps:
-
-- **bbteam** declares its own palette (`BG`, `SURFACE`, `INK`, `MUTED`, `GOLD`,
-  `DANGER`) and makes 130 `.color(..)` calls.
-- **The music app** repeats the pattern with `BG`, `INK`, `MUTED`, `ACCENT` and
-  27 `.color(..)` calls.
-- **bbteam copies dfui's light values back** (`DARK = 0x1d2030`,
-  `KEY = 0xe8e9ef`) so its content stays readable on dfui's white overlays.
-
-One constraint shapes the design. Constructors such as `button()` and the
-`stateful` closure run with no access to the tree, so they can't read an
-inherited value. `provide` and `Scope` already deliver inherited values, but
-only to `Widget::expand`, which is how `Label` reads a button's press state.
-
-## How other frameworks do theming
+## Other frameworks
 
 The tree-based frameworks converge on one pattern: named color roles, inherited
-down the tree, overridable for a subtree. Rust's immediate-mode and Elm-style
-toolkits have no comparable tree scope, or pin the look at build time.
+down the tree, overridable for a subtree. Immediate-mode and Elm-style toolkits
+tend to keep the style in a context or in style functions, and some fix it at
+build time.
 
 | Framework | What a theme holds | How widgets get it | Override for a subtree | Override one widget |
 | --- | --- | --- | --- | --- |
@@ -62,156 +117,22 @@ toolkits have no comparable tree scope, or pin the look at build time.
 | [iced](https://docs.rs/iced/latest/iced/theme/index.html) | `Theme` over a six-color [`Palette`](https://docs.rs/iced_core/latest/iced_core/theme/palette/struct.Palette.html): background, text, primary, success, warning, danger | Style functions and a per-widget `Catalog` trait | Not confirmed from the pages read | [Named styles](https://docs.rs/iced_widget/latest/iced_widget/button/index.html) such as `primary` and `danger`, or a `StyleFn` |
 | [Slint](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/style/) | Compiled style such as `fluent` or `material`, with `-light` and `-dark` variants | `Palette` and `StyleMetrics` globals | Not offered on the page read | Component properties |
 
-Details that matter for dfui:
-
-- **Paired colors.** Material 3 pairs each background with an "on" color.
-  Compose's `LocalContentColor` makes text inside a `Surface` contrast
-  automatically.
-- **Good defaults.** Google's guidance is that a `CompositionLocal` should have
-  a good default, so tests and previews work without setup. It should also be
-  used only for tree-scoped concerns.
-- **Rebuild cost.** Compose offers `staticCompositionLocalOf` for values that
-  rarely change: a change recomposes the whole subtree, and reads aren't tracked.
-- **App-defined tokens.** Flutter has `ThemeExtension`, keyed by type. dfui's
-  `provide` is already keyed by type.
-- **Semantic names.** MDN recommends names like `--main-text-color` over names
-  that describe the value.
-
 The SwiftUI row is from general knowledge, because Apple's reference page body
 wasn't readable when this was written.
 
-## What to take and what to skip
+Ideas from these that shaped dfui:
 
-Take Compose's model at a tenth of its size: a small set of named roles,
-inherited through the existing `provide`, with content colors paired to
-surfaces.
+- **Paired colors.** Material 3 pairs each background with an "on" color, and
+  Compose's `LocalContentColor` makes text inside a `Surface` contrast
+  automatically. dfui's `on_accent` and `Ink::Content` follow this.
+- **A good default.** Google's guidance is that a `CompositionLocal` should have
+  a good default, so tests and previews work without setup, and should be used
+  only for tree-scoped concerns.
+- **Application tokens.** Flutter has `ThemeExtension`, keyed by type. dfui's
+  `provide` is already keyed by type, so no extension point was needed.
+- **Semantic names.** MDN recommends names like `--main-text-color` over names
+  that describe the value.
+- **A small palette.** iced manages with six base colors, against 45 in
+  Flutter's `colorScheme`.
 
-| Idea | Seen in | Verdict for dfui | Why |
-| --- | --- | --- | --- |
-| Named color roles | Compose, Flutter, iced, CSS | Take | Fixes the seven copies of accent and four of ink |
-| Inherited, nearest ancestor wins | Flutter, Compose, SwiftUI, CSS | Take | `provide` and `Scope` already work this way |
-| Paired content color | Compose | Take | Removes most of the `.color(INK)` calls in both apps |
-| Light default without setup | Compose guidance | Take | Existing apps and goldens keep working |
-| Light and dark presets | All | Take | Both real apps are dark |
-| App-defined tokens | Flutter `ThemeExtension` | Already covered | Apps call `provide` with their own type |
-| Small palette | iced (6 colors) | Take the size | The audit needs about 12 roles; Flutter's 45 is far more than two apps use |
-| Per-component themes | Flutter | Skip | `.color()` on the widget covers the need so far |
-| Per-state style tables | egui | Skip | dfui derives hover and press from the base color |
-| Tonal palettes, dynamic color | Material 3 | Skip | Needs a color algorithm and no app has asked |
-| Animated theme change | Flutter `AnimatedTheme` | Skip for now | Nothing switches themes at runtime yet |
-| Compile-time styles | Slint | Reject | dfui needs per-subtree overrides |
-
-## Proposed design
-
-A `Theme` struct of named colors, delivered by `provide`, with each widget
-storing a role instead of a color and resolving it at paint time.
-
-### Roles
-
-| Role | Used for | Today (light) | bbteam equivalent |
-| --- | --- | --- | --- |
-| `background` | Window | `WHITE` | `BG` |
-| `surface` | Dialog, sheet, menu | `WHITE` | `SURFACE` |
-| `ink` | Text on background and surface | `0x1d2030` | `INK` |
-| `muted` | Secondary text | `0x6b7080` | `MUTED` |
-| `accent` | Buttons, toggles, focus | `0x3b6fe0` | `GOLD` |
-| `on_accent` | Text on accent | Black, from `text` | `BG` |
-| `selected` | Chosen menu row | `0xe8eefc` | None yet |
-| `track` | Slider, progress, tab track | `0xd5d8e0`, `0xe8e9ef` | `CHIP` |
-| `outline` | Input border, radio ring, toggle off | `0xc9ccd6`, `0x9a9fb0` | `EDGE` |
-| `divider` | Tables, tabs | `0xdfe1e8` | None yet |
-| `inverse` | Snackbar, tooltip | `0x323232`, `0x404040` | None yet |
-| `danger` | Destructive actions | None | `DANGER` |
-
-### API sketch
-
-```rust
-#[derive(Clone)]
-pub struct Theme { pub background: Color, pub surface: Color, pub ink: Color, /* roles above */ }
-
-impl Theme {
-    pub fn light() -> Self;
-    pub fn dark() -> Self;
-}
-
-pub enum Role { Background, Surface, Ink, Muted, Accent, /* roles above */ }
-
-pub enum Ink { Fixed(Color), Role(Role), Content }
-impl From<Color> for Ink { /* Fixed */ }
-impl From<Role> for Ink { /* Role */ }
-
-pub trait App {
-    fn view(&self) -> Element;
-    fn theme(&self) -> Theme { Theme::light() }
-}
-
-// One app, one line:
-fn theme(&self) -> Theme { Theme { accent: GOLD, ..Theme::dark() } }
-
-// A subtree, using what exists today:
-provide(Theme::light(), receipt_view())
-
-// A widget, unchanged:
-button(text("Delete")).color(DANGER)
-```
-
-### How a color reaches the screen
-
-1. `App::theme` seeds the root of the `provide` stack, so a `Theme` is always
-   found.
-2. The layout walk records the nearest `Theme` on each node, which is one `Rc`
-   clone per node.
-3. `PaintCx` exposes that theme, so widgets resolve their `Ink` while painting.
-4. A theme change comes through the normal rebuild, and the existing scene diff
-   repaints what changed.
-
-Step 3 is what removes the constructor problem: `button()` stores a role and
-never needs the tree. Composites work the same way, so `dropdown` writes
-`.bg(Role::Surface)` inside its `stateful` closure.
-
-### Content color
-
-Buttons and surfaces provide the color their text should use, and a `Label` with
-no explicit color reads it. `Button` already provides `Emphasis` to its labels,
-so this extends that value. `Widget::provide` returns a single value per widget,
-which is enough for now.
-
-### Non-goals
-
-Typography, spacing and corner radius stay out of the first version. Neither app
-has asked to change them, and each can be added as a `Theme` field later.
-
-## Rollout
-
-The work splits into four steps, each landing on its own, and the first changes
-no pixels.
-
-1. **Plumbing, no visual change.** Add `Theme`, `Ink`, `App::theme` and
-   `PaintCx` access, then move each widget's constants to roles. All 20 goldens
-   must pass untouched.
-2. **Dark overlays.** Fill in `Theme::dark()` and resolve `dialog`,
-   `bottom_sheet`, `dropdown`, `tabs` and `segmented` through it. Add dark
-   goldens for each.
-3. **Content color.** Labels pick up the color of the surface or button around
-   them.
-4. **Migrate the apps.** Convert the music app, then bbteam, deleting their
-   workaround constants. Put bbteam in git first.
-
-Tests to add:
-
-- A preset contrast check: every text role against its background reaches
-  [4.5:1](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html), the
-  WCAG AA minimum for normal text. Disabled controls are exempt.
-- A nested `provide(Theme::light(), ..)` inside a dark app resolves to light,
-  and only inside that subtree.
-
-## Open questions
-
-- [ ] Merge the two `track` values (`0xd5d8e0`, `0xe8e9ef`) and the two `outline`
-      values into one each? Merging means re-blessing goldens once.
-- [ ] Should `Theme::dark()` follow the system setting, or stay an explicit app
-      choice? Neither app needs system following today.
-- [ ] Should `on_accent` default to black to match today's goldens, or white for
-      contrast on `0x3b6fe0`?
-- [ ] Is colors-only right for the first version, or should corner radius and
-      fonts be in `Theme` from the start?
+Pages opened on 2026-11-08 are linked above.

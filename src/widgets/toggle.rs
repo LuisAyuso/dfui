@@ -6,12 +6,12 @@ use super::Styled;
 use super::button::Tap;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect, Shadow};
+use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
 type OnChange = Box<dyn Fn(&mut EventCx, bool)>;
 
 const SLIDE: Duration = Duration::from_millis(160);
-const OFF: Color = Color::hex(0xc9ccd6);
 
 #[derive(Default)]
 struct ToggleState {
@@ -23,7 +23,7 @@ struct ToggleState {
 /// Controlled on/off switch: shows `on`, reports taps via `on_change`.
 pub struct Toggle {
     on: bool,
-    accent: Color,
+    accent: Ink,
     on_change: Option<OnChange>,
     style: Style,
 }
@@ -32,7 +32,7 @@ pub struct Toggle {
 pub fn toggle(on: bool) -> Toggle {
     Toggle {
         on,
-        accent: Color::hex(0x3b6fe0),
+        accent: Role::Accent.into(),
         on_change: None,
         style: Style {
             size: Size {
@@ -51,8 +51,8 @@ impl Toggle {
         self.on_change = Some(Box::new(f));
         self
     }
-    pub fn accent(mut self, c: Color) -> Self {
-        self.accent = c;
+    pub fn accent(mut self, c: impl Into<Ink>) -> Self {
+        self.accent = c.into();
         self
     }
 }
@@ -82,7 +82,11 @@ impl Widget for Toggle {
         if s.pos.running(now) {
             cx.request_frame();
         }
-        cx.fill(r, r.h / 2.0, OFF.lerp(self.accent, t));
+        cx.fill(
+            r,
+            r.h / 2.0,
+            cx.theme.outline.lerp(cx.color(self.accent), t),
+        );
         let d = r.h - 6.0;
         let thumb = Rect::new(r.x + 3.0 + t * (r.w - d - 6.0), r.y + 3.0, d, d);
         let sh = Shadow {
@@ -91,7 +95,7 @@ impl Widget for Toggle {
             blur: 2.0,
         };
         cx.shadow(thumb, d / 2.0, sh);
-        cx.fill(thumb, d / 2.0, Color::WHITE);
+        cx.fill(thumb, d / 2.0, cx.theme.surface);
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
         let mut tap = std::mem::take(&mut cx.state.get::<ToggleState>().tap);

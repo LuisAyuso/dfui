@@ -13,6 +13,7 @@ use super::{
 use crate::anim::{Animated, ease};
 use crate::render::{Color, Shadow};
 use crate::runtime::task::{self, sleep};
+use crate::theme::Role;
 use crate::widget::{
     Element, Event, EventCx, Handle, Layer, PaintCx, Placement, Scope, State, Widget,
 };
@@ -33,7 +34,6 @@ const LINGER: Duration = Duration::from_millis(1500);
 const MENU_MAX_HEIGHT: f32 = 320.0;
 
 const SCRIM: Color = Color::BLACK.alpha(0.4);
-const INK: Color = Color::hex(0x1d2030);
 const SHADOW: Shadow = Shadow {
     color: Color::BLACK.alpha(0.25),
     offset: (0.0, 4.0),
@@ -340,7 +340,8 @@ impl Widget for Sink {
 
 fn card(child: impl Into<Element>) -> Container {
     container(child)
-        .bg(Color::WHITE)
+        .bg(Role::Surface)
+        .content(Role::Ink)
         .radius(16.0)
         .padding(24.0)
         .shadow(SHADOW)
@@ -385,8 +386,8 @@ pub fn bottom_sheet(child: impl Into<Element>) -> Overlay {
 /// leave and is removed after; in a plain tree give it a new `key` to show
 /// it again.
 pub fn snackbar(message: impl Into<String>) -> Overlay {
-    let bar = container(text(message).size(14.0).color(Color::WHITE))
-        .bg(Color::hex(0x323232))
+    let bar = container(text(message).size(14.0).color(Role::OnInverse))
+        .bg(Role::Inverse)
         .radius(8.0)
         .padding_xy(16.0, 14.0);
     let mut o = overlay(bar)
@@ -556,8 +557,8 @@ impl Widget for OnBack {
 
 /// Shows `tip` above `child` while the pointer is over it.
 pub fn tooltip(child: impl Into<Element>, tip: impl Into<String>) -> Container {
-    let tip = container(text(tip).size(13.0).color(Color::WHITE))
-        .bg(Color::hex(0x404040))
+    let tip = container(text(tip).size(13.0).color(Role::OnInverse))
+        .bg(Role::Inverse)
         .radius(6.0)
         .padding_xy(8.0, 4.0);
     let mut p = layer(Layer::Parent, Style::default(), beside(true), tip.into());
@@ -601,23 +602,23 @@ impl From<Dropdown> for Element {
                 move |v: bool| move |cx: &mut EventCx| cx.update(h, move |o: &mut bool| *o = v);
             let field = button(
                 row([
-                    text(&labels[selected]).color(INK).into(),
-                    text("▾").color(INK).into(),
+                    text(&labels[selected]).color(Role::Ink).into(),
+                    text("▾").color(Role::Ink).into(),
                 ])
                 .gap(8.0),
             )
-            .color(Color::hex(0xe8e9ef))
+            .color(Role::Track)
             .on_click(set(!open));
             let menu = {
                 let last = labels.len().saturating_sub(1);
                 let items = labels.iter().enumerate().map(|(i, l)| {
                     let f = on_change.clone();
                     let bg = if i == selected {
-                        Color::hex(0xe8eefc)
+                        Role::Selected
                     } else {
-                        Color::WHITE
+                        Role::Surface
                     };
-                    button(text(l).color(INK))
+                    button(text(l).color(Role::Ink))
                         .color(bg)
                         .flat()
                         .radius(6.0)
@@ -636,7 +637,7 @@ impl From<Dropdown> for Element {
                     options = options.start_at(selected as f32 / last.max(1) as f32);
                 }
                 let list = column([options.into()])
-                    .bg(Color::WHITE)
+                    .bg(Role::Surface)
                     .radius(8.0)
                     .padding(4.0)
                     .shadow(SHADOW);

@@ -590,6 +590,13 @@ impl<A: App> Runtime<A> {
         );
         self.text.outlines.begin_frame();
         let mut spans = Vec::with_capacity(nodes.len());
+        let app_theme = self.app.theme();
+        let mut themes: Vec<&crate::Theme> = Vec::with_capacity(nodes.len());
+        for n in &nodes {
+            let inherited = n.parent.map_or(&app_theme, |p| themes[p]);
+            let provided = n.w.provide().and_then(|v| v.downcast_ref());
+            themes.push(provided.unwrap_or(inherited));
+        }
         for &i in &self.order {
             let (n, p) = (&nodes[i], &self.placed[i]);
             let start = scene.len();
@@ -602,6 +609,7 @@ impl<A: App> Runtime<A> {
                 rect: p.rect,
                 clip: p.clip,
                 focused: self.focused == Some(n.id),
+                theme: themes[i],
                 state: self.states.entry(n.id).or_default(),
                 scene: &mut scene,
                 text: &mut self.text,

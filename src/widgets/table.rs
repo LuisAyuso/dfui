@@ -6,12 +6,8 @@ use taffy::{AlignItems, JustifyContent};
 use super::list::{List, Rows, Thunk};
 use super::{Stateful, Styled, button, column, container, row, spacer, stateful, text};
 use crate::model::ListModel;
-use crate::render::Color;
+use crate::theme::Role;
 use crate::widget::Element;
-
-const INK: Color = Color::hex(0x1d2030);
-const HEADER: Color = Color::hex(0xe8e9ef);
-const DIVIDER: Color = Color::hex(0xdfe1e8);
 
 type Cell<T> = Rc<dyn Fn(&T) -> Element>;
 type Cmp<T> = Rc<dyn Fn(&T, &T) -> Ordering>;
@@ -83,8 +79,11 @@ where
         Rc::new(move || {
             let cells = columns.iter().map(|c| c.sized((c.cell)(&item)));
             column([
-                row(cells).align(AlignItems::CENTER).bg(Color::WHITE).into(),
-                spacer().height(1.0).bg(DIVIDER).into(),
+                row(cells)
+                    .align(AlignItems::CENTER)
+                    .bg(Role::Surface)
+                    .into(),
+                spacer().height(1.0).bg(Role::Divider).into(),
             ])
             .into()
         })
@@ -115,7 +114,9 @@ where
                 Some((s, true)) if s == i => " ▼",
                 _ => "",
             };
-            let label = text(format!("{}{arrow}", c.title)).size(14.0).color(INK);
+            let label = text(format!("{}{arrow}", c.title))
+                .size(14.0)
+                .color(Role::Ink);
             if c.cmp.is_none() {
                 return c.sized(label);
             }
@@ -129,7 +130,7 @@ where
             let tap = button(label)
                 .flat()
                 .radius(0.0)
-                .color(HEADER)
+                .color(Role::Track)
                 .on_click(move |cx| cx.update(h, next))
                 .padding(0.0)
                 .justify(JustifyContent::START);
@@ -140,6 +141,10 @@ where
             order,
             columns: columns.clone(),
         };
-        column([row(header).bg(HEADER).into(), List::new(rows).fill().into()]).fill()
+        column([
+            row(header).bg(Role::Track).into(),
+            List::new(rows).fill().into(),
+        ])
+        .fill()
     })
 }

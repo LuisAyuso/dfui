@@ -9,6 +9,7 @@ pub mod path;
 mod render;
 mod runtime;
 mod text;
+mod theme;
 mod widget;
 pub mod widgets;
 
@@ -19,6 +20,7 @@ pub use runtime::task::{Notifier, Sleep, sleep};
 pub use runtime::{Bench, GpuBench, snapshot};
 pub use taffy;
 pub use text::{Font, Text, TextLayout};
+pub use theme::{Ink, Role, Theme};
 pub use web_time::Instant;
 pub use widget::{
     BuildCx, Element, Event, EventCx, Handle, Key, Layer, PaintCx, Placement, Scope, State, Widget,
@@ -28,9 +30,13 @@ pub use widget::{
 /// that builders read; `view` runs again whenever any of it changes.
 pub trait App: 'static {
     fn view(&self) -> Element;
+    /// Colors for the whole app, read every frame.
+    fn theme(&self) -> Theme {
+        Theme::default()
+    }
     /// Window background, read every frame.
     fn background(&self) -> Color {
-        Color::WHITE
+        self.theme().background
     }
 }
 

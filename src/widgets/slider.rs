@@ -7,12 +7,12 @@ use super::Styled;
 use crate::anim::{Animated, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::text::Text;
+use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
 type OnChange = Box<dyn Fn(&mut EventCx, f32)>;
 
 const THUMB: f32 = 22.0;
-const TRACK: Color = Color::hex(0xd5d8e0);
 /// Thumb scale while dragged.
 const GRAB: f32 = 1.2;
 const GROW: Duration = Duration::from_millis(120);
@@ -28,7 +28,7 @@ struct SliderState {
 pub struct Slider {
     value: f32,
     range: RangeInclusive<f32>,
-    accent: Color,
+    accent: Ink,
     on_change: Option<OnChange>,
     style: Style,
 }
@@ -38,7 +38,7 @@ pub fn slider(value: f32, range: RangeInclusive<f32>) -> Slider {
     Slider {
         value,
         range,
-        accent: Color::hex(0x3b6fe0),
+        accent: Role::Accent.into(),
         on_change: None,
         style: Style::default(),
     }
@@ -50,8 +50,8 @@ impl Slider {
         self.on_change = Some(Box::new(f));
         self
     }
-    pub fn accent(mut self, c: Color) -> Self {
-        self.accent = c;
+    pub fn accent(mut self, c: impl Into<Ink>) -> Self {
+        self.accent = c.into();
         self
     }
 
@@ -104,8 +104,12 @@ impl Widget for Slider {
         let (x0, len) = Self::track(r);
         let cy = r.y + r.h / 2.0;
         let x = x0 + self.fraction() * len;
-        cx.fill(Rect::new(x0, cy - 2.0, len, 4.0), 2.0, TRACK);
-        cx.fill(Rect::new(x0, cy - 2.0, x - x0, 4.0), 2.0, self.accent);
+        cx.fill(Rect::new(x0, cy - 2.0, len, 4.0), 2.0, cx.theme.track);
+        cx.fill(
+            Rect::new(x0, cy - 2.0, x - x0, 4.0),
+            2.0,
+            cx.color(self.accent),
+        );
         let thumb = Rect::new(x - d / 2.0, cy - d / 2.0, d, d);
         let sh = Shadow {
             color: Color::BLACK.alpha(0.25),
@@ -113,7 +117,7 @@ impl Widget for Slider {
             blur: 3.0,
         };
         cx.shadow(thumb, d / 2.0, sh);
-        cx.fill_bordered(thumb, d / 2.0, Color::WHITE, 1.0, TRACK);
+        cx.fill_bordered(thumb, d / 2.0, cx.theme.surface, 1.0, cx.theme.track);
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
         let dragging = cx.state.get::<SliderState>().dragging;
