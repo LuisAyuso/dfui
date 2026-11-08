@@ -60,7 +60,8 @@ impl Host for Window {
         // threads get cancelled. Explicit, since Android ignores implicit ones once the user hid it.
         self.app.run_on_java_main_thread(Box::new(move || match on {
             true => app.show_soft_input(false),
-            false => app.hide_soft_input(true),
+            // Not implicit-only, which leaves an explicitly shown keyboard up.
+            false => app.hide_soft_input(false),
         }));
     }
 }
