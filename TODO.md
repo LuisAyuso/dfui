@@ -183,6 +183,34 @@ Theming:
 - [x] `dialog`, `bottom_sheet` and `dropdown` are white with dark text on a
       dark app: they now follow the `Theme` (`docs/theming.md`).
 
+## From the code review
+- [x] Shape storage: equal shapes share one copy, and shapes not drawn for 600
+      painted frames give their space back.
+- [ ] Android editor: `deleteSurroundingText` ignores text after the caret; no
+      `setComposingRegion` or `setSelection`.
+- [ ] `editor::set_keyboard` and the light-bars call post `with_activity` to the
+      Java thread, where the activity may already be gone. From reading only.
+- [ ] A stream that is always ready never yields: `task::drive` and
+      `stream_builder`'s drain loop can hang the UI. From reading only.
+- [ ] A touch cancelled by the system leaves `pressed` set (`overlay.rs`).
+- [ ] Tab bars can't scroll when their labels don't fit (`segmented.rs`).
+- [ ] Long functions: `Runtime::dispatch`, `Renderer::new`, `Renderer::draw`,
+      `layout::measure`, `text_input::event`.
+- [ ] List ghosts are recognized by `position == Absolute` (`Slot::inert`);
+      use an explicit flag.
+- [ ] Test hooks in production code: `ime_requests` on `Runtime`, the settable
+      clock, `Bench` and `GpuBench` in the public API.
+- [ ] Public API: `Event` and `Key` aren't `#[non_exhaustive]`; `taffy` types
+      are exposed, so a `taffy` upgrade breaks apps.
+- [ ] Remaining panics: invalid font data, window creation, and `Bitmap`'s size
+      check can overflow `u32`.
+- [ ] Duplicated cubic-to-quadratic splitting in `outline.rs` and `svg2path`.
+- [ ] Tests: goldens only run on the reference machine (a tolerance or a pinned
+      software GPU would let CI run them); pattern tests use fixed coordinates.
+- [ ] Benches for `list`, `table` and typing; compare phone numbers against
+      the earlier baseline.
+- [ ] Docs: 178 undocumented public items; `site/pages/concepts.md` is a stub.
+
 ## Design studies (need discussion before code)
 
 - [x] Global state management: messages removed; `provide` injects

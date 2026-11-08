@@ -186,8 +186,9 @@ Characters the font lacks fall back to `Font::DEFAULT`.
 ## Icons (`path.rs`, `widgets/icon.rs`)
 
 A `Shape` is a `Path` (contours of quads, logical px, y down) plus a `view`
-box, like an SVG `viewBox`. `Text::draw_shape` stores it once per shape id
-in the same buffers as glyphs:
+box, like an SVG `viewBox`. `Text::draw_shape` stores equal shapes once, in the
+same buffers as glyphs, and reuses the space of shapes not drawn for 600 painted
+frames:
 
 ```
  view box, y down          unit box, y up            any target rect

@@ -622,7 +622,7 @@ impl<A: App> Runtime<A> {
             Color::TRANSPARENT,
             all,
         );
-        self.text.outlines.begin_frame();
+        self.text.begin_frame();
         let mut spans = Vec::with_capacity(nodes.len());
         let app_theme = self.app.theme();
         let mut themes: Vec<&crate::Theme> = Vec::with_capacity(nodes.len());

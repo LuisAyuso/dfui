@@ -9,7 +9,7 @@ use read_fonts::model::Font as Face;
 use read_fonts::types::GlyphId;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::outline::Outlines;
+use crate::outline::{Block, Outlines};
 use crate::path::{Path, Shape};
 use crate::render::{Color, Rect, Scene};
 
@@ -54,6 +54,12 @@ struct Glyph {
     bands: [f32; 3],
 }
 
+struct StoredShape {
+    /// `None` for a shape with nothing to fill.
+    stored: Option<(Glyph, Block)>,
+    drawn: u64,
+}
+
 /// Index into `Text::faces`.
 type FaceId = usize;
 
@@ -86,9 +92,10 @@ pub struct Text {
     plans: RefCell<Vec<(FaceId, Rc<ShapePlan>)>>,
     buffer: RefCell<Option<Buffer>>,
     glyphs: HashMap<(FaceId, GlyphId), Option<Glyph>>,
-    /// `Shape`s by id, stored like glyphs in units of the view's larger side.
-    // ponytail: never evicted; fine for icon sets, add eviction if apps make shapes per frame.
-    shapes: HashMap<u64, Option<Glyph>>,
+    /// `Shape`s by content, stored like glyphs in units of the view's larger side.
+    shapes: HashMap<u64, StoredShape>,
+    /// Counts painted frames, to age `shapes`.
+    frame: u64,
     /// Layouts by hash of (text, font, size, max width); `view` rebuilds the
     /// same strings every frame and taffy measures each label several times.
     layouts: RefCell<HashMap<u64, Cached>>,
@@ -103,6 +110,7 @@ impl Default for Text {
             buffer: RefCell::default(),
             glyphs: HashMap::new(),
             shapes: HashMap::new(),
+            frame: 0,
             layouts: RefCell::default(),
             outlines: Outlines::default(),
         };
@@ -123,7 +131,24 @@ fn line_box(f: &Face, size: f32) -> (f32, f32, f32) {
     )
 }
 
+/// Painted frames a shape survives without being drawn.
+const SHAPE_GRACE: u64 = 600;
+
 impl Text {
+    /// Frees the frame-scoped outlines; the runtime calls this before painting.
+    pub(crate) fn begin_frame(&mut self) {
+        self.outlines.begin_frame();
+        self.frame += 1;
+        let (frame, outlines) = (self.frame, &mut self.outlines);
+        self.shapes.retain(|_, s| {
+            let keep = frame - s.drawn < SHAPE_GRACE;
+            if !keep && let Some((_, block)) = s.stored.take() {
+                outlines.free(block);
+            }
+            keep
+        });
+    }
+
     fn face_id(&self, font: Font) -> FaceId {
         let ptr = font.0.as_ptr();
         let mut faces = self.faces.borrow_mut();
@@ -412,7 +437,7 @@ impl Text {
         if span <= 0.0 {
             return;
         }
-        let g = *self.shapes.entry(d.id).or_insert_with(|| {
+        let entry = self.shapes.entry(d.key).or_insert_with(|| {
             // Unit box, y up, like glyph em space.
             let unit = d
                 .path
@@ -421,15 +446,19 @@ impl Text {
                 .flatten()
                 .map(|q| q.map(|[x, y]| [(x - v.x) / span, (v.y + v.h - y) / span]));
             // Room for the antialiased edge of shapes that touch the view box.
-            let g = self.outlines.store(unit.collect(), 0.02)?;
-            let [x0, y0, x1, y1] = g.bbox;
-            Some(Glyph {
-                em: [x0, y1, x1, y0],
-                plane: Rect::new(x0, y0, x1 - x0, y1 - y0),
-                bands: [g.header as f32, g.bands_h as f32, g.bands_v as f32],
-            })
+            let stored = self.outlines.store(unit.collect(), 0.02).map(|(g, block)| {
+                let [x0, y0, x1, y1] = g.bbox;
+                let glyph = Glyph {
+                    em: [x0, y1, x1, y0],
+                    plane: Rect::new(x0, y0, x1 - x0, y1 - y0),
+                    bands: [g.header as f32, g.bands_h as f32, g.bands_v as f32],
+                };
+                (glyph, block)
+            });
+            StoredShape { stored, drawn: 0 }
         });
-        let Some(g) = g else { return };
+        entry.drawn = self.frame;
+        let Some((g, _)) = &entry.stored else { return };
         // Unit box to `r`; `plane` holds the bbox, y up.
         let (sx, sy) = (r.w * span / v.w, r.h * span / v.h);
         let top = v.h / span - (g.plane.y + g.plane.h);
@@ -541,6 +570,49 @@ mod tests {
             "Super…"
         );
         assert_eq!(t.truncate("line\nbreak", f, size, 1000.0, 1), "line…");
+    }
+
+    fn square(side: f32) -> Shape {
+        let sq = Path::polygon(&[[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]]);
+        Shape::new(sq, Rect::new(0.0, 0.0, 24.0, 24.0))
+    }
+
+    fn draw(t: &mut Text, shape: &Shape) -> Scene {
+        let mut scene = Scene::default();
+        let all = Rect::new(0.0, 0.0, 100.0, 100.0);
+        t.draw_shape(shape, all, Color::BLACK, all, &mut scene);
+        scene
+    }
+
+    #[test]
+    fn identical_shapes_share_their_storage() {
+        let mut t = Text::default();
+        draw(&mut t, &square(12.0));
+        let stored = t.outlines.curves.len();
+        for _ in 0..10 {
+            t.begin_frame();
+            draw(&mut t, &square(12.0));
+        }
+        assert_eq!(t.outlines.curves.len(), stored);
+    }
+
+    #[test]
+    fn shapes_no_longer_drawn_give_their_storage_back() {
+        let mut t = Text::default();
+        let kept = square(1.0);
+        let kept_at = draw(&mut t, &kept).instances[0].rect;
+        for i in 0..SHAPE_GRACE * 3 {
+            t.begin_frame();
+            draw(&mut t, &kept);
+            draw(&mut t, &square(2.0 + i as f32 / 100.0));
+        }
+        let peak = t.outlines.curves.len();
+        for i in 0..SHAPE_GRACE * 3 {
+            t.begin_frame();
+            assert_eq!(draw(&mut t, &kept).instances[0].rect, kept_at);
+            draw(&mut t, &square(1000.0 + i as f32 / 100.0));
+        }
+        assert_eq!(t.outlines.curves.len(), peak, "storage is reused");
     }
 
     #[test]

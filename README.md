@@ -58,8 +58,8 @@ cargo run -p svg2path -- icons/ assets/icons/   # a file or a directory
 cargo install --path tools/svg2path             # for use outside this repo
 ```
 
-Build each `Shape` once and keep it, for example in the `App`. Every new
-`Shape` is stored again and never freed, so don't build one in `view`:
+Build each `Shape` once and keep it, for example in the `App`, to avoid parsing
+it again in `view`:
 
 ```rust
 struct MyApp { close: Shape }

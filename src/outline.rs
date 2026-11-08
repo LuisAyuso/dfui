@@ -1,6 +1,8 @@
 //! Glyph outlines as monotonic quadratic Béziers plus per-glyph band lists; the
 //! fragment shader evaluates glyph coverage directly from these curves.
 
+use std::ops::Range;
+
 use read_fonts::model::Font;
 use read_fonts::model::glyph::outline::{DrawMemory, DrawOptions, PathSink};
 use read_fonts::types::GlyphId;
@@ -14,6 +16,40 @@ pub(crate) struct OutlineGlyph {
     pub bands_h: u32,
     pub bands_v: u32,
     pub bbox: [f32; 4],
+}
+
+/// Where a stored shape's data sits, to hand back to `Outlines::free`.
+pub(crate) struct Block {
+    curves: Range<usize>,
+    bands: Range<usize>,
+}
+
+/// Freed spans of a buffer, sorted and merged.
+#[derive(Default)]
+struct FreeList(Vec<Range<usize>>);
+
+impl FreeList {
+    /// Start of a span of `n` taken from the first one big enough.
+    fn take(&mut self, n: usize) -> Option<usize> {
+        let i = self.0.iter().position(|r| r.len() >= n)?;
+        let at = self.0[i].start;
+        self.0[i].start += n;
+        if self.0[i].is_empty() {
+            self.0.remove(i);
+        }
+        Some(at)
+    }
+
+    fn give(&mut self, r: Range<usize>) {
+        let i = self.0.partition_point(|f| f.start < r.start);
+        self.0.insert(i, r);
+        if i + 1 < self.0.len() && self.0[i].end == self.0[i + 1].start {
+            self.0[i].end = self.0.remove(i + 1).end;
+        }
+        if i > 0 && self.0[i - 1].end == self.0[i].start {
+            self.0[i - 1].end = self.0.remove(i).end;
+        }
+    }
 }
 
 /// Curves and band entries reserved at the front of the buffers for shapes
@@ -35,6 +71,8 @@ pub(crate) struct Outlines {
     transient: (usize, usize),
     /// Where stored data ends and this frame's overflow begins, as buffer lengths.
     stored: (usize, usize),
+    free_curves: FreeList,
+    free_bands: FreeList,
 }
 
 impl Default for Outlines {
@@ -46,6 +84,8 @@ impl Default for Outlines {
             transient_dirty: false,
             transient: (0, 0),
             stored: (2 * TRANSIENT_CURVES, TRANSIENT_BANDS),
+            free_curves: FreeList::default(),
+            free_bands: FreeList::default(),
         }
     }
 }
@@ -56,9 +96,44 @@ impl Outlines {
         self.insert(quads, 0.0, false)
     }
 
-    /// Stores closed contours (y up) for good, like a glyph.
-    pub fn store(&mut self, quads: Vec<Quad>, pad: f32) -> Option<OutlineGlyph> {
-        self.insert(quads, pad, false)
+    /// Stores closed contours (y up) until the returned block is freed,
+    /// reusing freed space when there is enough.
+    pub fn store(&mut self, raw: Vec<Quad>, pad: f32) -> Option<(OutlineGlyph, Block)> {
+        let quads = monotonic(raw)?;
+        let (_, sized) = build(&quads, pad, 0, 0);
+        let c = self.free_curves.take(quads.len());
+        let b = self.free_bands.take(sized.len());
+        let first = c.unwrap_or(self.curves.len() / 2);
+        let header = b.unwrap_or(self.bands.len());
+        let (glyph, bands) = build(&quads, pad, first as u32, header as u32);
+        let block = Block {
+            curves: first..first + quads.len(),
+            bands: header..header + bands.len(),
+        };
+        match c {
+            Some(_) => {
+                let dst = &mut self.curves[2 * block.curves.start..2 * block.curves.end];
+                for (d, s) in dst.iter_mut().zip(encode(&quads).flatten()) {
+                    *d = s;
+                }
+            }
+            None => self.curves.extend(encode(&quads).flatten()),
+        }
+        match b {
+            Some(_) => self.bands[block.bands.clone()].copy_from_slice(&bands),
+            None => self.bands.extend(bands),
+        }
+        if c.is_none() || b.is_none() {
+            self.stored = (self.curves.len(), self.bands.len());
+        }
+        self.dirty = true;
+        Some((glyph, block))
+    }
+
+    /// Makes a stored shape's space reusable; nothing may draw it afterwards.
+    pub fn free(&mut self, block: Block) {
+        self.free_curves.give(block.curves);
+        self.free_bands.give(block.bands);
     }
 
     /// Frees the transient region; the runtime calls this before painting.
@@ -75,14 +150,7 @@ impl Outlines {
     }
 
     fn insert(&mut self, raw: Vec<Quad>, pad: f32, transient: bool) -> Option<OutlineGlyph> {
-        let mut quads = Vec::new();
-        for q in raw {
-            split_monotonic(q, &mut quads);
-        }
-        if quads.is_empty() {
-            return None;
-        }
-
+        let quads = monotonic(raw)?;
         if transient {
             let (c, b) = self.transient;
             let (glyph, bands) = build(&quads, pad, c as u32, b as u32);
@@ -119,6 +187,15 @@ impl Outlines {
             &self.bands[..TRANSIENT_BANDS],
         )
     }
+}
+
+/// `raw` split into monotonic pieces; `None` if nothing is left.
+fn monotonic(raw: Vec<Quad>) -> Option<Vec<Quad>> {
+    let mut quads = Vec::new();
+    for q in raw {
+        split_monotonic(q, &mut quads);
+    }
+    (!quads.is_empty()).then_some(quads)
 }
 
 fn encode(quads: &[Quad]) -> impl Iterator<Item = [[f32; 4]; 2]> + '_ {

@@ -1,7 +1,7 @@
 //! Filled outlines drawn the same way as glyphs.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::render::Rect;
 
@@ -40,13 +40,14 @@ impl Path {
 
 /// A `Path` stored on the GPU once, like a glyph, and drawn into any rect
 /// with `PaintCx::shape`: scaling it costs nothing. Use it for icons and
-/// other shapes drawn every frame; cheap to clone. Build one and keep it:
-/// each new `Shape` is stored again and never freed.
+/// other shapes drawn every frame; cheap to clone. Equal shapes share their
+/// storage, which is reused once a shape hasn't been drawn for a while.
 #[derive(Clone)]
 pub struct Shape(pub(crate) Rc<ShapeData>);
 
 pub(crate) struct ShapeData {
-    pub id: u64,
+    /// Hash of the path and view; equal shapes share their storage.
+    pub key: u64,
     pub path: Path,
     pub view: Rect,
 }
@@ -76,9 +77,14 @@ impl Shape {
     /// `path` with `view` as the box that `PaintCx::shape` maps onto its
     /// target rect, like an SVG `viewBox`.
     pub fn new(path: Path, view: Rect) -> Shape {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        Shape(Rc::new(ShapeData { id, path, view }))
+        let mut h = DefaultHasher::new();
+        let bits = [view.x, view.y, view.w, view.h];
+        let quads = path.contours.iter().flatten().flatten().flatten();
+        for v in bits.iter().chain(quads) {
+            v.to_bits().hash(&mut h);
+        }
+        let key = h.finish();
+        Shape(Rc::new(ShapeData { key, path, view }))
     }
 
     pub fn view(&self) -> Rect {
