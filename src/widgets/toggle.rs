@@ -98,9 +98,7 @@ impl Widget for Toggle {
         cx.fill(thumb, d / 2.0, cx.theme.surface);
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
-        let mut tap = std::mem::take(&mut cx.state.get::<ToggleState>().tap);
-        let fire = tap.event(ev, cx);
-        cx.state.get::<ToggleState>().tap = tap;
+        let (fire, _) = Tap::feed(ev, cx, |s: &mut ToggleState| &mut s.tap);
         if fire && let Some(f) = &self.on_change {
             f(cx, !self.on);
         }

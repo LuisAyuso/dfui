@@ -69,9 +69,8 @@ Text:
       `PaintCx::truncate` for custom widgets.
 - [x] `Font::BOLD` (bundled DejaVu Sans Bold).
 - [x] `text_input(..).password()`: a dot per char, no copy or cut.
-- [ ] Input type hints for the Android keyboard (password, number, email):
-      android-activity's `set_ime_editor_info` is a no-op on NativeActivity,
-      which has no editor view to carry an `inputType`.
+- [x] Input type hints for the Android keyboard: `text_input(..).keyboard(..)`
+      (text, number, email, password); password fields turn off learning.
 
 Widgets:
 
@@ -129,8 +128,7 @@ Android:
       `InputConnection` (`inputType` text, Gboard's toolbar shows). Its dex is
       embedded and loaded at runtime (`scripts/android-dex.sh`), so apps need
       no Java or packaging. `commitText` and deletes reach `text_input`.
-- [ ] Editor view follow-ups: pass each field's input type (password, number,
-      email); send the text and selection to the `InputConnection`, so
+- [ ] Editor view follow-ups: send the text and selection to the `InputConnection`, so
       predictions and autocorrect see context (`getTextBeforeCursor` is empty);
       verify composing on a device with the on-screen keyboard.
 - [ ] Image picking needs app Java: an activity method that starts
@@ -170,9 +168,9 @@ Widgets:
       scrolls past a maximum height and opens at the selected option.
 - [x] Chips: `chip(label)` and a tappable `choice_chip(label, selected)`.
 - [x] Badge: `badge(child, label)`, a count over a corner of another widget.
-- [ ] Numeric text input: no number mode or maximum length (a one-digit
-      field keeps only the last digit typed, by hand). Ties into the input
-      type hints.
+- [ ] Numeric text input: `Keyboard::Number` shows digits, but there's no
+      filtering or maximum length (a one-digit field keeps only the last digit
+      typed, by hand).
 - [x] `stateful_with(init, build)`: state from an initial value, for forms
       over existing data; it needn't be `Default`.
 - [ ] The card stack (fold/unfold, kinetic scroll, shadows on the card

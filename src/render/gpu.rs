@@ -1,353 +1,13 @@
-use std::collections::{HashMap, HashSet};
-use std::f32::consts::FRAC_1_SQRT_2;
-use std::ops::Range;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::anim::Lerp;
 use crate::text::Text;
 
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct Color {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-    pub a: f32,
-}
-
-impl Color {
-    pub const TRANSPARENT: Color = Color {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
-        a: 0.0,
-    };
-    pub const WHITE: Color = Color {
-        r: 1.0,
-        g: 1.0,
-        b: 1.0,
-        a: 1.0,
-    };
-    pub const BLACK: Color = Color {
-        r: 0.0,
-        g: 0.0,
-        b: 0.0,
-        a: 1.0,
-    };
-
-    /// sRGB `0xRRGGBB`.
-    pub const fn hex(rgb: u32) -> Color {
-        Color {
-            r: ((rgb >> 16) & 0xff) as f32 / 255.0,
-            g: ((rgb >> 8) & 0xff) as f32 / 255.0,
-            b: (rgb & 0xff) as f32 / 255.0,
-            a: 1.0,
-        }
-    }
-
-    pub const fn alpha(self, a: f32) -> Color {
-        Color { a, ..self }
-    }
-
-    /// `self` at `t` 0, `to` at `t` 1, blended per channel, alpha included.
-    pub fn mix(self, to: Color, t: f32) -> Color {
-        self.lerp(to, t)
-    }
-
-    /// Moves `t` of the way to white, keeping alpha.
-    pub fn lighten(self, t: f32) -> Color {
-        self.mix(Color::WHITE.alpha(self.a), t)
-    }
-
-    /// Moves `t` of the way to black, keeping alpha.
-    pub fn darken(self, t: f32) -> Color {
-        self.mix(Color::BLACK.alpha(self.a), t)
-    }
-
-    fn rgba(self) -> [f32; 4] {
-        [self.r, self.g, self.b, self.a]
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-}
-
-impl Rect {
-    pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Rect {
-        Rect { x, y, w, h }
-    }
-
-    pub fn contains(&self, x: f32, y: f32) -> bool {
-        x >= self.x && y >= self.y && x < self.x + self.w && y < self.y + self.h
-    }
-
-    pub fn intersect(&self, o: &Rect) -> Rect {
-        let x = self.x.max(o.x);
-        let y = self.y.max(o.y);
-        let r = (self.x + self.w).min(o.x + o.w);
-        let b = (self.y + self.h).min(o.y + o.h);
-        Rect::new(x, y, (r - x).max(0.0), (b - y).max(0.0))
-    }
-
-    pub fn union(&self, o: &Rect) -> Rect {
-        let x = self.x.min(o.x);
-        let y = self.y.min(o.y);
-        let r = (self.x + self.w).max(o.x + o.w);
-        let b = (self.y + self.h).max(o.y + o.h);
-        Rect::new(x, y, r - x, b - y)
-    }
-}
-
-/// A rendered frame: sRGB RGBA8, row-major.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Pixels {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
-}
-
-#[cfg(test)]
-impl Pixels {
-    fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
-        let i = ((y * self.width + x) * 4) as usize;
-        self.rgba[i..i + 4].try_into().unwrap()
-    }
-}
-
-/// Immutable RGBA8 pixels, cheap to clone and safe to build on any thread.
-/// Decoding is up to the app; the GPU copy lives until the last clone drops.
-#[derive(Clone)]
-pub struct Bitmap(Arc<BitmapData>);
-
-struct BitmapData {
-    id: u32,
-    width: u32,
-    height: u32,
-    /// Premultiplied sRGB.
-    rgba: Box<[u8]>,
-}
-
-impl Bitmap {
-    /// Straight-alpha sRGB RGBA8, row-major, as image decoders produce it.
-    pub fn from_rgba8(width: u32, height: u32, mut rgba: Vec<u8>) -> Bitmap {
-        static NEXT: AtomicU32 = AtomicU32::new(1);
-        assert_eq!(rgba.len(), (width * height * 4) as usize, "rgba size");
-        for p in rgba.as_chunks_mut::<4>().0 {
-            let a = p[3] as u32;
-            for c in &mut p[..3] {
-                *c = ((*c as u32 * a + 127) / 255) as u8;
-            }
-        }
-        Bitmap(Arc::new(BitmapData {
-            id: NEXT.fetch_add(1, Ordering::Relaxed),
-            width,
-            height,
-            rgba: rgba.into(),
-        }))
-    }
-
-    pub fn width(&self) -> u32 {
-        self.0.width
-    }
-
-    pub fn height(&self) -> u32 {
-        self.0.height
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Shadow {
-    pub color: Color,
-    pub offset: (f32, f32),
-    pub blur: f32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub(crate) struct Instance {
-    pub(crate) rect: [f32; 4],
-    uv: [f32; 4],
-    color: [f32; 4],
-    border_color: [f32; 4],
-    params: [f32; 4],
-    clip: [f32; 4],
-}
-
-/// Flat list of distance-field primitives for one frame, in logical pixels.
-#[derive(Default)]
-pub struct Scene {
-    pub(crate) instances: Vec<Instance>,
-    /// Instance index of each image, in order, with the bitmap it samples.
-    bitmaps: Vec<(usize, Bitmap)>,
-}
-
-pub(crate) enum Outcome {
-    /// Drawn and presented; how long acquiring the frame blocked (vsync).
-    Presented(std::time::Duration),
-    /// Nothing changed, so nothing was presented.
-    Idle,
-    /// No frame could be acquired; the canvas is untouched.
-    Failed,
-}
-
-/// Which instances each node painted, by node id.
-pub(crate) type Spans = Vec<(u64, Range<usize>)>;
-
-impl Scene {
-    pub fn len(&self) -> usize {
-        self.instances.len()
-    }
-
-    /// Pixels the instances can touch: quad plus AA/blur padding, clipped.
-    fn bounds(&self, r: Range<usize>) -> Option<Rect> {
-        self.instances[r]
-            .iter()
-            .map(|i| {
-                let [x, y, w, h] = i.rect;
-                let glyph = i.params[3] > 0.5;
-                let pad = if glyph { 1.0 } else { i.params[2] + 1.0 };
-                let [cx, cy, cw, ch] = i.clip;
-                Rect::new(x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad)
-                    .intersect(&Rect::new(cx, cy, cw, ch))
-            })
-            .filter(|r| r.w > 0.0 && r.h > 0.0)
-            .reduce(|a, b| a.union(&b))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn shape(
-        &mut self,
-        r: Rect,
-        radius: f32,
-        fill: Color,
-        border: f32,
-        border_color: Color,
-        clip: Rect,
-    ) {
-        // An opaque shape right over a shadow (a card on its own shadow)
-        // hides what's under it; the shadow is drawn as a ring around that.
-        let opaque = fill.a >= 1.0 && (border <= 0.0 || border_color.a >= 1.0);
-        if opaque
-            && let Some(prev) = self.instances.last_mut()
-            && prev.params[3] == 0.0
-            && prev.params[2] > 0.0
-        {
-            // Inscribed in the rounded corners, minus 1px of edge antialiasing.
-            let k = radius.min(r.w.min(r.h) * 0.5) * (1.0 - FRAC_1_SQRT_2) + 1.0;
-            prev.uv = [
-                (r.x + k).max(clip.x),
-                (r.y + k).max(clip.y),
-                (r.x + r.w - k).min(clip.x + clip.w),
-                (r.y + r.h - k).min(clip.y + clip.h),
-            ];
-        }
-        self.instances.push(Instance {
-            rect: [r.x, r.y, r.w, r.h],
-            uv: [0.0; 4],
-            color: fill.rgba(),
-            border_color: border_color.rgba(),
-            params: [radius, border, 0.0, 0.0],
-            clip: [clip.x, clip.y, clip.w, clip.h],
-        });
-    }
-
-    pub fn shadow(&mut self, r: Rect, radius: f32, s: Shadow, clip: Rect) {
-        self.instances.push(Instance {
-            rect: [r.x + s.offset.0, r.y + s.offset.1, r.w, r.h],
-            uv: [0.0; 4],
-            color: s.color.rgba(),
-            border_color: [0.0; 4],
-            params: [radius, 0.0, s.blur.max(0.01), 0.0],
-            clip: [clip.x, clip.y, clip.w, clip.h],
-        });
-    }
-
-    pub(crate) fn glyph(
-        &mut self,
-        r: Rect,
-        em: [f32; 4],
-        color: Color,
-        clip: Rect,
-        bands: [f32; 3],
-    ) {
-        self.instances.push(Instance {
-            rect: [r.x, r.y, r.w, r.h],
-            uv: em,
-            color: color.rgba(),
-            border_color: [0.0; 4],
-            params: [bands[0], bands[1], bands[2], 1.0],
-            clip: [clip.x, clip.y, clip.w, clip.h],
-        });
-    }
-
-    /// `bitmap` stretched over `r`, with rounded corners, multiplied by `tint`.
-    pub fn image(&mut self, r: Rect, bitmap: &Bitmap, radius: f32, tint: Color, clip: Rect) {
-        self.bitmaps.push((self.instances.len(), bitmap.clone()));
-        self.instances.push(Instance {
-            rect: [r.x, r.y, r.w, r.h],
-            uv: [0.0, 0.0, 1.0, 1.0],
-            color: tint.rgba(),
-            // Only for the damage diff: a different bitmap means different bytes.
-            border_color: [f32::from_bits(bitmap.0.id), 0.0, 0.0, 0.0],
-            params: [radius, 0.0, 0.0, 2.0],
-            clip: [clip.x, clip.y, clip.w, clip.h],
-        });
-    }
-}
-
-/// Area that differs between two painted frames, or `None` if nothing does.
-/// Nodes are matched by id, so inserting one doesn't damage its later siblings.
-// ponytail: a pure z-order swap with identical instances isn't detected; hash sibling order if that ever matters.
-pub(crate) fn damage(
-    old: &Scene,
-    old_spans: &Spans,
-    new: &Scene,
-    new_spans: &Spans,
-) -> Option<Rect> {
-    fn bytes<'a>(s: &'a Scene, r: &Range<usize>) -> &'a [u8] {
-        bytemuck::cast_slice(&s.instances[r.clone()])
-    }
-    let prev: HashMap<u64, &Range<usize>> = old_spans.iter().map(|(id, r)| (*id, r)).collect();
-    let mut seen = HashSet::new();
-    let mut out: Option<Rect> = None;
-    let mut add = |r: Option<Rect>| {
-        if let Some(r) = r {
-            out = Some(out.map_or(r, |o| o.union(&r)));
-        }
-    };
-    // Instances before the first span (the background) belong to no node.
-    let lead = |s: &Scene, sp: &Spans| 0..sp.first().map_or(s.len(), |(_, r)| r.start);
-    let (lo, ln) = (lead(old, old_spans), lead(new, new_spans));
-    if bytes(old, &lo) != bytes(new, &ln) {
-        add(old.bounds(lo));
-        add(new.bounds(ln));
-    }
-    for (id, r) in new_spans {
-        seen.insert(*id);
-        match prev.get(id) {
-            Some(o) if bytes(old, o) == bytes(new, r) => {}
-            Some(o) => {
-                add(old.bounds((*o).clone()));
-                add(new.bounds(r.clone()));
-            }
-            None => add(new.bounds(r.clone())),
-        }
-    }
-    for (id, r) in old_spans {
-        if !seen.contains(id) {
-            add(old.bounds(r.clone()));
-        }
-    }
-    out
-}
+use super::*;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -499,7 +159,7 @@ fn image_group(
 }
 
 impl Gpu {
-    async fn new(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> Gpu {
+    async fn new(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> Result<Gpu, String> {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 // Outline text needs fragment-stage storage buffers (GLES 3.1+/Vulkan/WebGPU).
@@ -509,7 +169,7 @@ impl Gpu {
                 ..Default::default()
             })
             .await
-            .expect("request device");
+            .map_err(|e| format!("the GPU can't run dfui: {e}"))?;
 
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
@@ -588,7 +248,7 @@ impl Gpu {
         });
         let no_image = image_group(&device, &queue, &image_layout, &sampler, (1, 1), &[0; 4]);
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("../shader.wgsl"));
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[Some(&bgl), Some(&outline_layout), Some(&image_layout)],
@@ -637,7 +297,7 @@ impl Gpu {
             .features()
             .contains(wgpu::Features::TIMESTAMP_QUERY)
             .then(|| GpuTimer::new(&device));
-        Gpu {
+        Ok(Gpu {
             device,
             queue,
             pipeline,
@@ -654,7 +314,7 @@ impl Gpu {
             textures: HashMap::new(),
             empty: true,
             timer,
-        }
+        })
     }
 
     /// Reads back the last timestamp sample if its mapping has completed.
@@ -822,7 +482,10 @@ impl Gpu {
 
 /// The platform window a `Renderer` draws into.
 pub(crate) trait Host {
-    fn surface(&self, instance: &wgpu::Instance) -> wgpu::Surface<'static>;
+    fn surface(
+        &self,
+        instance: &wgpu::Instance,
+    ) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError>;
     /// Physical px.
     fn size(&self) -> (u32, u32);
     fn scale(&self) -> f32;
@@ -831,8 +494,8 @@ pub(crate) trait Host {
     fn refresh_mhz(&self) -> Option<u32> {
         None
     }
-    /// Shows or hides the soft keyboard.
-    fn set_ime(&self, _on: bool) {}
+    /// Shows the given soft keyboard, or hides it.
+    fn set_ime(&self, _keyboard: Option<crate::widget::Keyboard>) {}
 }
 
 pub(crate) struct Renderer {
@@ -872,7 +535,7 @@ fn canvas(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::T
 
 /// `d` (logical px) rounded out to physical pixels with a 2px margin for AA
 /// fringes, within a `size` target; zero-sized when nothing of it is inside.
-fn scissor(d: Rect, scale: f32, (w, h): (u32, u32)) -> [u32; 4] {
+pub(super) fn scissor(d: Rect, scale: f32, (w, h): (u32, u32)) -> [u32; 4] {
     if d.w <= 0.0 || d.h <= 0.0 {
         return [0; 4];
     }
@@ -886,15 +549,17 @@ fn scissor(d: Rect, scale: f32, (w, h): (u32, u32)) -> [u32; 4] {
 impl Renderer {
     /// Async because adapter and device requests are; on native they resolve
     /// on first poll, on the web they wait for the browser.
-    pub async fn new(instance: wgpu::Instance, window: Box<dyn Host>) -> Renderer {
-        let surface = window.surface(&instance);
+    pub async fn new(instance: wgpu::Instance, window: Box<dyn Host>) -> Result<Renderer, String> {
+        let surface = window
+            .surface(&instance)
+            .map_err(|e| format!("can't draw to this window: {e}"))?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
                 ..Default::default()
             })
             .await
-            .expect("no GPU adapter");
+            .map_err(|e| format!("no usable GPU: {e}"))?;
         let caps = surface.get_capabilities(&adapter);
         let format = caps
             .formats
@@ -904,7 +569,7 @@ impl Renderer {
             .unwrap_or(caps.formats[0]);
         // Blend in sRGB space like browsers do; linear blending makes AA edges look thin and stepped.
         let view_format = format.remove_srgb_suffix();
-        let gpu = Gpu::new(&adapter, view_format).await;
+        let gpu = Gpu::new(&adapter, view_format).await?;
         let (width, height) = window.size();
         let copyable = caps.usages.contains(wgpu::TextureUsages::COPY_DST);
         let config = wgpu::SurfaceConfiguration {
@@ -928,7 +593,7 @@ impl Renderer {
         };
         surface.configure(&gpu.device, &config);
         let canvas = copyable.then(|| canvas(&gpu.device, &config));
-        Renderer {
+        Ok(Renderer {
             surface,
             config,
             gpu,
@@ -937,7 +602,7 @@ impl Renderer {
             show_damage: std::env::var_os("DFUI_SHOW_DAMAGE").map(|_| 0),
             tinted: false,
             window,
-        }
+        })
     }
 
     pub fn window(&self) -> &dyn Host {
@@ -1079,7 +744,7 @@ impl Offscreen {
             );
             let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
                 .expect("no GPU adapter");
-            pollster::block_on(Gpu::new(&adapter, format))
+            pollster::block_on(Gpu::new(&adapter, format)).expect("request device")
         };
         let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
@@ -1197,198 +862,4 @@ pub(crate) fn render_offscreen(
         off.draw(scene, text, scale, scissor);
     }
     off.read()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn color_helpers_blend_and_keep_alpha() {
-        let c = Color::hex(0x336699).alpha(0.5);
-        assert_eq!(c.mix(Color::BLACK, 0.0), c);
-        assert_eq!(c.mix(Color::BLACK, 1.0), Color::BLACK);
-        assert_eq!(c.lighten(1.0), Color::WHITE.alpha(0.5));
-        assert_eq!(c.darken(1.0), Color::BLACK.alpha(0.5));
-        assert!((c.darken(0.5).g - c.g / 2.0).abs() < 1e-6);
-    }
-
-    fn solid(c: Color) -> Scene {
-        let mut s = Scene::default();
-        let all = Rect::new(0.0, 0.0, 40.0, 40.0);
-        s.shape(all, 0.0, c, 0.0, Color::TRANSPARENT, all);
-        s
-    }
-
-    #[test]
-    #[ignore = "needs a GPU"]
-    fn scissored_pass_only_touches_damage() {
-        let (red, blue) = (solid(Color::hex(0xff0000)), solid(Color::hex(0x0000ff)));
-        let passes = [(&red, None), (&blue, Some([10, 10, 20, 20]))];
-        let img = render_offscreen(&passes, &mut Text::default(), (40, 40), 1.0);
-        assert_eq!(img.pixel(5, 5), [255, 0, 0, 255]);
-        assert_eq!(img.pixel(15, 15), [0, 0, 255, 255]);
-        assert_eq!(img.pixel(35, 35), [255, 0, 0, 255]);
-    }
-
-    #[test]
-    #[ignore = "needs a GPU"]
-    fn image_draws_in_painter_order_between_shapes() {
-        // Left half red, right half half-transparent blue.
-        let bitmap = Bitmap::from_rgba8(2, 1, vec![255, 0, 0, 255, 0, 0, 255, 128]);
-        let all = Rect::new(0.0, 0.0, 40.0, 40.0);
-        let mut s = solid(Color::WHITE);
-        s.image(
-            Rect::new(0.0, 0.0, 40.0, 20.0),
-            &bitmap,
-            0.0,
-            Color::WHITE,
-            all,
-        );
-        s.shape(
-            Rect::new(0.0, 15.0, 40.0, 5.0),
-            0.0,
-            Color::BLACK,
-            0.0,
-            Color::TRANSPARENT,
-            all,
-        );
-        let img = render_offscreen(&[(&s, None)], &mut Text::default(), (40, 40), 1.0);
-        assert_eq!(img.pixel(2, 5), [255, 0, 0, 255]);
-        let [r, g, b, _] = img.pixel(37, 5);
-        assert!(
-            r.abs_diff(127) <= 2 && g.abs_diff(127) <= 2 && b == 255,
-            "blended over white"
-        );
-        assert_eq!(
-            img.pixel(20, 17),
-            [0, 0, 0, 255],
-            "shape after image covers it"
-        );
-        assert_eq!(img.pixel(20, 30), [255, 255, 255, 255]);
-    }
-
-    #[test]
-    fn swapping_bitmaps_damages_the_image() {
-        let (a, b) = (
-            Bitmap::from_rgba8(1, 1, vec![0; 4]),
-            Bitmap::from_rgba8(1, 1, vec![0; 4]),
-        );
-        let scene = |bm: &Bitmap| {
-            let mut s = Scene::default();
-            s.image(Rect::new(0.0, 0.0, 10.0, 10.0), bm, 0.0, Color::WHITE, ALL);
-            (s, vec![(1, 0..1)])
-        };
-        let ((sa, na), (sb, nb), (sa2, na2)) = (scene(&a), scene(&b), scene(&a));
-        assert!(damage(&sa, &na, &sa2, &na2).is_none());
-        assert!(damage(&sa, &na, &sb, &nb).is_some());
-    }
-
-    #[test]
-    fn scissor_stays_inside_the_target() {
-        let size = (800, 600);
-        assert_eq!(
-            scissor(Rect::new(10.0, 10.0, 20.0, 20.0), 1.0, size),
-            [8, 8, 24, 24]
-        );
-        assert_eq!(
-            scissor(Rect::new(790.0, 590.0, 50.0, 50.0), 1.0, size),
-            [788, 588, 12, 12]
-        );
-        // Below the window: nothing to draw, not a 1px strip past the edge.
-        let [_, _, w, h] = scissor(Rect::new(23.0, 772.0, 302.0, 202.0), 1.0, size);
-        assert_eq!(w * h, 0);
-    }
-
-    const ALL: Rect = Rect::new(-1e4, -1e4, 2e4, 2e4);
-
-    /// One square node per `(id, x, color)`, 10px wide, at y = 0.
-    fn frame(nodes: &[(u64, f32, u32)]) -> (Scene, Spans) {
-        let mut s = Scene::default();
-        let mut spans = Vec::new();
-        for &(id, x, c) in nodes {
-            let start = s.len();
-            let r = Rect::new(x, 0.0, 10.0, 10.0);
-            s.shape(r, 0.0, Color::hex(c), 0.0, Color::TRANSPARENT, ALL);
-            spans.push((id, start..s.len()));
-        }
-        (s, spans)
-    }
-
-    fn diff(a: &[(u64, f32, u32)], b: &[(u64, f32, u32)]) -> Option<Rect> {
-        let ((sa, na), (sb, nb)) = (frame(a), frame(b));
-        damage(&sa, &na, &sb, &nb)
-    }
-
-    #[test]
-    fn damage_tracks_changed_nodes_by_id() {
-        let base = [(1, 0.0, 0xff0000), (2, 20.0, 0x00ff00)];
-        assert_eq!(diff(&base, &base), None);
-        // Recolor: just that node, padded 1px for AA.
-        let recolored = [(1, 0.0, 0xff0000), (2, 20.0, 0x0000ff)];
-        assert_eq!(
-            diff(&base, &recolored),
-            Some(Rect::new(19.0, -1.0, 12.0, 12.0))
-        );
-        // Move: old and new position.
-        let moved = [(1, 0.0, 0xff0000), (2, 40.0, 0x00ff00)];
-        assert_eq!(diff(&base, &moved), Some(Rect::new(19.0, -1.0, 32.0, 12.0)));
-        // Insert before node 2 shifts instance indices but not node 2.
-        let inserted = [(1, 0.0, 0xff0000), (3, 60.0, 0x0), (2, 20.0, 0x00ff00)];
-        assert_eq!(
-            diff(&base, &inserted),
-            Some(Rect::new(59.0, -1.0, 12.0, 12.0))
-        );
-        // Removal damages where the node was.
-        assert_eq!(
-            diff(&base, &base[..1]),
-            Some(Rect::new(19.0, -1.0, 12.0, 12.0))
-        );
-    }
-
-    #[test]
-    fn opaque_shape_cuts_a_hole_in_the_shadow_under_it() {
-        let r = Rect::new(0.0, 0.0, 100.0, 50.0);
-        let sh = Shadow {
-            color: Color::BLACK,
-            offset: (0.0, 3.0),
-            blur: 8.0,
-        };
-        let hole = |fill: Color, clip: Rect| {
-            let mut s = Scene::default();
-            s.shadow(r, 0.0, sh, ALL);
-            s.shape(r, 0.0, fill, 0.0, Color::TRANSPARENT, clip);
-            s.instances[0].uv
-        };
-        assert_eq!(hole(Color::WHITE, ALL), [1.0, 1.0, 99.0, 49.0]);
-        assert_eq!(
-            hole(Color::WHITE, Rect::new(0.0, 0.0, 100.0, 20.0)),
-            [1.0, 1.0, 99.0, 20.0]
-        );
-        // The shadow shows through a translucent shape.
-        assert_eq!(hole(Color::WHITE.alpha(0.5), ALL), [0.0; 4]);
-    }
-
-    #[test]
-    fn damage_bounds_include_blur_and_respect_clip() {
-        let mut a = Scene::default();
-        let r = Rect::new(0.0, 0.0, 10.0, 10.0);
-        let sh = Shadow {
-            color: Color::BLACK,
-            offset: (0.0, 0.0),
-            blur: 4.0,
-        };
-        a.shadow(r, 0.0, sh, ALL);
-        assert_eq!(a.bounds(0..1), Some(Rect::new(-5.0, -5.0, 20.0, 20.0)));
-        let mut b = Scene::default();
-        b.shape(
-            r,
-            0.0,
-            Color::BLACK,
-            0.0,
-            Color::TRANSPARENT,
-            Rect::new(0.0, 0.0, 4.0, 4.0),
-        );
-        assert_eq!(b.bounds(0..1), Some(Rect::new(0.0, 0.0, 4.0, 4.0)));
-    }
 }

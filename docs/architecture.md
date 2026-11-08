@@ -56,7 +56,7 @@ the window through the `Host` trait.
 | `runtime/task.rs` | Widget-owned futures/streams, polling, `sleep` timers, the event-loop waker. |
 | `runtime/clipboard.rs` | System clipboard on desktop, in-app elsewhere. |
 | `runtime/bench.rs` | `Bench`, `GpuBench` and `snapshot`, through the real runtime without a window. |
-| `render.rs` | `Scene`, `Color`/`Rect`/`Shadow`, wgpu setup, the single render pass, GPU timestamp timing, offscreen rendering. |
+| `render/` | `primitives` (`Color`/`Rect`/`Shadow`/`Bitmap`), `scene` (`Scene`, damage), `gpu` (wgpu setup, the single render pass, GPU timestamp timing, offscreen rendering). |
 | `shader.wgsl` | Vertex expands instances to quads; fragment does SDF shapes (kind 0) and outline glyphs (kind 1). |
 | `text.rs` | `Font` handles (bundled DejaVu Sans as default and fallback), per-word shaping with harfrust, greedy word wrap, lazy glyph outline building. |
 | `outline.rs` | Converts glyph contours to monotonic quadratics and per-glyph band lists for the shader. |

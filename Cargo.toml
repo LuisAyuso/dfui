@@ -33,6 +33,8 @@ wgpu = "30"
 # WebGPU only: the other backends would just add size to the wasm.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["std", "webgpu", "wgsl"] }
+web-sys = { version = "0.3", features = ["Document", "HtmlElement", "Node", "Window"] }
+wasm-bindgen = "0.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"

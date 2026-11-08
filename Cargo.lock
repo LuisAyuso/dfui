@@ -569,6 +569,8 @@ dependencies = [
  "read-fonts",
  "taffy",
  "unicode-segmentation",
+ "wasm-bindgen",
+ "web-sys",
  "web-time",
  "wgpu",
  "winit",

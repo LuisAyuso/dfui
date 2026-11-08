@@ -32,10 +32,11 @@ impl<A: App> Runtime<A> {
 }
 
 impl Host for Arc<Window> {
-    fn surface(&self, instance: &wgpu::Instance) -> wgpu::Surface<'static> {
-        instance
-            .create_surface(self.clone())
-            .expect("create surface")
+    fn surface(
+        &self,
+        instance: &wgpu::Instance,
+    ) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError> {
+        instance.create_surface(self.clone())
     }
     fn size(&self) -> (u32, u32) {
         self.inner_size().into()

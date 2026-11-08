@@ -23,7 +23,7 @@ use super::editor::Edit;
 use super::task::{self, LoopWaker};
 use crate::App;
 use crate::render::{Host, Renderer};
-use crate::widget::{Event, Key};
+use crate::widget::{Event, Key, Keyboard};
 
 struct Window {
     app: AndroidApp,
@@ -32,7 +32,10 @@ struct Window {
 }
 
 impl Host for Window {
-    fn surface(&self, instance: &wgpu::Instance) -> wgpu::Surface<'static> {
+    fn surface(
+        &self,
+        instance: &wgpu::Instance,
+    ) -> Result<wgpu::Surface<'static>, wgpu::CreateSurfaceError> {
         let target = wgpu::SurfaceTargetUnsafe::RawHandle {
             raw_display_handle: Some(RawDisplayHandle::Android(AndroidDisplayHandle::new())),
             raw_window_handle: RawWindowHandle::AndroidNdk(AndroidNdkWindowHandle::new(
@@ -41,7 +44,7 @@ impl Host for Window {
         };
         // SAFETY: `Renderer` drops the surface before this window, whose
         // `NativeWindow` holds a reference to the ANativeWindow.
-        unsafe { instance.create_surface_unsafe(target) }.expect("create surface")
+        unsafe { instance.create_surface_unsafe(target) }
     }
     fn size(&self) -> (u32, u32) {
         (self.native.width() as u32, self.native.height() as u32)
@@ -55,8 +58,8 @@ impl Host for Window {
     fn request_redraw(&self) {
         self.redraw.set(true);
     }
-    fn set_ime(&self, on: bool) {
-        super::editor::set_visible(&self.app, on);
+    fn set_ime(&self, keyboard: Option<Keyboard>) {
+        super::editor::set_keyboard(&self.app, keyboard);
     }
 }
 

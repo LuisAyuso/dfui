@@ -11,6 +11,7 @@ use jni::{Env, EnvUnowned, NativeMethod, jni_sig, jni_str};
 use winit::platform::android::activity::{AndroidApp, AndroidAppWaker};
 
 use crate::android::with_activity;
+use crate::widget::Keyboard;
 
 static DEX: &[u8] = include_bytes!("../../android/classes.dex");
 
@@ -48,7 +49,7 @@ extern "system" fn backspace<'l>(_: EnvUnowned<'l>, _: JClass<'l>, n: i32) {
     push(Edit::Delete(n.max(0) as usize));
 }
 
-/// Adds the view to this activity; runs once per activity, before any `set_visible`.
+/// Adds the view to this activity; runs once per activity, before any `set_keyboard`.
 pub(crate) fn install(app: &AndroidApp) {
     *WAKER.lock().unwrap() = Some(app.create_waker());
     let a = app.clone();
@@ -129,17 +130,27 @@ fn create(env: &mut Env, activity: &JObject) -> Result<Global<JObject<'static>>>
     env.new_global_ref(view)
 }
 
-/// Shows or hides the keyboard, attached to the view.
-pub(crate) fn set_visible(app: &AndroidApp, on: bool) {
+/// `InputType` flags for each keyboard.
+fn input_type(k: Keyboard) -> i32 {
+    match k {
+        Keyboard::Text => 0x1,
+        Keyboard::Number => 0x2,
+        Keyboard::Email => 0x21,
+        Keyboard::Password => 0x81,
+    }
+}
+
+/// Shows the given keyboard, attached to the view, or hides it.
+pub(crate) fn set_keyboard(app: &AndroidApp, keyboard: Option<Keyboard>) {
     let a = app.clone();
     app.run_on_java_main_thread(Box::new(move || {
-        if let Err(e) = with_activity(&a, |env, activity| apply(env, activity, on)) {
+        if let Err(e) = with_activity(&a, |env, activity| apply(env, activity, keyboard)) {
             log::error!("toggling the keyboard failed: {e}");
         }
     }));
 }
 
-fn apply(env: &mut Env, activity: &JObject, on: bool) -> Result<()> {
+fn apply(env: &mut Env, activity: &JObject, keyboard: Option<Keyboard>) -> Result<()> {
     let guard = VIEW.lock().unwrap();
     let Some(view) = guard.as_ref() else {
         return Ok(());
@@ -153,7 +164,13 @@ fn apply(env: &mut Env, activity: &JObject, on: bool) -> Result<()> {
             &[JValue::Object(&service)],
         )?
         .l()?;
-    if on {
+    if let Some(k) = keyboard {
+        env.call_method(
+            view,
+            jni_str!("setInputType"),
+            jni_sig!("(I)V"),
+            &[JValue::Int(input_type(k))],
+        )?;
         env.call_method(view, jni_str!("requestFocus"), jni_sig!("()Z"), &[])?;
         env.call_method(
             &imm,

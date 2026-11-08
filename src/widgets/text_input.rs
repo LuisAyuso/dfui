@@ -12,7 +12,7 @@ use super::Styled;
 use crate::render::Rect;
 use crate::text::{Font, Text};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, Key, PaintCx, Widget};
+use crate::widget::{Element, Event, EventCx, Key, Keyboard, PaintCx, Widget};
 
 type OnChange = Box<dyn Fn(&mut EventCx, String)>;
 
@@ -37,7 +37,7 @@ pub struct TextInput {
     size: f32,
     color: Ink,
     accent: Ink,
-    password: bool,
+    keyboard: Keyboard,
     on_change: Option<OnChange>,
     style: Style,
 }
@@ -51,7 +51,7 @@ pub fn text_input(value: impl Into<String>) -> TextInput {
         size: 16.0,
         color: Role::Ink.into(),
         accent: Role::Accent.into(),
-        password: false,
+        keyboard: Keyboard::Text,
         on_change: None,
         style: Style {
             padding: taffy::Rect {
@@ -93,14 +93,23 @@ impl TextInput {
     }
     /// Shows a dot per char and doesn't copy.
     pub fn password(mut self) -> Self {
-        self.password = true;
+        self.keyboard = Keyboard::Password;
         self
+    }
+    /// The soft keyboard to show; `Keyboard::Password` is the same as `password`.
+    pub fn keyboard(mut self, k: Keyboard) -> Self {
+        self.keyboard = k;
+        self
+    }
+
+    fn is_password(&self) -> bool {
+        self.keyboard == Keyboard::Password
     }
 
     /// The value as drawn: one dot per char for passwords, so caret
     /// positions (in chars) line up either way.
     fn shown(&self) -> Cow<'_, str> {
-        if self.password {
+        if self.is_password() {
             Cow::Owned("•".repeat(self.value.chars().count()))
         } else {
             Cow::Borrowed(&self.value)
@@ -279,7 +288,7 @@ impl Widget for TextInput {
                 let keep = if cx.shift { anchor } else { at };
                 select(cx, at, keep);
                 cx.state.get::<Caret>().dragging = true;
-                cx.focus();
+                cx.focus(self.keyboard);
             }
             Event::PointerMove { x, .. } if cx.state.get::<Caret>().dragging => {
                 let at = self.index_at(cx.text, cx.rect, caret, *x);
@@ -321,7 +330,7 @@ impl Widget for TextInput {
                 select(cx, to, if cx.shift { anchor } else { to });
             }
             Event::Key(Key::SelectAll) => select(cx, *bounds.last().unwrap(), 0),
-            Event::Key(k @ (Key::Copy | Key::Cut)) if !sel.is_empty() && !self.password => {
+            Event::Key(k @ (Key::Copy | Key::Cut)) if !sel.is_empty() && !self.is_password() => {
                 cx.copy(&self.value[self.byte(sel.start)..self.byte(sel.end)]);
                 if *k == Key::Cut {
                     replace(cx, sel, "");

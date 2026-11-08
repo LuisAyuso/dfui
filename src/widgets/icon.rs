@@ -3,7 +3,7 @@ use std::time::Duration;
 use taffy::{AvailableSpace, Size, Style};
 
 use super::Styled;
-use super::button::Tap;
+use super::button::{Handler, Tap};
 use super::label::Emphasis;
 use crate::anim::{Animated, ease};
 use crate::path::Shape;
@@ -11,8 +11,6 @@ use crate::render::Rect;
 use crate::text::Text;
 use crate::theme::Ink;
 use crate::widget::{BuildCx, Element, Event, EventCx, PaintCx, Widget};
-
-type Handler = Box<dyn Fn(&mut EventCx)>;
 
 /// Icon scale while pressed.
 const PRESSED: f32 = 0.8;
@@ -146,13 +144,10 @@ impl Widget for Icon {
             return;
         }
         let Some(f) = &self.on_click else { return };
-        let mut tap = std::mem::take(&mut cx.state.get::<IconState>().tap);
-        let before = tap.pressed;
-        let fire = tap.event(ev, cx);
-        if tap.pressed != before {
+        let (fire, changed) = Tap::feed(ev, cx, |s: &mut IconState| &mut s.tap);
+        if changed {
             cx.request_redraw();
         }
-        cx.state.get::<IconState>().tap = tap;
         if fire {
             f(cx);
         }

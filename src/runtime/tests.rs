@@ -112,7 +112,8 @@ fn tapping_the_focused_input_requests_the_keyboard_again() {
     for y in [10.0, 10.0, 190.0, 190.0] {
         rt.dispatch(Event::PointerDown { x: 10.0, y });
     }
-    assert_eq!(rt.ime_requests, [true, true, false]);
+    let text = Some(Keyboard::Text);
+    assert_eq!(rt.ime_requests, [text, text, None]);
 }
 
 struct ScrollInOverlays;

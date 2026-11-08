@@ -14,10 +14,17 @@ public final class EditorView extends View {
     /** Deletes this many UTF-16 units before the caret. */
     private static native void backspace(int units);
 
+    private int inputType = InputType.TYPE_CLASS_TEXT;
+
     public EditorView(Context c) {
         super(c);
         setFocusable(true);
         setFocusableInTouchMode(true);
+    }
+
+    /** Takes effect when the input connection restarts. */
+    public void setInputType(int type) {
+        inputType = type;
     }
 
     @Override
@@ -27,8 +34,11 @@ public final class EditorView extends View {
 
     @Override
     public InputConnection onCreateInputConnection(EditorInfo out) {
-        out.inputType = InputType.TYPE_CLASS_TEXT;
+        out.inputType = inputType;
         out.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
+        if ((inputType & InputType.TYPE_MASK_VARIATION) == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
+            out.imeOptions |= EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING;
+        }
         return new Connection(this);
     }
 

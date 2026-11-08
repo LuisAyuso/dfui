@@ -13,7 +13,7 @@ use crate::App;
 use crate::layout::{Insets, Layout, Measured, Placed, flatten, order, place, walk, walk_to};
 use crate::render::{Color, Outcome, Rect, Renderer, Scene, Spans, damage};
 use crate::text::Text;
-use crate::widget::{Element, Event, EventCx, Key, PaintCx, State};
+use crate::widget::{Element, Event, EventCx, Key, Keyboard, PaintCx, State};
 use task::{LoopWaker, Tasks};
 
 #[cfg(target_os = "android")]
@@ -27,12 +27,33 @@ mod editor;
 // TIMERS is already const; clippy misfires on Android's thread_local expansion.
 #[allow(clippy::missing_const_for_thread_local)]
 pub(crate) mod task;
+/// Tells the user why there's no UI, in the page on the web; elsewhere exits.
+#[cfg(target_arch = "wasm32")]
+fn startup_failed(reason: &str) -> ! {
+    if let Some(body) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.body())
+    {
+        body.set_text_content(Some(&format!("This page needs WebGPU. {reason}")));
+    }
+    wasm_bindgen::throw_str(reason)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn startup_failed(reason: &str) -> ! {
+    log::error!("{reason}");
+    eprintln!("dfui: {reason}");
+    std::process::exit(1)
+}
+
 #[cfg(test)]
 mod tests;
 mod winit_app;
 
 pub use bench::{Bench, GpuBench, snapshot};
 use clipboard::Clipboard;
+
+type PendingRenderer = Pin<Box<dyn Future<Output = Result<Renderer, String>>>>;
 
 pub(crate) struct Runtime<A: App> {
     app: A,
@@ -80,7 +101,7 @@ pub(crate) struct Runtime<A: App> {
     instance: Option<wgpu::Instance>,
     renderer: Option<Renderer>,
     /// GPU setup started in `resumed`; polled like a task until it resolves.
-    pending_renderer: Option<Pin<Box<dyn Future<Output = Renderer>>>>,
+    pending_renderer: Option<PendingRenderer>,
     viewport: (f32, f32),
     cursor: (f32, f32),
     touch: Option<u64>,
@@ -91,7 +112,7 @@ pub(crate) struct Runtime<A: App> {
     pub(crate) android: Option<crate::AndroidApp>,
     /// Keyboard requests, since tests have no window to send them to.
     #[cfg(test)]
-    ime_requests: Vec<bool>,
+    ime_requests: Vec<Option<Keyboard>>,
 }
 
 /// Rolling frame timings, logged every couple of seconds.
@@ -231,6 +252,10 @@ impl<A: App> Runtime<A> {
         };
         if let Poll::Ready(r) = f.as_mut().poll(&mut Context::from_waker(&self.waker)) {
             self.pending_renderer = None;
+            let r = match r {
+                Ok(r) => r,
+                Err(e) => startup_failed(&e),
+            };
             // Resizes during setup were scaled without the window's factor.
             let ((w, h), s) = (r.window().size(), r.window().scale());
             self.viewport = (w as f32 / s, h as f32 / s);
@@ -384,14 +409,14 @@ impl<A: App> Runtime<A> {
                 updates: &mut updates,
                 copied: &mut copied,
                 capture: false,
-                focus: false,
+                focus: None,
                 stop: false,
                 redraw: false,
             };
             widget(i).event(ev, &mut cx);
             redraw |= cx.redraw;
-            if cx.focus {
-                focus = Some(id);
+            if let Some(k) = cx.focus {
+                focus = Some((id, k));
             }
             // A press taken by a capture never reached what it would have focused.
             if cx.capture {
@@ -519,16 +544,18 @@ impl<A: App> Runtime<A> {
     }
 
     /// Returns whether focus changed.
-    fn set_focus(&mut self, id: Option<u64>) -> bool {
+    fn set_focus(&mut self, to: Option<(u64, Keyboard)>) -> bool {
+        let id = to.map(|(id, _)| id);
+        let keyboard = to.map(|(_, k)| k);
         let changed = self.focused != id;
         self.focused = id;
         // ponytail: IME only drives the Android soft keyboard; desktop composition (CJK) needs Ime::Preedit handling.
         // Tapping the focused input again brings back a keyboard the user dismissed.
         if changed || id.is_some() {
             #[cfg(test)]
-            self.ime_requests.push(id.is_some());
+            self.ime_requests.push(keyboard);
             if let Some(r) = &self.renderer {
-                r.window().set_ime(id.is_some());
+                r.window().set_ime(keyboard);
             }
         }
         changed

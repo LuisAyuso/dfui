@@ -17,7 +17,8 @@ pub(crate) struct OutlineGlyph {
 }
 
 /// Curves and band entries reserved at the front of the buffers for shapes
-/// that change every frame (`PaintCx::polygon`); glyphs are stored after them.
+/// that change every frame (`PaintCx::polygon`); glyphs are stored after them,
+/// and a frame that outgrows the reserve continues after the glyphs.
 const TRANSIENT_CURVES: usize = 512;
 const TRANSIENT_BANDS: usize = 4096;
 
@@ -32,6 +33,8 @@ pub(crate) struct Outlines {
     pub transient_dirty: bool,
     /// Next free curve and band entry in the transient region.
     transient: (usize, usize),
+    /// Where stored data ends and this frame's overflow begins, as buffer lengths.
+    stored: (usize, usize),
 }
 
 impl Default for Outlines {
@@ -42,6 +45,7 @@ impl Default for Outlines {
             dirty: true,
             transient_dirty: false,
             transient: (0, 0),
+            stored: (2 * TRANSIENT_CURVES, TRANSIENT_BANDS),
         }
     }
 }
@@ -60,11 +64,12 @@ impl Outlines {
     /// Frees the transient region; the runtime calls this before painting.
     pub fn begin_frame(&mut self) {
         self.transient = (0, 0);
+        self.curves.truncate(self.stored.0);
+        self.bands.truncate(self.stored.1);
     }
 
     /// Stores closed contours (y up) until the next `begin_frame`. `pad` widens
-    /// the box so antialiasing on its edges isn't cut off. `None` once the
-    /// transient region is full.
+    /// the box so antialiasing on its edges isn't cut off.
     pub fn transient(&mut self, quads: Vec<Quad>, pad: f32) -> Option<OutlineGlyph> {
         self.insert(quads, pad, true)
     }
@@ -78,80 +83,33 @@ impl Outlines {
             return None;
         }
 
-        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
-        for q in &quads {
-            for p in q {
-                for a in 0..2 {
-                    lo[a] = lo[a].min(p[a] - pad);
-                    hi[a] = hi[a].max(p[a] + pad);
-                }
-            }
-        }
-
-        let n = ((quads.len() as f32 / 2.0).ceil() as u32).clamp(1, 32);
-        let (first, header) = if transient {
-            let (c, b) = self.transient;
-            (c as u32, b as u32)
-        } else {
-            ((self.curves.len() / 2) as u32, self.bands.len() as u32)
-        };
-        let mut bands = vec![0u32; 4 * n as usize];
-        // Horizontal bands slice y and are scanned by +x rays; vertical bands the reverse.
-        for (axis, base) in [(1usize, 0u32), (0, n)] {
-            let size = (hi[axis] - lo[axis]) / n as f32;
-            for i in 0..n {
-                let (b0, b1) = (lo[axis] + i as f32 * size, lo[axis] + (i + 1) as f32 * size);
-                let start = header + bands.len() as u32;
-                let mut members: Vec<usize> = (0..quads.len())
-                    .filter(|&k| {
-                        let q = &quads[k];
-                        q[0][axis].min(q[2][axis]) <= b1 && q[0][axis].max(q[2][axis]) >= b0
-                    })
-                    .collect();
-                // Furthest reach along the ray first, so the shader can stop at the
-                // first curve lying entirely behind the pixel.
-                let ray = 1 - axis;
-                members.sort_by(|&a, &b| {
-                    let reach = |k: usize| quads[k][0][ray].max(quads[k][2][ray]);
-                    reach(b).total_cmp(&reach(a))
-                });
-                bands.extend(members.iter().map(|&k| first + k as u32));
-                let h = 2 * (base + i) as usize;
-                bands[h] = start;
-                bands[h + 1] = header + bands.len() as u32 - start;
-            }
-        }
-        let curves = quads.iter().flat_map(|q| {
-            [
-                [q[0][0], q[0][1], q[1][0], q[1][1]],
-                [q[2][0], q[2][1], 0.0, 0.0],
-            ]
-        });
-
         if transient {
             let (c, b) = self.transient;
+            let (glyph, bands) = build(&quads, pad, c as u32, b as u32);
             let (c_end, b_end) = (c + quads.len(), b + bands.len());
-            // ponytail: fixed transient capacity; shapes past it are dropped. Grow the region if real screens hit it.
-            if c_end > TRANSIENT_CURVES || b_end > TRANSIENT_BANDS {
-                return None;
+            if c_end <= TRANSIENT_CURVES && b_end <= TRANSIENT_BANDS {
+                for (dst, src) in self.curves[2 * c..2 * c_end]
+                    .iter_mut()
+                    .zip(encode(&quads).flatten())
+                {
+                    *dst = src;
+                }
+                self.bands[b..b_end].copy_from_slice(&bands);
+                self.transient = (c_end, b_end);
+                self.transient_dirty = true;
+                return Some(glyph);
             }
-            for (dst, src) in self.curves[2 * c..2 * c_end].iter_mut().zip(curves) {
-                *dst = src;
-            }
-            self.bands[b..b_end].copy_from_slice(&bands);
-            self.transient = (c_end, b_end);
-            self.transient_dirty = true;
-        } else {
-            self.curves.extend(curves);
-            self.bands.extend(bands);
-            self.dirty = true;
         }
-        Some(OutlineGlyph {
-            header,
-            bands_h: n,
-            bands_v: n,
-            bbox: [lo[0], lo[1], hi[0], hi[1]],
-        })
+        let first = (self.curves.len() / 2) as u32;
+        let (glyph, bands) = build(&quads, pad, first, self.bands.len() as u32);
+        self.curves.extend(encode(&quads).flatten());
+        self.bands.extend(bands);
+        self.dirty = true;
+        if !transient {
+            // ponytail: overflow from this frame sitting before the glyph stays allocated; only a glyph first seen during an overflow frame leaks any.
+            self.stored = (self.curves.len(), self.bands.len());
+        }
+        Some(glyph)
     }
 
     /// The transient region's slices, to upload when only it changed.
@@ -161,6 +119,63 @@ impl Outlines {
             &self.bands[..TRANSIENT_BANDS],
         )
     }
+}
+
+fn encode(quads: &[Quad]) -> impl Iterator<Item = [[f32; 4]; 2]> + '_ {
+    quads.iter().map(|q| {
+        [
+            [q[0][0], q[0][1], q[1][0], q[1][1]],
+            [q[2][0], q[2][1], 0.0, 0.0],
+        ]
+    })
+}
+
+/// The glyph and its band data, for curves stored from index `first` and bands from `header`.
+fn build(quads: &[Quad], pad: f32, first: u32, header: u32) -> (OutlineGlyph, Vec<u32>) {
+    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for q in quads {
+        for p in q {
+            for a in 0..2 {
+                lo[a] = lo[a].min(p[a] - pad);
+                hi[a] = hi[a].max(p[a] + pad);
+            }
+        }
+    }
+
+    let n = ((quads.len() as f32 / 2.0).ceil() as u32).clamp(1, 32);
+    let mut bands = vec![0u32; 4 * n as usize];
+    // Horizontal bands slice y and are scanned by +x rays; vertical bands the reverse.
+    for (axis, base) in [(1usize, 0u32), (0, n)] {
+        let size = (hi[axis] - lo[axis]) / n as f32;
+        for i in 0..n {
+            let (b0, b1) = (lo[axis] + i as f32 * size, lo[axis] + (i + 1) as f32 * size);
+            let start = header + bands.len() as u32;
+            let mut members: Vec<usize> = (0..quads.len())
+                .filter(|&k| {
+                    let q = &quads[k];
+                    q[0][axis].min(q[2][axis]) <= b1 && q[0][axis].max(q[2][axis]) >= b0
+                })
+                .collect();
+            // Furthest reach along the ray first, so the shader can stop at the
+            // first curve lying entirely behind the pixel.
+            let ray = 1 - axis;
+            members.sort_by(|&a, &b| {
+                let reach = |k: usize| quads[k][0][ray].max(quads[k][2][ray]);
+                reach(b).total_cmp(&reach(a))
+            });
+            bands.extend(members.iter().map(|&k| first + k as u32));
+            let h = 2 * (base + i) as usize;
+            bands[h] = start;
+            bands[h + 1] = header + bands.len() as u32 - start;
+        }
+    }
+    let glyph = OutlineGlyph {
+        header,
+        bands_h: n,
+        bands_v: n,
+        bbox: [lo[0], lo[1], hi[0], hi[1]],
+    };
+    (glyph, bands)
 }
 
 /// A glyph's closed contours in em units, y up.
@@ -353,6 +368,41 @@ mod tests {
             "left of glyph is outside"
         );
         assert_ne!(winding(&o, &g, [cx, y1 - 0.02]), 0, "top stroke is inside");
+    }
+
+    #[test]
+    fn transient_shapes_past_the_reserved_region_still_draw() {
+        let square =
+            crate::path::Path::polygon(&[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]);
+        let quads: Vec<Quad> = square.contours.concat();
+        let font = Font::new(&include_bytes!("../assets/DejaVuSans.ttf")[..], 0).unwrap();
+        let mut o = Outlines::default();
+        let shapes: Vec<_> = (0..TRANSIENT_CURVES)
+            .map(|_| o.transient(quads.clone(), 1.0).unwrap())
+            .collect();
+        for g in [&shapes[0], shapes.last().unwrap()] {
+            assert_ne!(winding(&o, g, [5.0, 5.0]), 0);
+        }
+        assert!(o.dirty, "the overflow needs uploading");
+
+        let (curves, bands) = (o.curves.len(), o.bands.len());
+        o.begin_frame();
+        o.transient(quads.clone(), 1.0).unwrap();
+        assert!(
+            o.curves.len() < curves && o.bands.len() < bands,
+            "overflow freed"
+        );
+
+        // A glyph stored behind this frame's overflow has to survive it.
+        for _ in 0..TRANSIENT_CURVES {
+            o.transient(quads.clone(), 1.0).unwrap();
+        }
+        let g = o
+            .add(&font, font.charmap().map_unicode('O').unwrap())
+            .unwrap();
+        o.begin_frame();
+        let [x0, y0, _, y1] = g.bbox;
+        assert_ne!(winding(&o, &g, [x0 + 0.02, (y0 + y1) / 2.0]), 0);
     }
 
     #[test]

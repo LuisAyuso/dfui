@@ -3,13 +3,11 @@ use std::time::Duration;
 use taffy::{AlignItems, LengthPercentage, Style};
 
 use super::Styled;
-use super::button::Tap;
+use super::button::{Handler, Tap};
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect};
 use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
-
-type Handler = Box<dyn Fn(&mut EventCx)>;
 
 const GROW: Duration = Duration::from_millis(140);
 const DOT: f32 = 20.0;
@@ -108,9 +106,7 @@ impl Widget for Radio {
         }
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
-        let mut tap = std::mem::take(&mut cx.state.get::<RadioState>().tap);
-        let fire = tap.event(ev, cx);
-        cx.state.get::<RadioState>().tap = tap;
+        let (fire, _) = Tap::feed(ev, cx, |s: &mut RadioState| &mut s.tap);
         if fire
             && !self.selected
             && let Some(f) = &self.on_select

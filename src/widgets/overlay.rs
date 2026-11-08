@@ -18,7 +18,7 @@ use crate::widget::{
     Element, Event, EventCx, Handle, Layer, PaintCx, Placement, Scope, State, Widget,
 };
 
-type Handler = Box<dyn Fn(&mut EventCx)>;
+use super::button::Handler;
 type OnChange = Rc<dyn Fn(&mut EventCx, usize)>;
 type Build = Rc<dyn Fn(Shown) -> Overlay>;
 

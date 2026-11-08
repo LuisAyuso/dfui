@@ -44,6 +44,17 @@ pub enum Event {
     Back,
 }
 
+/// The soft keyboard a text field asks for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Keyboard {
+    #[default]
+    Text,
+    Number,
+    Email,
+    /// Keeps what's typed out of suggestions and the keyboard's learning.
+    Password,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Key {
     Backspace,
@@ -414,7 +425,7 @@ pub struct EventCx<'a> {
     pub(crate) updates: &'a mut Vec<Update>,
     pub(crate) copied: &'a mut Option<String>,
     pub(crate) capture: bool,
-    pub(crate) focus: bool,
+    pub(crate) focus: Option<Keyboard>,
     pub(crate) stop: bool,
     pub(crate) redraw: bool,
 }
@@ -444,9 +455,9 @@ impl EventCx<'_> {
         *self.copied = Some(text.into());
     }
 
-    /// Take keyboard focus; on touch devices this shows the soft keyboard.
-    pub fn focus(&mut self) {
-        self.focus = true;
+    /// Take keyboard focus; on touch devices this shows the given soft keyboard.
+    pub fn focus(&mut self, keyboard: Keyboard) {
+        self.focus = Some(keyboard);
     }
 
     /// Don't offer this event to ancestors.

@@ -10,7 +10,7 @@ use crate::render::{Color, Shadow};
 use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
 
-type Handler = Box<dyn Fn(&mut EventCx)>;
+pub(crate) type Handler = Box<dyn Fn(&mut EventCx)>;
 
 const FADE: Duration = Duration::from_millis(120);
 
@@ -39,6 +39,20 @@ impl Tap {
             _ => {}
         }
         false
+    }
+    /// Feeds `ev` to the `Tap` that `field` finds in the widget's state `S`.
+    /// Returns whether a tap completed and whether its look changed.
+    pub fn feed<S: Default + 'static>(
+        ev: &Event,
+        cx: &mut EventCx,
+        field: fn(&mut S) -> &mut Tap,
+    ) -> (bool, bool) {
+        let mut tap = std::mem::take(field(cx.state.get::<S>()));
+        let before = (tap.pressed, tap.hovered);
+        let fire = tap.event(ev, cx);
+        let changed = (tap.pressed, tap.hovered) != before;
+        *field(cx.state.get::<S>()) = tap;
+        (fire, changed)
     }
 }
 
@@ -175,13 +189,10 @@ impl Widget for Button {
             cx.state.get::<ButtonState>().tap = Tap::default();
             return;
         }
-        let mut tap = std::mem::take(&mut cx.state.get::<ButtonState>().tap);
-        let before = (tap.pressed, tap.hovered);
-        let fire = tap.event(ev, cx);
-        if (tap.pressed, tap.hovered) != before {
+        let (fire, changed) = Tap::feed(ev, cx, |s: &mut ButtonState| &mut s.tap);
+        if changed {
             cx.request_redraw();
         }
-        cx.state.get::<ButtonState>().tap = tap;
         if fire && let Some(f) = &self.on_click {
             f(cx);
         }
