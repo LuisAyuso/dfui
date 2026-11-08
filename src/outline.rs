@@ -305,9 +305,7 @@ fn push_clamped(mut q: Quad, out: &mut Vec<Quad>) {
     }
     // Float error after splitting can leave the control point just outside the
     // endpoint range, breaking monotonicity.
-    for a in 0..2 {
-        q[1][a] = q[1][a].clamp(q[0][a].min(q[2][a]), q[0][a].max(q[2][a]));
-    }
+    q[1] = [0, 1].map(|a| q[1][a].clamp(q[0][a].min(q[2][a]), q[0][a].max(q[2][a])));
     out.push(q);
 }
 

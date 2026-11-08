@@ -53,11 +53,9 @@ extern "system" fn backspace<'l>(_: EnvUnowned<'l>, _: JClass<'l>, n: i32) {
 pub(crate) fn install(app: &AndroidApp) {
     *WAKER.lock().unwrap() = Some(app.create_waker());
     let a = app.clone();
-    app.run_on_java_main_thread(Box::new(move || {
-        match with_activity(&a, |env, activity| create(env, activity)) {
-            Ok(v) => *VIEW.lock().unwrap() = Some(v),
-            Err(e) => log::error!("creating the editor view failed: {e}"),
-        }
+    app.run_on_java_main_thread(Box::new(move || match with_activity(&a, create) {
+        Ok(v) => *VIEW.lock().unwrap() = Some(v),
+        Err(e) => log::error!("creating the editor view failed: {e}"),
     }));
 }
 
