@@ -93,7 +93,7 @@ Widgets:
       into rows) on top of it.
 - [ ] Data model follow-ups: selection by key, filter adapters, lazy tree
       children, paged remote data, horizontal virtualization for wide
-      tables; ghosts of removed rows still take taps.
+      tables.
 - [ ] List row: title, subtitle, trailing actions.
 - [ ] Image fit modes and a placeholder (also under Image follow-ups);
       apps downscale covers themselves for lack of mipmaps.
@@ -239,8 +239,7 @@ Theming:
 - [ ] Multi-touch: per-finger dispatch (runtime is single-pointer today).
 - [x] Kinetic scrolling: a released drag flings with exponential friction,
       stopping at the edges; re-placed per frame via `request_placement`.
-- [ ] Horizontal scroll; overscroll bounce/glow; a press that catches a
-      fling still reaches the widget under it.
+- [ ] Horizontal scroll; overscroll bounce/glow.
 - [ ] Widget library: checkbox.
 - [x] Layers: widgets that float above the tree outside its layout
       (`Widget::layer`); `dialog`, `drawer`, `bottom_sheet`, `snackbar`,

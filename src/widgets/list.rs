@@ -368,6 +368,10 @@ impl Widget for Slot {
     fn clips(&self) -> bool {
         false
     }
+    // Only ghosts are absolutely positioned.
+    fn inert(&self) -> bool {
+        self.style.position == Position::Absolute
+    }
     fn scroll(&self, _: &mut State, at: Placement, now: Instant) -> Option<(f32, f32)> {
         if self.style.position != Position::Absolute {
             self.heights.borrow_mut().insert(self.key, at.rest.h);
@@ -471,6 +475,7 @@ impl Widget for List {
 mod tests {
     use super::*;
     use crate::model::Keyed;
+    use crate::widgets::{button, text};
     use crate::{App, Bench};
 
     #[derive(Clone)]
@@ -516,6 +521,37 @@ mod tests {
         PAINTED.with(|p| p.borrow_mut().clear());
         b.paint();
         PAINTED.with(|p| p.take())
+    }
+
+    #[test]
+    fn rows_sliding_out_take_no_taps() {
+        thread_local!(static TAPS: RefCell<Vec<u64>> = RefCell::default());
+        struct T(Rc<RefCell<Vec<It>>>);
+        impl App for T {
+            fn view(&self) -> Element {
+                let row = |it: &It| {
+                    let k = it.0;
+                    button(text("row"))
+                        .on_click(move |_| TAPS.with(|t| t.borrow_mut().push(k)))
+                        .height(50.0)
+                };
+                column([list(self.0.clone(), row).height(200.0).into()]).into()
+            }
+        }
+        let items = Rc::new(RefCell::new((0..6).map(It).collect::<Vec<_>>()));
+        let mut b = Bench::new(T(items.clone()), (100.0, 200.0));
+        b.settle();
+        items.borrow_mut().retain(|it| it.0 != 1);
+        b.frame();
+        b.advance(MOTION / 2);
+        b.paint();
+        b.event(Event::PointerDown { x: 75.0, y: 75.0 });
+        b.event(Event::PointerUp { x: 75.0, y: 75.0 });
+        assert_eq!(
+            TAPS.with(|t| t.take()),
+            [2],
+            "only the row taking its place"
+        );
     }
 
     #[test]

@@ -121,8 +121,11 @@ pub(crate) fn drag_scroll(
     s.max = max;
     let (mut capture, mut redraw, mut stop) = (false, false, false);
     match *ev {
-        // ponytail: a press that catches a fling also reaches the widget under it.
-        Event::PointerDown { x, y } if hit(x, y) => s.drag.down(y, s.offset, now),
+        Event::PointerDown { x, y } if hit(x, y) => {
+            // Catching a fling isn't a tap on what's under the finger.
+            capture = s.drag.flinging();
+            s.drag.down(y, s.offset, now);
+        }
         Event::PointerMove { y, .. } => {
             if let Some(o) = s.drag.moved(y, now) {
                 s.offset = o.clamp(0.0, max);

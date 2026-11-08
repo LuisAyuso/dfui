@@ -357,6 +357,7 @@ impl<A: App> Runtime<A> {
                     self.hovered = hits;
                 }
                 t.extend(&self.layers);
+                t.retain(|&i| !self.placed[i].inert);
                 // Topmost first: layers, then descendants and later siblings.
                 t.sort_unstable_by_key(|&i| std::cmp::Reverse(self.rank[i]));
                 t.dedup();
@@ -389,6 +390,10 @@ impl<A: App> Runtime<A> {
             redraw |= cx.redraw;
             if cx.focus {
                 focus = Some(id);
+            }
+            // A press taken by a capture never reached what it would have focused.
+            if cx.capture {
+                focus = None;
             }
             (cx.capture, cx.stop)
         };

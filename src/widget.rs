@@ -125,6 +125,11 @@ pub trait Widget {
         None
     }
 
+    /// Whether this subtree is drawn but ignores the pointer.
+    fn inert(&self) -> bool {
+        false
+    }
+
     /// Value made available to descendants through `Scope::get`.
     fn provide(&self) -> Option<&dyn Any> {
         None

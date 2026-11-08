@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 use crate::Theme;
 use crate::path::{Path, Shape};
 use crate::text::Font;
-use crate::widget::{PaintCx, Scope, Widget};
+use crate::widget::{Handle, PaintCx, Scope, Widget};
 use crate::widgets::{
     Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon, icon_button, on_back,
     overlays, popup, provide, radio, row, scroll, segmented, slider, snackbar, spacer, stateful,
@@ -1394,4 +1394,57 @@ fn watch_rebuilds_when_another_thread_notifies() {
         assert!(rt.drive(), "notify {i} rebuilds");
         assert!(!rt.drive(), "a burst is one rebuild");
     }
+}
+
+/// A fling over rows from `row`, caught by a press; returns the state after.
+struct FlingOver(fn(Handle<i32>) -> Element);
+
+impl App for FlingOver {
+    fn view(&self) -> Element {
+        let row = self.0;
+        stateful(move |_: &i32, h| scroll(column((0..20).map(|_| row(h)))).height(200.0)).into()
+    }
+}
+
+fn flinging(row: fn(Handle<i32>) -> Element) -> Runtime<FlingOver> {
+    let mut rt = Runtime::new(FlingOver(row));
+    rt.viewport = (100.0, 200.0);
+    rt.relayout();
+    let t = Instant::now();
+    task::set_clock(Some(t));
+    rt.dispatch(Event::PointerDown { x: 50.0, y: 150.0 });
+    for i in 1..=4 {
+        task::set_clock(Some(t + Duration::from_millis(16 * i)));
+        let y = 150.0 - 20.0 * i as f32;
+        rt.dispatch(Event::PointerMove { x: 50.0, y });
+    }
+    rt.dispatch(Event::PointerUp { x: 50.0, y: 70.0 });
+    rt
+}
+
+#[test]
+fn press_that_catches_a_fling_does_not_tap() {
+    let mut rt = flinging(|h| {
+        button(text("x"))
+            .on_click(move |cx| cx.update(h, |n: &mut i32| *n += 1))
+            .height(50.0)
+            .into()
+    });
+    rt.dispatch(Event::PointerDown { x: 50.0, y: 100.0 });
+    rt.dispatch(Event::PointerUp { x: 50.0, y: 100.0 });
+    assert_eq!(
+        *root::<i32, _>(&mut rt),
+        0,
+        "the press only stops the fling"
+    );
+    rt.dispatch(Event::PointerDown { x: 50.0, y: 100.0 });
+    rt.dispatch(Event::PointerUp { x: 50.0, y: 100.0 });
+    assert_eq!(*root::<i32, _>(&mut rt), 1, "the next tap lands");
+}
+
+#[test]
+fn press_that_catches_a_fling_does_not_focus() {
+    let mut rt = flinging(|_| text_input("x").height(50.0).into());
+    rt.dispatch(Event::PointerDown { x: 50.0, y: 100.0 });
+    assert_eq!(rt.focused, None);
 }

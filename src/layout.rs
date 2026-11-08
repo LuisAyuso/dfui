@@ -35,6 +35,7 @@ pub(crate) struct Placed {
     pub rect: Rect,
     pub clip: Rect,
     pub content: Size<f32>,
+    pub inert: bool,
 }
 
 /// Pre-order flattening of the element tree, expanding stateful widgets and
@@ -395,6 +396,7 @@ pub(crate) fn place(
             rect: Rect::new(origin.0 + m.rect.x, origin.1 + m.rect.y, m.rect.w, m.rect.h),
             clip,
             content: m.content,
+            inert: nodes[i].w.inert() || nodes[i].parent.is_some_and(|p| placed[p].inert),
         };
         let r = placed[i].rect;
         let mut at = Placement {
