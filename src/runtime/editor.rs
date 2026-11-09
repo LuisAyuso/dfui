@@ -59,6 +59,13 @@ pub(crate) fn install(app: &AndroidApp) {
     }));
 }
 
+/// Lets the destroyed activity go: the view references it, and the process
+/// can outlive it.
+pub(crate) fn uninstall() {
+    *VIEW.lock().unwrap() = None;
+    *WAKER.lock().unwrap() = None;
+}
+
 fn create(env: &mut Env, activity: &JObject) -> Result<Global<JObject<'static>>> {
     let bytes = env.byte_array_from_slice(DEX)?;
     let buffer = env

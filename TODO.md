@@ -188,8 +188,8 @@ Theming:
       painted frames give their space back.
 - [ ] Android editor: `deleteSurroundingText` ignores text after the caret; no
       `setComposingRegion` or `setSelection`.
-- [ ] `editor::set_keyboard` and the light-bars call post `with_activity` to the
-      Java thread, where the activity may already be gone. From reading only.
+- [x] Late `with_activity` calls on a destroyed activity are safe (`AndroidApp`
+      keeps its reference alive); the editor view no longer outlives the activity.
 - [x] Sources faster than a rebuild hung the UI: `drive` re-polls only new
       tasks, `stream_builder` drains at most 1024 items per poll, and wakes
       are handled in `about_to_wait`.

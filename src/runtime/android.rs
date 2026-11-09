@@ -13,8 +13,9 @@ pub use jni;
 use crate::AndroidApp;
 
 /// Runs `f` on the current thread, attached to the JVM, with the activity.
-/// Any thread works, but only while the activity lives (until `run_android`
-/// returns). A pending Java exception is cleared and reported as an error.
+/// Any thread works. After the activity is destroyed the reference stays valid
+/// while `app` lives, but calls on it may fail or do nothing. A pending Java
+/// exception is cleared and reported as an error.
 pub fn with_activity<R>(
     app: &AndroidApp,
     f: impl FnOnce(&mut Env, &JObject) -> jni::errors::Result<R>,
@@ -22,7 +23,7 @@ pub fn with_activity<R>(
     // SAFETY: android-activity hands out a valid JavaVM pointer for the process.
     let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) };
     vm.attach_current_thread(|env| {
-        // SAFETY: the activity global ref lives until onDestroy; JObject doesn't delete it.
+        // SAFETY: `app` holds the activity global ref until dropped; JObject doesn't delete it.
         let activity = unsafe { JObject::from_raw(env, app.activity_as_ptr().cast()) };
         let r = f(env, &activity);
         if env.exception_check() {

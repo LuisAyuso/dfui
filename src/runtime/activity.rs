@@ -148,6 +148,7 @@ pub(crate) fn run<A: App>(mut rt: Runtime<A>, app: AndroidApp) {
             }
         }
     }
+    super::editor::uninstall();
 }
 
 /// Unhandled events (Back, volume) get the system's default behavior.
