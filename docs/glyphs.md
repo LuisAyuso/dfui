@@ -207,8 +207,10 @@ frames:
   press/spring animation, which only changes the rect.
 - `PaintCx::path` is for paths that change every frame (morphs, polygons).
   They go in a fixed transient region at the front of the buffers (512
-  curves, 4096 band entries) that `Outlines::begin_frame` resets.
-- SVG isn't parsed; convert its paths to a `Path` with a parser such as usvg.
+  curves, 4096 band entries) that `Outlines::begin_frame` resets. Paths that
+  don't fit spill into the main buffers for that frame.
+- SVG isn't parsed at runtime; `tools/svg2path` converts icons ahead of time
+  to `.path` files, loaded with `Shape::from_bytes`.
 
 ## Trade-offs
 

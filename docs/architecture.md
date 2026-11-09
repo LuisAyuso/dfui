@@ -156,8 +156,10 @@ and `cx.shift` for extending selections. Ctrl/Cmd+A, C and X arrive as
 `Key::SelectAll`, `Key::Copy` and `Key::Cut`; a widget hands text to the
 clipboard with `cx.copy`. Paste arrives as `Event::Text` with the
 clipboard's contents. On
-Android, focus toggles the soft keyboard via `set_ime_allowed`; NativeActivity
-delivers its input as key events.
+Android, focus shows the soft keyboard through `runtime/editor.rs`: a Java view
+with an `InputConnection`, whose edits arrive as `Event::Text` and
+`Key::DeleteBefore`. A field's `Keyboard` picks the keyboard type. Hardware
+keys still arrive as key events.
 
 ## Layers
 
@@ -221,8 +223,9 @@ Details and design decisions, including partial redraws: `rendering.md`.
 
 - Unit tests sit next to the code (`layout`, `outline`, `text`, `runtime`
   dispatch).
-- `dfui::snapshot(app, size, scale)` renders one frame offscreen to an
-  `RgbaImage` for golden-image tests (not automated yet).
+- `dfui::snapshot(app, size, scale)` renders one frame offscreen to `Pixels`.
+  `tests/golden.rs` compares those against the PNGs in `tests/golden/`.
+- `tests/patterns.rs` drives usual app patterns with input events.
 
 ## Known limits
 

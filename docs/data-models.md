@@ -135,8 +135,8 @@ Rows outside the viewport never animate. Offsets are applied through
 the animations need no relayout per frame. Only rows on screen are diffed.
 `list(..).animate(false)` turns animations off.
 
-Ghosts are not cut off from input: a tap on one while it slides out
-reaches its buttons, which act on an item that is already gone.
+Ghosts are inert: a tap on one while it slides out goes to the row taking
+its place.
 
 ## Not done
 

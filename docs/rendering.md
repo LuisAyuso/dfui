@@ -138,8 +138,9 @@ back to back rather than against this table.
 ## Partial redraws
 
 In `render/` and `runtime/mod.rs`: a scissored retained canvas, per-node damage
-from a scene diff, and idle frames skipped entirely. Not yet measured on the
-phone.
+from a scene diff, and idle frames skipped entirely. The render pass is
+measured on the phone (see GPU benchmarks); the canvas copy and `LoadOp::Load`
+traffic in the real app are not.
 
 ### Idea
 
@@ -248,8 +249,6 @@ Not yet measured:
 
 ### Open questions / next steps
 
-- **Caret blink** is now cheap on the GPU (damage = the caret), but it
-  keeps the CPU rebuilding the scene every frame while a field is focused.
 - **One rect vs several.** A union of distant rects (corner button + caret)
   can be large. Several scissored draws of the same buffer are cheap on the
   vertex side; decide by measurement.
