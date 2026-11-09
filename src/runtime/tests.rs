@@ -789,6 +789,30 @@ fn tooltip_shows_on_long_press_and_lingers() {
     assert!(!at(&mut rt, 2500), "then hides");
 }
 
+#[test]
+fn cancelled_touch_ends_a_tooltip_press() {
+    let mut rt = Runtime::new(Tip);
+    rt.viewport = (200.0, 200.0);
+    let t = Instant::now();
+    task::set_clock(Some(t));
+    rt.relayout();
+    let tip = rt.placed.len() - 1;
+    let at = |rt: &mut Runtime<Tip>, d: u64| {
+        task::set_clock(Some(t + Duration::from_millis(d)));
+        rt.reposition();
+        rt.placed[tip].rect.y.abs() < 1e5
+    };
+    rt.touch(1, TouchPhase::Started, 5.0, 5.0);
+    assert!(!at(&mut rt, 100), "not held long enough yet");
+    rt.touch(1, TouchPhase::Cancelled, 5.0, 5.0);
+    assert!(!at(&mut rt, 800), "a cancelled press never shows it");
+
+    rt.touch(1, TouchPhase::Started, 5.0, 5.0);
+    assert!(at(&mut rt, 1600), "held long enough");
+    rt.touch(1, TouchPhase::Cancelled, 5.0, 5.0);
+    assert!(!at(&mut rt, 60_000), "hides without another touch");
+}
+
 #[derive(Default)]
 struct Pick {
     selected: usize,

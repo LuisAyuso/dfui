@@ -541,6 +541,7 @@ impl<A: App> Runtime<A> {
                 self.touch = None;
                 self.captured = None;
                 self.dispatch(Event::Cancel);
+                self.dispatch(Event::Leave);
             }
         }
     }

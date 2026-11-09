@@ -193,7 +193,8 @@ Theming:
 - [x] Sources faster than a rebuild hung the UI: `drive` re-polls only new
       tasks, `stream_builder` drains at most 1024 items per poll, and wakes
       are handled in `about_to_wait`.
-- [ ] A touch cancelled by the system leaves `pressed` set (`overlay.rs`).
+- [x] A touch cancelled by the system left a tooltip stuck: a cancel now ends
+      with `Leave`, like a lift.
 - [ ] Tab bars can't scroll when their labels don't fit (`segmented.rs`).
 - [ ] Long functions: `Runtime::dispatch`, `Renderer::new`, `Renderer::draw`,
       `layout::measure`, `text_input::event`.

@@ -289,7 +289,6 @@ impl Widget for Overlay {
                     (s.hovered, s.pressed) = (true, Some(now));
                 }
                 // The anchor took the press; the Leave after it still comes.
-                // ponytail: a touch the system cancels leaves `pressed` set until the next Leave.
                 Event::Cancel => {}
                 Event::PointerUp { .. } | Event::Leave => {
                     if s.pressed.is_some_and(|t| now >= t + LONG_PRESS) {
