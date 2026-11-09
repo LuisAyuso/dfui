@@ -42,7 +42,8 @@ pub trait App: 'static {
 }
 
 pub fn run<A: App>(app: A) {
-    let event_loop = winit::event_loop::EventLoop::new().expect("event loop");
+    let event_loop = winit::event_loop::EventLoop::new()
+        .unwrap_or_else(|e| runtime::startup_failed(&format!("can't start the event loop: {e}")));
     runtime::Runtime::new(app).run(event_loop);
 }
 

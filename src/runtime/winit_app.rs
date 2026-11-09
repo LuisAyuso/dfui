@@ -9,6 +9,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
 use super::Runtime;
+use super::startup_failed;
 use super::task::{self, LoopWaker};
 use crate::App;
 use crate::render::{Host, Renderer};
@@ -27,7 +28,9 @@ impl<A: App> Runtime<A> {
         #[cfg(target_arch = "wasm32")]
         winit::platform::web::EventLoopExtWebSys::spawn_app(event_loop, self);
         #[cfg(not(target_arch = "wasm32"))]
-        event_loop.run_app(&mut self).expect("event loop");
+        if let Err(e) = event_loop.run_app(&mut self) {
+            startup_failed(&format!("the event loop failed: {e}"));
+        }
     }
 }
 
@@ -65,7 +68,10 @@ impl<A: App> ApplicationHandler for Runtime<A> {
             use winit::platform::web::WindowAttributesExtWebSys;
             attrs = attrs.with_append(true);
         }
-        let window = Arc::new(el.create_window(attrs).expect("create window"));
+        let window = el
+            .create_window(attrs)
+            .unwrap_or_else(|e| startup_failed(&format!("can't create the window: {e}")));
+        let window = Arc::new(window);
         let instance = self.instance.get_or_insert_with(|| {
             let mut desc = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
                 el.owned_display_handle(),

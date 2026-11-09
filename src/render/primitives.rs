@@ -132,7 +132,11 @@ impl Bitmap {
     /// Straight-alpha sRGB RGBA8, row-major, as image decoders produce it.
     pub fn from_rgba8(width: u32, height: u32, mut rgba: Vec<u8>) -> Bitmap {
         static NEXT: AtomicU32 = AtomicU32::new(1);
-        assert_eq!(rgba.len(), (width * height * 4) as usize, "rgba size");
+        assert_eq!(
+            rgba.len() as u64,
+            width as u64 * height as u64 * 4,
+            "rgba size"
+        );
         for p in rgba.as_chunks_mut::<4>().0 {
             let a = p[3] as u32;
             for c in &mut p[..3] {
@@ -161,4 +165,15 @@ pub struct Shadow {
     pub color: Color,
     pub offset: (f32, f32),
     pub blur: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Bitmap;
+
+    #[test]
+    #[should_panic(expected = "rgba size")]
+    fn bitmap_size_check_does_not_overflow() {
+        Bitmap::from_rgba8(65536, 65536, Vec::new());
+    }
 }

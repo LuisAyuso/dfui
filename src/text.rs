@@ -14,7 +14,8 @@ use crate::path::{Path, Shape};
 use crate::render::{Color, Rect, Scene};
 
 /// TrueType/OpenType font data. Fonts are told apart by address, so keep each
-/// one in a `static`; it is parsed on first use.
+/// one in a `static`; it is parsed on first use, and data that doesn't parse
+/// draws in the default font.
 #[derive(Clone, Copy)]
 pub struct Font(pub &'static [u8]);
 
@@ -168,7 +169,10 @@ impl Text {
         if let Some(i) = faces.iter().position(|(p, _)| *p == ptr) {
             return i;
         }
-        let face = Face::new(font.0, 0).expect("invalid font data");
+        let face = Face::new(font.0, 0).unwrap_or_else(|| {
+            log::warn!("invalid font data, using the default font");
+            faces[0].1.clone()
+        });
         faces.push((ptr, face));
         faces.len() - 1
     }
@@ -543,6 +547,16 @@ impl Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_font_falls_back_to_the_default_once() {
+        static BAD: [u8; 3] = *b"bad";
+        let t = Text::default();
+        let expected = t.line_height(Font::DEFAULT, 16.0);
+        assert_eq!(t.line_height(Font(&BAD), 16.0), expected);
+        t.line_height(Font(&BAD), 16.0);
+        assert_eq!(t.faces.borrow().len(), 2, "parsed once");
+    }
 
     #[test]
     fn wraps_at_width() {

@@ -29,7 +29,7 @@ mod editor;
 pub(crate) mod task;
 /// Tells the user why there's no UI, in the page on the web; elsewhere exits.
 #[cfg(target_arch = "wasm32")]
-fn startup_failed(reason: &str) -> ! {
+pub(crate) fn startup_failed(reason: &str) -> ! {
     if let Some(body) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.body())
@@ -40,7 +40,7 @@ fn startup_failed(reason: &str) -> ! {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn startup_failed(reason: &str) -> ! {
+pub(crate) fn startup_failed(reason: &str) -> ! {
     log::error!("{reason}");
     eprintln!("dfui: {reason}");
     std::process::exit(1)

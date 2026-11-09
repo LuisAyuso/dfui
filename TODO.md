@@ -204,8 +204,8 @@ Theming:
       clock, `Bench` and `GpuBench` in the public API.
 - [ ] Public API: `Event` and `Key` aren't `#[non_exhaustive]`; `taffy` types
       are exposed, so a `taffy` upgrade breaks apps.
-- [ ] Remaining panics: invalid font data, window creation, and `Bitmap`'s size
-      check can overflow `u32`.
+- [x] Startup failures exit with a message, invalid fonts fall back to the
+      default, and `Bitmap`'s size check can't overflow.
 - [ ] Duplicated cubic-to-quadratic splitting in `outline.rs` and `svg2path`.
 - [ ] Tests: goldens only run on the reference machine (a tolerance or a pinned
       software GPU would let CI run them); pattern tests use fixed coordinates.
