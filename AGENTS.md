@@ -1,8 +1,24 @@
 # Working on dfui
 
-Start with `README.md` for the layout and commands, `docs/architecture.md` for
-how it fits together, and `TODO.md` for the roadmap. Tick off or add items in
-`TODO.md` as part of a change.
+Start with `README.md` for the commands, `docs/architecture.md` for how it fits
+together, and `TODO.md` for the roadmap. Tick off or add items in `TODO.md` as
+part of a change.
+
+## Layout
+
+- `src/` — the framework crate (`dfui`)
+- `demo/` — demo app, desktop binary and Android `cdylib`
+- `site/` — docs site published to GitHub Pages: guide pages and a live example per widget
+- `tools/svg2path/` — converts SVG icons to shapes an app can bundle (see Icons in `README.md`)
+- `docs/architecture.md` — how it fits together
+- `docs/rendering.md` — renderer details and design decisions
+- `docs/glyphs.md` — how text and icons are drawn from outlines (Slug)
+- `docs/tree.md` — the flattened node list and its id cache
+- `docs/async-and-state.md` — study: external/async state and the web port
+- `docs/state-management.md` — study: state architectures across UI frameworks
+- `docs/data-models.md` — list and tree models, virtualized lists, tables and trees
+- `docs/theming.md` — the `Theme`, color roles and how other frameworks do it
+- `TODO.md` — roadmap and current performance baseline
 
 ## Checks
 
