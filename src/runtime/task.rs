@@ -22,17 +22,28 @@ pub(crate) struct Task {
     pub deps: u64,
     /// `None` once finished; the entry stays so equal deps don't restart it.
     pub poll: Option<Poll>,
+    pub polled: bool,
 }
 
 /// Tasks by node id. Dropped with their node, which cancels them.
 pub(crate) type Tasks = HashMap<u64, Task>;
 
-/// Polls every live task once; returns whether any changed its node's state.
+/// Polls live tasks once, or with `only_new` those never polled; returns
+/// whether any changed its node's state.
 // ponytail: one waker for all tasks, so any wake polls them all; per-task wakers if there are many.
-pub(crate) fn poll(tasks: &mut Tasks, states: &mut HashMap<u64, State>, waker: &Waker) -> bool {
+pub(crate) fn poll(
+    tasks: &mut Tasks,
+    states: &mut HashMap<u64, State>,
+    waker: &Waker,
+    only_new: bool,
+) -> bool {
     let mut cx = Context::from_waker(waker);
     let mut changed = false;
     for (id, t) in tasks.iter_mut() {
+        if only_new && t.polled {
+            continue;
+        }
+        t.polled = true;
         if let Some(p) = &mut t.poll {
             let (c, done) = p(&mut cx, states.entry(*id).or_default());
             changed |= c;
@@ -64,7 +75,6 @@ impl LoopWaker {
     }
 
     /// A wake was sent and not yet handled.
-    #[cfg(target_os = "android")]
     pub fn pending(&self) -> bool {
         self.pending.load(Ordering::Acquire)
     }

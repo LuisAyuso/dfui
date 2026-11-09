@@ -81,11 +81,14 @@ impl<A: App> ApplicationHandler for Runtime<A> {
         self.poll_renderer();
     }
 
-    fn user_event(&mut self, _: &ActiveEventLoop, (): ()) {
-        self.woken();
-    }
+    fn user_event(&mut self, _: &ActiveEventLoop, (): ()) {}
 
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        // Not in `user_event`: X11 drains those until none are left, so a wake
+        // sent while handling one would starve redraws.
+        if self.loop_waker.as_ref().is_some_and(|w| w.pending()) {
+            self.woken();
+        }
         let now = Instant::now();
         if self.next_frame.is_some_and(|t| now >= t) {
             self.next_frame = None;

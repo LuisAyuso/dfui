@@ -97,8 +97,9 @@ the window through the `Host` trait.
   their node in the same pass that drops state, which cancels them.
 - Tasks are polled on the UI thread, so sources need not be `Send`. One
   `Waker` posts a winit user event (deduplicated); `user_event` polls every
-  task, draining ready items so a burst costs one rebuild, and rebuilds
-  until no task changes (new tasks get their first poll that way). Without
+  task, draining up to 1024 ready items so a burst costs one rebuild, then
+  gives tasks started by that rebuild their first poll. Running tasks wait
+  for their next wake, so a fast source can't hold off painting. Without
   an event loop (tests, benches) the waker is a no-op and `drive` is called
   directly.
 

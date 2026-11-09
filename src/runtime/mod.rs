@@ -265,13 +265,15 @@ impl<A: App> Runtime<A> {
         }
     }
 
-    /// Polls tasks, rebuilding while they change state (new tasks start in a
-    /// rebuild and get polled too). Returns whether anything changed.
+    /// Polls tasks and rebuilds if they changed state, then does the same for
+    /// tasks those rebuilds started. Running tasks wait for their next wake,
+    /// so a source faster than a rebuild can't hold off painting. Returns
+    /// whether anything changed.
     fn drive(&mut self) -> bool {
-        let mut changed = false;
-        while task::poll(&mut self.tasks, &mut self.states, &self.waker) {
+        let (mut changed, mut only_new) = (false, false);
+        while task::poll(&mut self.tasks, &mut self.states, &self.waker, only_new) {
             self.rebuild();
-            changed = true;
+            (changed, only_new) = (true, true);
         }
         changed
     }

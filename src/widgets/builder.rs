@@ -17,6 +17,8 @@ pub struct Snapshot<T> {
     pub done: bool,
 }
 
+const DRAIN_LIMIT: usize = 1024;
+
 type Source<S> = Box<dyn FnMut(&mut Context, &mut S) -> (bool, bool)>;
 type Start<S> = Box<dyn FnOnce(Scope) -> Source<S>>;
 
@@ -47,8 +49,9 @@ where
         let mut st = Box::pin(stream(scope));
         Box::new(move |cx: &mut Context, snap: &mut Snapshot<S>| {
             let mut changed = false;
-            // Drains everything ready, so a burst costs one rebuild.
-            loop {
+            // Drains what's ready, so a burst costs one rebuild; the limit
+            // keeps a stream that never runs dry from taking the UI thread.
+            for _ in 0..DRAIN_LIMIT {
                 match st.as_mut().poll_next(cx) {
                     Poll::Ready(Some(item)) => {
                         snap.data.extend([item]);
@@ -61,6 +64,8 @@ where
                     Poll::Pending => return (changed, false),
                 }
             }
+            cx.waker().wake_by_ref();
+            (changed, false)
         })
     })
 }
@@ -165,6 +170,7 @@ impl<S: Default + 'static> Widget for Builder<S> {
                 Task {
                     deps: self.deps,
                     poll: Some(Box::new(poll)),
+                    polled: false,
                 },
             );
         }

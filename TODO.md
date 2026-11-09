@@ -190,8 +190,9 @@ Theming:
       `setComposingRegion` or `setSelection`.
 - [ ] `editor::set_keyboard` and the light-bars call post `with_activity` to the
       Java thread, where the activity may already be gone. From reading only.
-- [ ] A stream that is always ready never yields: `task::drive` and
-      `stream_builder`'s drain loop can hang the UI. From reading only.
+- [x] Sources faster than a rebuild hung the UI: `drive` re-polls only new
+      tasks, `stream_builder` drains at most 1024 items per poll, and wakes
+      are handled in `about_to_wait`.
 - [ ] A touch cancelled by the system leaves `pressed` set (`overlay.rs`).
 - [ ] Tab bars can't scroll when their labels don't fit (`segmented.rs`).
 - [ ] Long functions: `Runtime::dispatch`, `Renderer::new`, `Renderer::draw`,

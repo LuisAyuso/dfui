@@ -1473,3 +1473,85 @@ fn delete_before_counts_utf16_units_and_takes_whole_graphemes() {
     rt.dispatch(Event::Key(Key::DeleteBefore(9)));
     assert_eq!(root::<String, _>(&mut rt), "", "stops at the start");
 }
+
+mod fast_sources {
+    use super::*;
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+
+    #[derive(Default)]
+    struct Discard;
+
+    impl Extend<()> for Discard {
+        fn extend<I: IntoIterator<Item = ()>>(&mut self, items: I) {
+            items.into_iter().for_each(drop);
+        }
+    }
+
+    struct AlwaysReady;
+
+    impl futures_core::Stream for AlwaysReady {
+        type Item = ();
+        fn poll_next(self: Pin<&mut Self>, _: &mut Context) -> Poll<Option<()>> {
+            Poll::Ready(Some(()))
+        }
+    }
+
+    #[derive(Default)]
+    struct SelfWaking(bool);
+
+    impl futures_core::Stream for SelfWaking {
+        type Item = ();
+        fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<()>> {
+            self.0 = !self.0;
+            if self.0 {
+                return Poll::Ready(Some(()));
+            }
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
+
+    struct Streamed<St>(fn() -> St);
+
+    impl<St: futures_core::Stream<Item = ()> + 'static> App for Streamed<St> {
+        fn view(&self) -> Element {
+            let start = self.0;
+            stream_builder(0, move |_| start(), |_: &Snapshot<Discard>| text("x")).into()
+        }
+    }
+
+    /// Notified during every rebuild, like a producer faster than `view`.
+    struct NotifiedInView(crate::Notifier);
+
+    impl App for NotifiedInView {
+        fn view(&self) -> Element {
+            self.0.notify();
+            watch(&self.0, || text("x")).into()
+        }
+    }
+
+    fn drive_returns<A: App>(make: impl FnOnce() -> A + Send + 'static) -> bool {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            Runtime::new(make()).drive();
+            let _ = tx.send(());
+        });
+        rx.recv_timeout(Duration::from_secs(10)).is_ok()
+    }
+
+    #[test]
+    fn always_ready_stream_returns() {
+        assert!(drive_returns(|| Streamed(|| AlwaysReady)));
+    }
+
+    #[test]
+    fn self_waking_stream_returns() {
+        assert!(drive_returns(|| Streamed(SelfWaking::default)));
+    }
+
+    #[test]
+    fn updates_during_a_rebuild_wait_for_the_next_wake() {
+        assert!(drive_returns(|| NotifiedInView(crate::Notifier::new())));
+    }
+}
