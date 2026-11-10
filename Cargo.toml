@@ -2,7 +2,15 @@
 name = "dfui"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.90"
 license = "WTFPL"
+description = "Declarative UI framework that draws shapes, text and icons analytically in one wgpu shader"
+repository = "https://github.com/LuisAyuso/dfui"
+readme = "README.md"
+keywords = ["gui", "ui", "wgpu", "android", "declarative"]
+categories = ["gui", "rendering"]
+# The dex is built from the Java beside it by scripts/android-dex.sh.
+include = ["src/**", "assets/**", "android/**", "README.md", "LICENSE"]
 
 [dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }

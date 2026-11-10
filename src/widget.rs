@@ -12,6 +12,7 @@ use crate::runtime::task::Tasks;
 use crate::text::{Font, Text, TextLayout};
 
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Event {
     PointerDown {
         x: f32,
@@ -46,6 +47,7 @@ pub enum Event {
 
 /// The soft keyboard a text field asks for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Keyboard {
     #[default]
     Text,
@@ -56,6 +58,7 @@ pub enum Keyboard {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Key {
     Backspace,
     Delete,

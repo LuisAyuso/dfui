@@ -17,7 +17,10 @@ pub use anim::Animated;
 pub use path::{Path, Shape};
 pub use render::{Bitmap, Color, Pixels, Rect, Shadow};
 pub use runtime::task::{Notifier, Sleep, sleep};
+// Hooks for the benches and golden tests, outside the semver guarantee.
+#[doc(hidden)]
 pub use runtime::{Bench, GpuBench, snapshot};
+/// Layout styles. Its version is part of dfui's: a taffy upgrade is a breaking change.
 pub use taffy;
 pub use text::{Font, Text, TextLayout};
 pub use theme::{Ink, Role, Theme};

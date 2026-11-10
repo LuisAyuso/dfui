@@ -115,7 +115,7 @@ impl App for MyApp {
 }
 
 fn main() {
-    let close = Shape::from_bytes(include_bytes!("../assets/icons/close.path"));
+    let close = Shape::from_bytes(include_bytes!("../assets/icons/close.path")).unwrap();
     dfui::run(MyApp { close });
 }
 ```

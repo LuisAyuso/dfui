@@ -196,7 +196,9 @@ mod tests {
         let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <line x1="12" y1="2" x2="12" y2="20"/><polyline points="16 16 12 20 8 16"/></svg>"#;
-        let s = dfui::Shape::from_bytes(&convert(svg).unwrap());
+        let s = dfui::Shape::from_bytes(&convert(svg).unwrap()).unwrap();
+        let bytes = convert(svg).unwrap();
+        assert!(dfui::Shape::from_bytes(&bytes[..bytes.len() - 4]).is_none(), "truncated");
         assert_eq!(s.view(), dfui::Rect::new(0.0, 0.0, 24.0, 24.0));
         assert_ne!(winding(s.path(), [12.0, 10.0]), 0, "on the shaft");
         assert_ne!(

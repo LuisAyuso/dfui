@@ -200,10 +200,14 @@ Theming:
       `layout::measure`, `text_input::event`.
 - [ ] List ghosts are recognized by `position == Absolute` (`Slot::inert`);
       use an explicit flag.
-- [ ] Test hooks in production code: `ime_requests` on `Runtime`, the settable
-      clock, `Bench` and `GpuBench` in the public API.
-- [ ] Public API: `Event` and `Key` aren't `#[non_exhaustive]`; `taffy` types
-      are exposed, so a `taffy` upgrade breaks apps.
+- [ ] Test hooks in production code: `ime_requests` on `Runtime` and the
+      settable clock. `Bench`, `GpuBench` and `snapshot` are `#[doc(hidden)]`.
+- [x] Public API: `Event`, `Key` and `Keyboard` are `#[non_exhaustive]`.
+      `taffy` stays re-exported (`Widget` speaks its `Style`), so a `taffy`
+      upgrade is a dfui breaking change.
+- [x] `Shape::from_bytes` returns `None` on a bad or truncated file.
+- [x] Crate metadata, MSRV (1.90, from wgpu) and an `include` list for
+      `cargo package`.
 - [x] Startup failures exit with a message, invalid fonts fall back to the
       default, and `Bitmap`'s size check can't overflow.
 - [ ] Duplicated cubic-to-quadratic splitting in `outline.rs` and `svg2path`.
