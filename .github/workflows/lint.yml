@@ -28,3 +28,14 @@ jobs:
       # The Android and web runtimes are behind cfg, so the host pass never sees them.
       - run: cargo clippy -p dfui --target aarch64-linux-android --locked -- -D warnings
       - run: cargo clippy -p dfui --target wasm32-unknown-unknown --locked -- -D warnings
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Broken intra-doc links and malformed docs fail here before docs.rs sees them.
+      - run: cargo doc --no-deps -p dfui --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
