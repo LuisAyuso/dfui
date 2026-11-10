@@ -23,7 +23,8 @@ struct Instance {
     @location(2) color: vec4<f32>,
     @location(3) border_color: vec4<f32>,
     // shape: radius, border width, blur, kind 0
-    // glyph: band header, horizontal bands, vertical bands, kind 1
+    // glyph: band header, horizontal bands, vertical bands, kind 1; border_color is
+    // the mask's (header, horizontal bands, vertical bands, 1), or 0 for none
     // image: radius, _, _, kind 2
     // uv: glyph em-space quad corners; shadow: hole (x0, y0, x1, y1) left undrawn;
     // image: texture coordinates of the rect's corners
@@ -173,7 +174,13 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
         let v = ray_coverage(in.uv, header + 2u * u32(in.params.y), in.params.z, r.x, r.z, max(px.y, 1e-6), true);
         // Trust the ray that crosses an edge near the pixel; the other one only
         // sees a hard inside/outside step there. Same weighting as Slug.
-        let cov = max((h.x * h.y + v.x * v.y) / max(h.y + v.y, 1e-5), min(h.x, v.x));
+        var cov = max((h.x * h.y + v.x * v.y) / max(h.y + v.y, 1e-5), min(h.x, v.x));
+        if in.border_color.w > 0.5 {
+            let m = in.border_color;
+            let mh = ray_coverage(in.uv, u32(m.x), m.y, r.w, r.y, max(px.x, 1e-6), false);
+            let mv = ray_coverage(in.uv, u32(m.x) + 2u * u32(m.y), m.z, r.x, r.z, max(px.y, 1e-6), true);
+            cov *= max((mh.x * mh.y + mv.x * mv.y) / max(mh.y + mv.y, 1e-5), min(mh.x, mv.x));
+        }
         color = vec4(in.color.rgb, in.color.a * cov);
     } else {
         let radius = min(in.params.x, min(in.rect.z, in.rect.w) * 0.5);

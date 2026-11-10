@@ -253,6 +253,14 @@ Theming:
 - [ ] Morph any glyph into any other: corner counts differ, so pairs fall
       back to index pairing; a curve-matching pass (Sederberg & Greenwood
       1992, dynamic programming) would replace it.
+- [ ] Move the hybrid morph from `demo/examples/glyph_lab.rs` into
+      `anim::Morph`: dense DP with corners pinned, cutting the exact curves.
+      It tears about half as often and keeps corners. Skeleton strokes are
+      the candidate for topology changes and a pen animation.
+- [x] Masked paths (`PaintCx::path_masked`): the pen in `glyph_lab` reveals
+      the real outline, so its edges match the rendered glyph.
+- [ ] Tune the pen route in `glyph_lab` (`plan`): E, G, J, Q, g, 9 start
+      away from where a hand would.
 - [ ] Morphs across topology changes (O → C): an unpaired hole shrinks to
       its centre but can leave the outer contour on the way, showing as fill.
 - [ ] Layout animations (size/position): need a rebuild or relayout per

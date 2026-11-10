@@ -471,7 +471,7 @@ impl Text {
                 gl.plane.w * size,
                 gl.plane.h * size,
             );
-            scene.glyph(r, gl.em, color, clip, gl.bands);
+            scene.glyph(r, gl.em, color, clip, gl.bands, None);
         }
     }
 
@@ -521,7 +521,7 @@ impl Text {
             g.plane.w * sx,
             g.plane.h * sy,
         );
-        scene.glyph(q, g.em, color, clip, g.bands);
+        scene.glyph(q, g.em, color, clip, g.bands, None);
     }
 
     fn glyph(&mut self, face: FaceId, id: GlyphId) -> Option<Glyph> {

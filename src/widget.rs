@@ -6,7 +6,7 @@ use web_time::Instant;
 
 use taffy::{AvailableSpace, Size, Style};
 
-use crate::path::{Path, Shape};
+use crate::path::{Path, Quad, Shape};
 use crate::render::{Bitmap, Color, Rect, Scene, Shadow};
 use crate::runtime::task::Tasks;
 use crate::text::{Font, Text, TextLayout};
@@ -302,31 +302,52 @@ impl PaintCx<'_> {
 
     /// Fills `path` through the glyph renderer.
     pub fn path(&mut self, path: &Path, color: Color) {
-        let quads = path.contours.iter().flatten();
+        self.fill_path(path, None, color);
+    }
+
+    /// Fills `path` only where `mask` covers it: the edges stay `path`'s, and
+    /// `mask` just decides how much shows, e.g. to reveal a shape progressively.
+    pub fn path_masked(&mut self, path: &Path, mask: &Path, color: Color) {
+        self.fill_path(path, Some(mask), color);
+    }
+
+    fn fill_path(&mut self, path: &Path, mask: Option<&Path>, color: Color) {
+        let quads = || path.contours.iter().flatten();
+        let mask_quads = || mask.into_iter().flat_map(|m| m.contours.iter().flatten());
         let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
-        for p in quads.clone().flatten() {
+        for p in quads().chain(mask_quads()).flatten() {
             lo = [lo[0].min(p[0]), lo[1].min(p[1])];
             hi = [hi[0].max(p[0]), hi[1].max(p[1])];
         }
         let span = (hi[0] - lo[0]).max(hi[1] - lo[1]);
-        if !span.is_finite() || span <= 0.0 {
+        if !span.is_finite() || span <= 0.0 || mask.is_some_and(|m| m.contours.is_empty()) {
             return;
         }
         // Stored like a glyph: y up, scaled to a unit box, which keeps the
         // shader's line test and precision where glyphs have them.
         let s = 1.0 / span;
-        let unit = quads
-            .map(|q| q.map(|[x, y]| [(x - lo[0]) * s, (hi[1] - y) * s]))
-            .collect();
+        let unit = |q: &Quad| q.map(|[x, y]| [(x - lo[0]) * s, (hi[1] - y) * s]);
+        // Out-and-back slivers at the corners give a path and its mask one
+        // box, so the shader reads both with the same coordinates.
+        let far = [(hi[0] - lo[0]) * s, (hi[1] - lo[1]) * s];
+        let (p0, p1, p2, p3) = ([0.0; 2], [1e-4, 0.0], far, [far[0] - 1e-4, far[1]]);
+        let rim = [[p0, p0, p1], [p1, p1, p0], [p2, p2, p3], [p3, p3, p2]];
+        let corners = mask.map(|_| rim).into_iter().flatten();
         // 1px padding keeps the edge antialiasing.
-        let Some(g) = self.text.outlines.transient(unit, s) else {
+        let body = quads().map(unit).chain(corners).collect();
+        let Some(g) = self.text.outlines.transient(body, s) else {
             return;
         };
+        let cover = mask.and_then(|_| {
+            let edge = mask_quads().map(unit).chain(rim);
+            self.text.outlines.transient(edge.collect(), s)
+        });
         let [x0, y0, x1, y1] = g.bbox;
         let r = Rect::new(lo[0] + x0 / s, hi[1] - y1 / s, (x1 - x0) / s, (y1 - y0) / s);
         let bands = [g.header as f32, g.bands_h as f32, g.bands_v as f32];
+        let cover = cover.map(|c| [c.header as f32, c.bands_h as f32, c.bands_v as f32]);
         self.scene
-            .glyph(r, [x0, y1, x1, y0], color, self.clip, bands);
+            .glyph(r, [x0, y1, x1, y0], color, self.clip, bands, cover);
     }
 
     /// `shape` with its view box mapped onto `r`; stored once, so drawing it

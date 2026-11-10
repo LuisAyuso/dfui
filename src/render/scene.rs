@@ -113,12 +113,13 @@ impl Scene {
         color: Color,
         clip: Rect,
         bands: [f32; 3],
+        mask: Option<[f32; 3]>,
     ) {
         self.instances.push(Instance {
             rect: [r.x, r.y, r.w, r.h],
             uv: em,
             color: color.rgba(),
-            border_color: [0.0; 4],
+            border_color: mask.map_or([0.0; 4], |m| [m[0], m[1], m[2], 1.0]),
             params: [bands[0], bands[1], bands[2], 1.0],
             clip: [clip.x, clip.y, clip.w, clip.h],
         });

@@ -209,6 +209,10 @@ frames:
   They go in a fixed transient region at the front of the buffers (512
   curves, 4096 band entries) that `Outlines::begin_frame` resets. Paths that
   don't fit spill into the main buffers for that frame.
+- `PaintCx::path_masked` multiplies a path's coverage by a second path's, so
+  the edges stay the path's and the mask only decides how much shows. The
+  mask's band header travels in the instance's `border_color`, unused by
+  glyphs, and both get the same box, so one set of em coordinates reads both.
 - SVG isn't parsed at runtime; `tools/svg2path` converts icons ahead of time
   to `.path` files, loaded with `Shape::from_bytes`.
 
