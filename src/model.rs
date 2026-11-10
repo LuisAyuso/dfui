@@ -8,15 +8,21 @@ use std::rc::Rc;
 
 /// Stable identity of an item: rows keep their state and animate by it.
 pub trait Keyed {
+    /// Unique among the model's items and unchanged while the item lives.
     fn key(&self) -> u64;
 }
 
 /// Items by index, each with a stable key.
 pub trait ListModel {
+    /// What each row is built from.
     type Item;
+    /// Number of items.
     fn len(&self) -> usize;
+    /// Calls `f` with item `i`; `i` is below `len`.
     fn with<R>(&self, i: usize, f: impl FnOnce(&Self::Item) -> R) -> R;
+    /// Key of item `i`; `i` is below `len`.
     fn key(&self, i: usize) -> u64;
+    /// Whether there are no items.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -63,9 +69,11 @@ impl<M: ListModel> ListModel for RefCell<M> {
 
 /// Items addressed by key, each with ordered children.
 pub trait TreeModel {
+    /// What each row is built from.
     type Item;
     /// Calls `f` with the keys of `parent`'s children in order; `None` lists the roots.
     fn children(&self, parent: Option<u64>, f: &mut dyn FnMut(u64));
+    /// Calls `f` with the item under `key`, one the model has listed.
     fn with<R>(&self, key: u64, f: impl FnOnce(&Self::Item) -> R) -> R;
     /// Lets a node show as expandable before its children are listed.
     fn has_children(&self, key: u64) -> bool {
@@ -117,6 +125,7 @@ impl<T> Default for Tree<T> {
 }
 
 impl<T: Keyed> Tree<T> {
+    /// An empty tree.
     pub fn new() -> Self {
         Self::default()
     }
@@ -147,6 +156,7 @@ impl<T: Keyed> Tree<T> {
         }
     }
 
+    /// The item under `key`, if it's in the tree.
     pub fn get(&self, key: u64) -> Option<&T> {
         self.nodes.get(&key).map(|n| &n.0)
     }
@@ -172,9 +182,13 @@ impl<T> TreeModel for Tree<T> {
 /// One visible row of a flattened tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Row {
+    /// The node's key in the model.
     pub key: u64,
+    /// Levels below the roots; 0 for a root.
     pub depth: u16,
+    /// Whether its children are shown in the rows after it.
     pub expanded: bool,
+    /// Whether it can expand, from `TreeModel::has_children`.
     pub has_children: bool,
 }
 

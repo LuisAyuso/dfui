@@ -22,6 +22,7 @@ pub struct Theme {
     pub track: Color,
     /// Input borders, unchecked toggles and radios.
     pub outline: Color,
+    /// The line under table headers and tab bars.
     pub divider: Color,
     /// Snackbars and tooltips, which contrast with the window.
     pub inverse: Color,
@@ -51,21 +52,34 @@ impl Default for Theme {
 /// A `Theme` color by name, resolved where the widget is painted.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Role {
+    /// `Theme::background`.
     Background,
+    /// `Theme::surface`.
     Surface,
+    /// `Theme::ink`.
     Ink,
+    /// `Theme::muted`.
     Muted,
+    /// `Theme::accent`.
     Accent,
+    /// `Theme::on_accent`.
     OnAccent,
+    /// `Theme::selected`.
     Selected,
+    /// `Theme::track`.
     Track,
+    /// `Theme::outline`.
     Outline,
+    /// `Theme::divider`.
     Divider,
+    /// `Theme::inverse`.
     Inverse,
+    /// `Theme::on_inverse`.
     OnInverse,
 }
 
 impl Theme {
+    /// The color this theme gives `role`.
     pub fn color(&self, role: Role) -> Color {
         match role {
             Role::Background => self.background,
@@ -88,9 +102,13 @@ impl Theme {
 /// contrasts with the button or surface around it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Ink {
+    /// This color, whatever the theme.
     Fixed(Color),
+    /// The theme's color for this role.
     Role(Role),
     #[default]
+    /// The content color of the nearest `button` or `container` with `content`;
+    /// `Role::Ink` outside them.
     Content,
 }
 
