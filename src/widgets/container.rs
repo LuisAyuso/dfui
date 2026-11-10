@@ -53,10 +53,12 @@ pub fn spacer() -> Container {
 }
 
 impl Container {
+    /// Appends `c` after the existing children.
     pub fn child(mut self, c: impl Into<Element>) -> Self {
         self.children.push(c.into());
         self
     }
+    /// Background fill; transparent by default.
     pub fn bg(mut self, c: impl Into<Ink>) -> Self {
         self.bg = c.into();
         self
@@ -66,14 +68,17 @@ impl Container {
         self.emphasis = Some(Emphasis(Default::default(), Default::default(), c.into()));
         self
     }
+    /// Corner radius of the background and border, logical px.
     pub fn radius(mut self, r: f32) -> Self {
         self.radius = r;
         self
     }
+    /// Border `width` logical px wide, drawn inside the box.
     pub fn border(mut self, width: f32, c: impl Into<Ink>) -> Self {
         self.border = (width, c.into());
         self
     }
+    /// Drop shadow under the background, following its `radius`.
     pub fn shadow(mut self, s: Shadow) -> Self {
         self.shadow = Some(s);
         self

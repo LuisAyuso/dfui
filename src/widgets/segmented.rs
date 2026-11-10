@@ -94,6 +94,7 @@ impl Segmented {
         self.on_change = Some(Box::new(f));
         self
     }
+    /// Color of the selected label and the tab underline; `Role::Accent` by default.
     pub fn accent(mut self, c: impl Into<Ink>) -> Self {
         self.accent = c.into();
         self

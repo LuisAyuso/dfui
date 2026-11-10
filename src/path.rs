@@ -57,7 +57,11 @@ impl Shape {
     /// `None` if `bytes` aren't one or are truncated.
     pub fn from_bytes(bytes: &[u8]) -> Option<Shape> {
         let body = bytes.strip_prefix(b"DFP1")?;
-        let mut words = body.as_chunks::<4>().0.iter().map(|&w| u32::from_le_bytes(w));
+        let mut words = body
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&w| u32::from_le_bytes(w));
         // Counts are u32 words too; reading them as f32 bits keeps one closure.
         let mut f = || words.next().map(f32::from_bits);
         let view = Rect::new(f()?, f()?, f()?, f()?);

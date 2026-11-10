@@ -70,6 +70,7 @@ impl Progress {
         }
         self
     }
+    /// Color of the unfilled bar; `Role::Track` by default.
     pub fn track(mut self, c: impl Into<Ink>) -> Self {
         self.track = c.into();
         self
@@ -156,10 +157,12 @@ pub fn spinner() -> Spinner {
 }
 
 impl Spinner {
+    /// Width and height, logical px; 24 by default.
     pub fn size(mut self, px: f32) -> Self {
         self.size = px;
         self
     }
+    /// `Role::Accent` by default.
     pub fn color(mut self, c: impl Into<Ink>) -> Self {
         self.color = c.into();
         self

@@ -578,6 +578,7 @@ fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
 /// first, and keeps the app open. Leave it out where Back should exit.
 pub struct OnBack(Handler);
 
+/// Handles Back for the screen it's placed in; see `OnBack`.
 pub fn on_back(f: impl Fn(&mut EventCx) + 'static) -> OnBack {
     OnBack(Box::new(f))
 }
@@ -615,6 +616,7 @@ pub struct Dropdown {
     on_change: Option<OnChange>,
 }
 
+/// A dropdown over `labels` showing `labels[selected]`; the menu floats below it.
 pub fn dropdown<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Dropdown {
     Dropdown {
         labels: labels.into_iter().map(Into::into).collect(),

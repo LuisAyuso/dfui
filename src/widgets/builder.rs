@@ -13,7 +13,9 @@ use crate::widget::{BuildCx, Element, Scope, State, Widget};
 /// What an async source has produced so far, and whether it has finished.
 #[derive(Default)]
 pub struct Snapshot<T> {
+    /// Everything received so far: the stream's items, or the future's value.
     pub data: T,
+    /// The source has finished; `data` won't change until it restarts.
     pub done: bool,
 }
 

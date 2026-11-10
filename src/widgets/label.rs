@@ -23,6 +23,7 @@ struct LabelState {
     emphasis: Option<Emphasis>,
 }
 
+/// A run of text built by `text`; see there.
 pub struct Label {
     text: String,
     font: Font,
@@ -45,14 +46,17 @@ pub fn text(s: impl Into<String>) -> Label {
 }
 
 impl Label {
+    /// `Font::DEFAULT` unless set.
     pub fn font(mut self, f: Font) -> Self {
         self.font = f;
         self
     }
+    /// Font size, logical px; 16 by default.
     pub fn size(mut self, s: f32) -> Self {
         self.size = s;
         self
     }
+    /// Text color; by default the content color of the enclosing container or button.
     pub fn color(mut self, c: impl Into<Ink>) -> Self {
         self.color = c.into();
         self

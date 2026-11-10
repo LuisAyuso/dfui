@@ -61,14 +61,18 @@ pub fn icon_button(shape: &Shape) -> Icon {
 }
 
 impl Icon {
+    /// Width and height of the drawn shape, logical px; 24 by default.
+    /// Padding, as on `icon_button`, comes on top.
     pub fn size(mut self, px: f32) -> Self {
         self.size = px;
         self
     }
+    /// Fill color; by default the content color of the enclosing container or button.
     pub fn color(mut self, c: impl Into<Ink>) -> Self {
         self.color = c.into();
         self
     }
+    /// Runs on a release inside the icon, which then animates like `icon_button`.
     pub fn on_click(mut self, f: impl Fn(&mut EventCx) + 'static) -> Self {
         self.on_click = Some(Box::new(f));
         self

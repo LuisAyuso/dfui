@@ -33,6 +33,7 @@ impl<T> Column<T> {
             cmp: None,
         }
     }
+    /// Fixed width, logical px, instead of a share of what's left.
     pub fn width(mut self, w: f32) -> Self {
         self.width = Some(w);
         self

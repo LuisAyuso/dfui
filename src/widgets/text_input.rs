@@ -71,22 +71,27 @@ impl TextInput {
         self.on_change = Some(Box::new(f));
         self
     }
+    /// Faded hint shown while the value is empty.
     pub fn placeholder(mut self, s: impl Into<String>) -> Self {
         self.placeholder = s.into();
         self
     }
+    /// `Font::DEFAULT` unless set.
     pub fn font(mut self, f: Font) -> Self {
         self.font = f;
         self
     }
+    /// Font size, logical px; 16 by default.
     pub fn size(mut self, s: f32) -> Self {
         self.size = s;
         self
     }
+    /// Text color, and faded, the placeholder's; `Role::Ink` by default.
     pub fn color(mut self, c: impl Into<Ink>) -> Self {
         self.color = c.into();
         self
     }
+    /// Color of the caret, selection and focused border; `Role::Accent` by default.
     pub fn accent(mut self, c: impl Into<Ink>) -> Self {
         self.accent = c.into();
         self

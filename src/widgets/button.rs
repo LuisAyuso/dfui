@@ -64,6 +64,7 @@ struct ButtonState {
     press: Animated<f32>,
 }
 
+/// A tappable box built by `button`; see there.
 pub struct Button {
     child: [Element; 1],
     on_click: Option<Handler>,
@@ -111,10 +112,12 @@ impl Button {
         self.on_click = Some(Box::new(f));
         self
     }
+    /// Background color; `Role::Accent` by default.
     pub fn color(mut self, c: impl Into<Ink>) -> Self {
         self.color = c.into();
         self
     }
+    /// Corner radius, logical px; 8 by default.
     pub fn radius(mut self, r: f32) -> Self {
         self.radius = r;
         self

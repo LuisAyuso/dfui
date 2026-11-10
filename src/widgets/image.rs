@@ -5,6 +5,7 @@ use crate::render::{Bitmap, Color};
 use crate::text::Text;
 use crate::widget::{Element, PaintCx, Widget};
 
+/// A bitmap built by `image`; see there.
 pub struct Image {
     bitmap: Bitmap,
     radius: f32,
@@ -28,6 +29,7 @@ pub fn image(bitmap: Bitmap) -> Image {
 }
 
 impl Image {
+    /// Rounds the image's corners, logical px.
     pub fn radius(mut self, r: f32) -> Self {
         self.radius = r;
         self

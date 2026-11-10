@@ -13,6 +13,7 @@ pub struct Provide<T> {
     style: Style,
 }
 
+/// `child` with `value` in its scope; see `Provide`.
 pub fn provide<T: 'static>(value: T, child: impl Into<Element>) -> Provide<T> {
     Provide {
         value,
