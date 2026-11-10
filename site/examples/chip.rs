@@ -1,9 +1,3 @@
-//! # Chip
-//!
-//! `chip(label)` is a small rounded label, and `choice_chip(label, selected)`
-//! one you can tap. `badge(child, label)` puts a label, usually a count, over
-//! the top right corner of another widget.
-
 use dfui::taffy::AlignItems;
 use dfui::widgets::{Styled, badge, button, chip, choice_chip, column, row, stateful, text};
 use dfui::{Element, Role};
@@ -43,5 +37,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

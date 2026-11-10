@@ -93,6 +93,7 @@ where
 
 /// `model`'s items as rows of `columns`, under a header that sorts by the
 /// sortable ones. Rows are a virtualized `list`; bound its height the same way.
+#[doc = example!("table")]
 pub fn table<M>(model: M, columns: Vec<Column<M::Item>>) -> Stateful<TableSort>
 where
     M: ListModel + 'static,

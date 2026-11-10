@@ -18,3 +18,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Selects targets to leave out tests/golden.rs, whose images come from the reference machine.
       - run: cargo test --workspace --lib --bins --test patterns --locked
+      # The widget examples and the README, compiled but not run (they open a window).
+      - run: cargo test -p dfui --doc --locked

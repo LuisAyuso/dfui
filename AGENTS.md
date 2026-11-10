@@ -40,5 +40,6 @@ Tests marked `#[ignore]` need a GPU: `cargo test -- --include-ignored`.
 - A `ponytail:` comment marks a deliberate shortcut and its ceiling.
 - Commit directly to `main`. Title up to 50 characters saying what changed;
   a short body saying why.
-- New widgets get an example in `site/examples/`, added to `WIDGETS` in
-  `site/src/main.rs`, and a golden when they draw something new.
+- New widgets get an example in `site/examples/` (`<name>.rs` code, `<name>.md`
+  page text), added to `WIDGETS` in `site/src/main.rs` and to the widget's docs
+  with `#[doc = example!("<name>")]`, and a golden when they draw something new.

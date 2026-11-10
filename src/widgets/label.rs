@@ -34,6 +34,7 @@ pub struct Label {
 }
 
 /// A run of text, wrapped at spaces to the available width.
+#[doc = example!("text")]
 pub fn text(s: impl Into<String>) -> Label {
     Label {
         text: s.into(),

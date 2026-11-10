@@ -1,8 +1,3 @@
-//! # Tabs
-//!
-//! `tabs(labels, selected)` is a tab bar with a sliding underline. It only
-//! draws the bar: show the selected page yourself, as below.
-
 use dfui::widgets::{Styled, column, stateful, tabs, text};
 use dfui::{Color, Element};
 
@@ -28,5 +23,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

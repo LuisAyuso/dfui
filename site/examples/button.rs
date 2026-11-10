@@ -1,10 +1,3 @@
-//! # Button
-//!
-//! `button` wraps any child in a tappable box. `on_click` runs when a press is
-//! released inside it, and usually changes state through a `stateful` handle.
-//!
-//! `color` and `radius` restyle it; hover and press fade on their own.
-
 use dfui::taffy::AlignItems;
 use dfui::widgets::{Styled, button, row, stateful, text};
 use dfui::{Color, Element};
@@ -30,5 +23,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

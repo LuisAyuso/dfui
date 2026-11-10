@@ -1,8 +1,3 @@
-//! # Drawer
-//!
-//! `drawer(child)` is a modal, full-height panel sliding in along the left
-//! edge. Show it through an `overlays` host, like a `dialog`.
-
 use dfui::widgets::{Overlays, Shown, Styled, button, column, drawer, overlays, text};
 use dfui::{Element, Handle};
 
@@ -28,5 +23,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

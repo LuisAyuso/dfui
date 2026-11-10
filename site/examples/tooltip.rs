@@ -1,8 +1,3 @@
-//! # Tooltip
-//!
-//! `tooltip(child, tip)` shows `tip` beside `child` while the pointer is over
-//! it, or after a long press on a touch screen, and flips to stay in the window.
-
 use dfui::Element;
 use dfui::widgets::{Styled, button, text, tooltip};
 
@@ -13,5 +8,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

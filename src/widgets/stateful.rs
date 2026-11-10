@@ -17,6 +17,7 @@ pub struct Stateful<S> {
 }
 
 /// Builds a subtree from local state `S`, kept across rebuilds.
+#[doc = example!("stateful")]
 pub fn stateful<S, E>(build: impl Fn(&S, Handle<S>) -> E + 'static) -> Stateful<S>
 where
     S: Default + 'static,

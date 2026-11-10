@@ -14,6 +14,7 @@ pub struct Provide<T> {
 }
 
 /// `child` with `value` in its scope; see [`Provide`].
+#[doc = example!("provide")]
 pub fn provide<T: 'static>(value: T, child: impl Into<Element>) -> Provide<T> {
     Provide {
         value,

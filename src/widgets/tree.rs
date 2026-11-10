@@ -74,6 +74,7 @@ where
 
 /// `model`'s nodes as an indented, virtualized list; the arrow before a node
 /// with children expands or collapses it. `row` draws the rest of each line.
+#[doc = example!("tree_view")]
 pub fn tree_view<M, F, E>(model: M, row: F) -> Stateful<Expanded>
 where
     M: TreeModel + 'static,

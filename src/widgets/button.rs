@@ -79,6 +79,7 @@ pub struct Button {
 
 /// Tappable box around `child`; `on_click` runs on a release inside it.
 /// Text in it morphs to bold while pressed.
+#[doc = example!("button")]
 pub fn button(child: impl Into<Element>) -> Button {
     Button {
         child: [child.into()],

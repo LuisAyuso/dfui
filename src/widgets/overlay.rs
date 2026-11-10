@@ -347,6 +347,7 @@ fn card(child: impl Into<Element>) -> Container {
 }
 
 /// Modal card centered over the dimmed window.
+#[doc = example!("dialog")]
 pub fn dialog(child: impl Into<Element>) -> Overlay {
     let mut o = overlay(card(child))
         .modal(SCRIM)
@@ -358,6 +359,7 @@ pub fn dialog(child: impl Into<Element>) -> Overlay {
 }
 
 /// Modal full-height panel along the left edge.
+#[doc = example!("drawer")]
 pub fn drawer(child: impl Into<Element>) -> Overlay {
     let panel = card(child).radius(0.0).width(280.0).grow(1.0);
     let mut o = overlay(panel).modal(SCRIM);
@@ -367,6 +369,7 @@ pub fn drawer(child: impl Into<Element>) -> Overlay {
 }
 
 /// Modal panel along the bottom edge, full width.
+#[doc = example!("bottom_sheet")]
 pub fn bottom_sheet(child: impl Into<Element>) -> Overlay {
     // Runs a radius past the window's bottom edge, whose clip squares off
     // the bottom corners.
@@ -384,6 +387,7 @@ pub fn bottom_sheet(child: impl Into<Element>) -> Overlay {
 /// enters the tree. Shown through [`Overlays`] it waits for earlier ones to
 /// leave and is removed after; in a plain tree give it a new `key` to show
 /// it again.
+#[doc = example!("snackbar")]
 pub fn snackbar(message: impl Into<String>) -> Overlay {
     let bar = container(text(message).size(14.0).color(Role::OnInverse))
         .bg(Role::Inverse)
@@ -530,6 +534,7 @@ impl Handle<Overlays> {
 }
 
 /// Hosts `content` and the overlays its handlers show through the handle.
+#[doc = example!("overlays")]
 pub fn overlays<E: Into<Element>>(
     content: impl Fn(Handle<Overlays>) -> E + 'static,
 ) -> Stateful<Overlays> {
@@ -579,6 +584,7 @@ fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
 pub struct OnBack(Handler);
 
 /// Handles Back for the screen it's placed in; see [`OnBack`].
+#[doc = example!("on_back")]
 pub fn on_back(f: impl Fn(&mut EventCx) + 'static) -> OnBack {
     OnBack(Box::new(f))
 }
@@ -599,6 +605,7 @@ impl Widget for OnBack {
 }
 
 /// Shows `tip` above `child` while the pointer is over it.
+#[doc = example!("tooltip")]
 pub fn tooltip(child: impl Into<Element>, tip: impl Into<String>) -> Container {
     let tip = container(text(tip).size(13.0).color(Role::OnInverse))
         .bg(Role::Inverse)
@@ -617,6 +624,7 @@ pub struct Dropdown {
 }
 
 /// A dropdown over `labels` showing `labels[selected]`; the menu floats below it.
+#[doc = example!("dropdown")]
 pub fn dropdown<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Dropdown {
     Dropdown {
         labels: labels.into_iter().map(Into::into).collect(),

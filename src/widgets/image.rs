@@ -15,6 +15,7 @@ pub struct Image {
 
 /// `bitmap` stretched over the widget's box. Its natural size is one logical
 /// pixel per bitmap pixel, and a box sized on one axis keeps the aspect ratio.
+#[doc = example!("image")]
 pub fn image(bitmap: Bitmap) -> Image {
     let aspect = bitmap.width() as f32 / bitmap.height().max(1) as f32;
     Image {

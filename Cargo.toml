@@ -10,7 +10,8 @@ readme = "README.md"
 keywords = ["gui", "ui", "wgpu", "android", "declarative"]
 categories = ["gui", "rendering"]
 # The dex is built from the Java beside it by scripts/android-dex.sh.
-include = ["src/**", "assets/**", "android/**", "README.md", "LICENSE"]
+# Widget docs include the site examples' code.
+include = ["src/**", "assets/**", "android/**", "site/examples/*.rs", "README.md", "LICENSE"]
 
 [dependencies]
 bytemuck = { version = "1.25.2", features = ["derive"] }
@@ -41,7 +42,7 @@ wgpu = "30"
 # WebGPU only: the other backends would just add size to the wasm.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["std", "webgpu", "wgsl"] }
-web-sys = { version = "0.3", features = ["Document", "HtmlElement", "Node", "Window"] }
+web-sys = { version = "0.3", features = ["console", "Document", "HtmlElement", "Node", "Window"] }
 wasm-bindgen = "0.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -52,6 +53,7 @@ arboard = { version = "3.7", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8"
+futures-util = { version = "0.3", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Small wasm for the docs site's examples.

@@ -360,6 +360,9 @@ repeated on the phone; lists and text input have no bench.
 
 ## Tooling
 
+- [x] One file per widget example: `site/examples/<name>.rs` is the site's
+      code and wasm and the widget's doc example; doc tests compile it and
+      the README's snippets in CI.
 - [x] Golden-image tests (`tests/golden.rs`): widgets rendered offscreen
       on a virtual clock (`Bench::advance`/`settle`), animations as frame
       strips, compared against PNGs from the reference machine.

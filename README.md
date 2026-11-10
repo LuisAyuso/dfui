@@ -6,7 +6,12 @@ no glyph atlas. Text and icons are drawn straight from their Bézier outlines
 with the [Slug algorithm](docs/glyphs.md). Primary target is Android (NativeActivity, Vulkan); desktop runs
 through the same winit event loop.
 
-```rust
+```rust,no_run
+use dfui::widgets::{button, stateful, text};
+use dfui::{App, Element};
+
+struct Counter;
+
 impl App for Counter {
     fn view(&self) -> Element {
         stateful(|n: &i32, h| {
@@ -105,7 +110,10 @@ cargo install --path tools/svg2path             # for use outside this repo
 Build each `Shape` once and keep it, for example in the `App`, to avoid parsing
 it again in `view`:
 
-```rust
+```rust,no_run
+use dfui::widgets::icon_button;
+use dfui::{App, Element, Shape};
+
 struct MyApp { close: Shape }
 
 impl App for MyApp {
@@ -115,7 +123,8 @@ impl App for MyApp {
 }
 
 fn main() {
-    let close = Shape::from_bytes(include_bytes!("../assets/icons/close.path")).unwrap();
+    let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icons/close.path"));
+    let close = Shape::from_bytes(bytes).unwrap();
     dfui::run(MyApp { close });
 }
 ```
@@ -137,9 +146,11 @@ The docs site in `site/` is static HTML, deployed to GitHub Pages by
 
 - `site/pages/*.md`: hand-written pages (introduction, getting started,
   concepts); `docs/architecture.md` is published as is.
-- `site/examples/*.rs`: one standalone program per widget, built to its own
-  wasm. Its `//!` header is the widget page's text; its code is shown below
-  the live frame. New examples are added to `WIDGETS` in `site/src/main.rs`.
+- `site/examples/<name>.rs`: one standalone program per widget, built to its
+  own wasm and shown below the live frame, under the text of `<name>.md`. The
+  widget's API docs include the same file (`#[doc = example!("<name>")]`), so
+  `cargo test --doc` compiles it. New examples are added to `WIDGETS` in
+  `site/src/main.rs`.
 
 ```sh
 rustup target add wasm32-unknown-unknown

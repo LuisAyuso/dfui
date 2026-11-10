@@ -9,6 +9,7 @@ use crate::theme::Ink;
 use crate::widget::{Element, PaintCx, Widget};
 
 /// Flex box with optional rounded, bordered, shadowed background.
+#[doc = example!("layout")]
 pub struct Container {
     style: Style,
     children: Vec<Element>,

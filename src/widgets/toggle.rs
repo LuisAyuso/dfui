@@ -29,6 +29,7 @@ pub struct Toggle {
 }
 
 /// On/off switch; `on_change` gets the new value.
+#[doc = example!("toggle")]
 pub fn toggle(on: bool) -> Toggle {
     Toggle {
         on,

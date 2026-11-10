@@ -1,11 +1,3 @@
-//! # Text input
-//!
-//! `text_input` is a single-line field. It shows the `value` it is given and
-//! reports each edit through `on_change`, so the text lives in your state.
-//!
-//! Tap to focus. Arrows, Home and End move the caret by whole graphemes; with
-//! shift they select. Ctrl/Cmd+A, C, X and V select all, copy, cut and paste.
-
 use dfui::widgets::{Styled, column, stateful, text, text_input};
 use dfui::{Color, Element};
 
@@ -31,5 +23,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

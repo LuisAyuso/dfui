@@ -60,6 +60,7 @@ pub struct Segmented {
 }
 
 /// Pill-shaped segmented button with equal-width options.
+#[doc = example!("segmented")]
 pub fn segmented<S: Into<String>>(
     labels: impl IntoIterator<Item = S>,
     selected: usize,
@@ -80,6 +81,7 @@ pub fn segmented<S: Into<String>>(
 /// Tab bar with an underline; the app shows the selected tab's content. Each
 /// tab is as wide as its label, plus an equal share of the spare width; the
 /// selected label turns bold, morphing glyph by glyph.
+#[doc = example!("tabs")]
 pub fn tabs<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Segmented {
     Segmented {
         look: Look::Tabs,

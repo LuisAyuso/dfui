@@ -1,9 +1,3 @@
-//! # Segmented
-//!
-//! `segmented(labels, selected)` is a set of mutually exclusive options in one
-//! pill. The highlight slides to the selected option, and `on_change` gets its
-//! index.
-
 use dfui::Element;
 use dfui::widgets::{Styled, column, segmented, stateful, text};
 
@@ -26,5 +20,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

@@ -37,6 +37,7 @@ pub struct Builder<S> {
 
 /// Rebuilds from a stream's items, collected into `S` (a `Vec`, `String`, ...).
 /// `stream` gets the providers in scope.
+#[doc = example!("stream_builder")]
 pub fn stream_builder<St, S, E>(
     deps: impl Hash,
     stream: impl FnOnce(Scope) -> St + 'static,
@@ -73,6 +74,7 @@ where
 }
 
 /// Rebuilds once `future` resolves. `future` gets the providers in scope.
+#[doc = example!("future_builder")]
 pub fn future_builder<F, E>(
     deps: impl Hash,
     future: impl FnOnce(Scope) -> F + 'static,
@@ -103,6 +105,7 @@ where
 /// Rebuilds `build`'s subtree each time `notifier` is notified, from any
 /// thread. Unlike a stream, it can't run dry: restarts and several watchers
 /// of one notifier all keep working.
+#[doc = example!("watch")]
 pub fn watch<E: Into<Element>>(
     notifier: &Notifier,
     build: impl Fn() -> E + 'static,

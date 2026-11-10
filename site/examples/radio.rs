@@ -1,9 +1,3 @@
-//! # Radio
-//!
-//! `radio(selected, label)` is one option of a group. The group is just your
-//! state: draw one radio per option and record the choice in `on_select`.
-//! Tapping the label selects too.
-
 use dfui::widgets::{Styled, column, radio, stateful, text};
 use dfui::{Color, Element};
 
@@ -24,5 +18,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

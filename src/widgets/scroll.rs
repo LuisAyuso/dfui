@@ -29,6 +29,7 @@ pub struct Scroll {
 /// content unless told not to: give every flex box between the window and
 /// the scroll `.fill()` (not just `.grow(1.0)`), or the scroll grows to the
 /// whole list and never scrolls.
+#[doc = example!("scroll")]
 pub fn scroll(child: impl Into<Element>) -> Scroll {
     Scroll {
         child: [child.into()],

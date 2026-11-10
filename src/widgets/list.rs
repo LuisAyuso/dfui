@@ -145,6 +145,7 @@ pub struct List {
 }
 
 /// A virtualized list of `model`'s items, each drawn by `row`.
+#[doc = example!("list")]
 pub fn list<M, F, E>(model: M, row: F) -> List
 where
     M: ListModel + 'static,

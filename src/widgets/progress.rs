@@ -38,6 +38,7 @@ pub struct Progress {
 }
 
 /// A bar filled to `value` in 0..=1; changes ease in.
+#[doc = example!("progress")]
 pub fn progress(value: f32) -> Progress {
     let mut p = wait_bar();
     p.layers.push((value, Role::Accent.into()));

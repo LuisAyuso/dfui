@@ -30,6 +30,11 @@ pub use widget::{
     State, Widget,
 };
 
+// Compiles the README's examples as doc tests without publishing it as docs.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 /// Root of the UI. State lives in `stateful` widgets and in external sources
 /// that builders read; `view` runs again whenever any of it changes.
 pub trait App: 'static {
@@ -46,9 +51,22 @@ pub trait App: 'static {
     }
 }
 
+/// A function returning the view is an app with the default theme:
+/// `dfui::run(view)`.
+impl<F: Fn() -> Element + 'static> App for F {
+    fn view(&self) -> Element {
+        self()
+    }
+}
+
 /// Opens a window showing `app` and runs until it's closed. On the web it
 /// returns at once and the browser drives the app; on Android use `run_android`.
 pub fn run<A: App>(app: A) {
+    // Without it a panic in wasm only reports "unreachable executed".
+    #[cfg(target_arch = "wasm32")]
+    std::panic::set_hook(Box::new(|p| {
+        web_sys::console::error_1(&p.to_string().into())
+    }));
     let event_loop = winit::event_loop::EventLoop::new()
         .unwrap_or_else(|e| runtime::startup_failed(&format!("can't start the event loop: {e}")));
     runtime::Runtime::new(app).run(event_loop);

@@ -43,6 +43,7 @@ pub struct TextInput {
 }
 
 /// Single-line editable text showing `value`; edits arrive in `on_change`.
+#[doc = example!("text_input")]
 pub fn text_input(value: impl Into<String>) -> TextInput {
     TextInput {
         value: value.into(),

@@ -1,12 +1,3 @@
-//! # Provide
-//!
-//! `provide(value, child)` makes `value` available to everything below it.
-//! Builders read the nearest one with `scope.get::<T>()` when they start their
-//! source, so external state (clients, channels, stores) is handed down
-//! without passing it through every function.
-//!
-//! Here a provided `Greeter` service answers after a short delay.
-
 use std::time::Duration;
 
 use dfui::widgets::{Snapshot, Styled, future_builder, provide, text};
@@ -43,5 +34,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

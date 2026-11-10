@@ -43,6 +43,7 @@ pub struct Icon {
 }
 
 /// `shape` as a 24 px icon.
+#[doc = example!("icon")]
 pub fn icon(shape: &Shape) -> Icon {
     Icon {
         shape: shape.clone(),

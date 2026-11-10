@@ -1,9 +1,3 @@
-//! # On back
-//!
-//! `on_back(f)` runs `f` on Escape or the Android back button and keeps the
-//! app open; an open overlay takes the press first. Add it to screens that
-//! have somewhere to go back to, and leave it out where Back should exit.
-
 use dfui::Element;
 use dfui::widgets::{Styled, button, column, on_back, stateful, text};
 
@@ -26,5 +20,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

@@ -1,14 +1,15 @@
 //! `dfui-site OUT_DIR` writes the docs pages into OUT_DIR: the Markdown in
 //! `pages/`, the architecture doc, and one page per example in `examples/`
-//! (its `//!` header as text, then its live frame and code). `scripts/site.sh`
-//! adds each example's wasm under `wasm/`.
+//! (`<name>.md` as text, then the live frame and the code of `<name>.rs`,
+//! which dfui's docs also show). `scripts/site.sh` adds each example's wasm
+//! under `wasm/`.
 
 use std::fs;
 use std::path::Path;
 
 use pulldown_cmark::{Options, Parser, html};
 
-/// Widget pages, in navigation order; each is `examples/<name>.rs`.
+/// Widget pages, in navigation order; each is `examples/<name>.{md,rs}`.
 const WIDGETS: &[&str] = &[
     "text",
     "button",
@@ -79,8 +80,8 @@ fn main() {
         })
         .collect();
     for name in WIDGETS {
-        let src = read(&site.join(format!("examples/{name}.rs")));
-        let (doc, code) = split(&src);
+        let doc = read(&site.join(format!("examples/{name}.md")));
+        let code = read(&site.join(format!("examples/{name}.rs")));
         let title = title(&doc);
         let body = format!(
             "{}<div class=\"frame\"><iframe src=\"../run.html?example={name}\" \
@@ -89,7 +90,7 @@ fn main() {
              <p class=\"hint\">Run it natively: <code>cargo run -p dfui-site --example {name}</code></p>\n",
             markdown(&doc),
             escape(&title),
-            escape(code),
+            escape(&code),
         );
         pages.push(Page {
             path: format!("widgets/{name}.html"),
@@ -114,21 +115,6 @@ fn title(md: &str) -> String {
         .unwrap_or("dfui")
         .trim()
         .to_string()
-}
-
-/// Splits an example into its `//!` header (as Markdown) and the code after it.
-fn split(src: &str) -> (String, &str) {
-    let mut doc = String::new();
-    let mut rest = src;
-    while let Some(line) = rest.lines().next() {
-        let Some(text) = line.strip_prefix("//!") else {
-            break;
-        };
-        doc.push_str(text.strip_prefix(' ').unwrap_or(text));
-        doc.push('\n');
-        rest = rest[line.len()..].strip_prefix('\n').unwrap_or("");
-    }
-    (doc, rest.trim_start_matches('\n'))
 }
 
 fn markdown(md: &str) -> String {
@@ -291,23 +277,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn examples_split_into_docs_and_code() {
-        let (doc, code) = split("//! # Title\n//!\n//! Text `x`.\n\nuse a;\nfn main() {}\n");
-        assert_eq!(doc, "# Title\n\nText `x`.\n");
-        assert_eq!(code, "use a;\nfn main() {}\n");
-        assert_eq!(title(&doc), "Title");
-    }
-
-    #[test]
     fn every_widget_has_an_example_with_a_title() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
         for name in WIDGETS {
-            let src = fs::read_to_string(dir.join(format!("{name}.rs"))).unwrap();
-            let (doc, code) = split(&src);
-            assert_ne!(title(&doc), "dfui", "{name} has no `//! # Title`");
-            assert!(code.contains("dfui_site::run(view)"), "{name}");
+            let doc = fs::read_to_string(dir.join(format!("{name}.md"))).unwrap();
+            let code = fs::read_to_string(dir.join(format!("{name}.rs"))).unwrap();
+            assert_ne!(title(&doc), "dfui", "{name}.md has no `# Title`");
+            assert!(code.contains("dfui::run(view)"), "{name}");
         }
         let files = fs::read_dir(&dir).unwrap().count();
-        assert_eq!(files, WIDGETS.len(), "every example is listed in WIDGETS");
+        assert_eq!(
+            files,
+            2 * WIDGETS.len(),
+            "every example is listed in WIDGETS"
+        );
     }
 }

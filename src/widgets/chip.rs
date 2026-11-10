@@ -8,6 +8,7 @@ const RADIUS: f32 = 12.0;
 const OVERHANG: f32 = 6.0;
 
 /// A small rounded label; restyle with `.bg` and `.content`.
+#[doc = example!("chip")]
 pub fn chip(label: impl Into<String>) -> Container {
     container(text(label).size(13.0))
         .bg(Role::Track)

@@ -1,8 +1,3 @@
-//! # Snackbar
-//!
-//! `snackbar(message)` is a short note at the bottom of the window for four
-//! seconds. Shown through an `overlays` host, several wait their turn.
-
 use dfui::widgets::{Overlays, Styled, button, column, overlays, snackbar, text};
 use dfui::{Element, Handle};
 
@@ -17,5 +12,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }

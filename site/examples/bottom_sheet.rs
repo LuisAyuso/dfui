@@ -1,8 +1,3 @@
-//! # Bottom sheet
-//!
-//! `bottom_sheet(child)` is a modal panel rising from the bottom edge, full
-//! width. Show it through an `overlays` host, like a `dialog`.
-
 use dfui::widgets::{Overlays, Shown, Styled, bottom_sheet, button, column, overlays, text};
 use dfui::{Element, Handle};
 
@@ -28,5 +23,5 @@ fn view() -> Element {
 }
 
 fn main() {
-    dfui_site::run(view);
+    dfui::run(view);
 }
