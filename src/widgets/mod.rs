@@ -54,7 +54,7 @@ pub use text_input::{TextInput, text_input};
 pub use toggle::{Toggle, toggle};
 pub use tree::{Expanded, tree_view};
 
-/// Flex-layout modifiers shared by every widget that owns a `Style`.
+/// Flex-layout modifiers shared by every widget that owns a [`Style`].
 pub trait Styled: Sized {
     /// The taffy style the modifiers write; also an escape hatch for the rest.
     fn style_mut(&mut self) -> &mut Style;
@@ -81,7 +81,7 @@ pub trait Styled: Sized {
         self
     }
     /// Share of the parent's spare main-axis space to take; 0 by default.
-    /// The content still sets the minimum, so see `fill` around a `scroll`.
+    /// The content still sets the minimum, so see `fill` around a [`scroll()`].
     fn grow(mut self, g: f32) -> Self {
         self.style_mut().flex_grow = g;
         self
@@ -111,14 +111,14 @@ pub trait Styled: Sized {
         self.style_mut().min_size.height = LengthPercentageAuto::length(h);
         self
     }
-    /// Upper bound on the height, logical px, e.g. a `scroll` that grows with its content up to a point.
+    /// Upper bound on the height, logical px, e.g. a [`scroll()`] that grows with its content up to a point.
     fn max_height(mut self, h: f32) -> Self {
         self.style_mut().max_size.height = LengthPercentageAuto::length(h);
         self
     }
     /// Takes the space left along the parent's main axis, and no more: unlike
     /// `grow(1.0)`, the content's size doesn't push the parent. Use it on
-    /// every flex box between the window and a `scroll`. In a row, siblings
+    /// every flex box between the window and a [`scroll()`]. In a row, siblings
     /// that all `fill` get equal widths, whatever their content.
     fn fill(mut self) -> Self {
         let s = self.style_mut();

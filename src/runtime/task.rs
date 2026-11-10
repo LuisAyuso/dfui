@@ -139,7 +139,7 @@ impl Notifier {
 }
 
 thread_local! {
-    /// Pending `sleep` deadlines on the UI thread.
+    /// Pending [`sleep`] deadlines on the UI thread.
     static TIMERS: RefCell<Vec<(Instant, Waker)>> = const { RefCell::new(Vec::new()) };
     /// Fixed frame time for tests; the wall clock otherwise.
     static CLOCK: Cell<Option<Instant>> = const { Cell::new(None) };
@@ -160,7 +160,7 @@ pub fn sleep(d: Duration) -> Sleep {
     Sleep(now() + d)
 }
 
-/// The future `sleep` returns.
+/// The future [`sleep`] returns.
 pub struct Sleep(Instant);
 
 impl Future for Sleep {

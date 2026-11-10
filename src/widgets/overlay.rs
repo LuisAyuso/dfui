@@ -381,7 +381,7 @@ pub fn bottom_sheet(child: impl Into<Element>) -> Overlay {
 }
 
 /// Short message at the bottom of the window for four seconds after it
-/// enters the tree. Shown through `Overlays` it waits for earlier ones to
+/// enters the tree. Shown through [`Overlays`] it waits for earlier ones to
 /// leave and is removed after; in a plain tree give it a new `key` to show
 /// it again.
 pub fn snackbar(message: impl Into<String>) -> Overlay {
@@ -416,7 +416,7 @@ struct Entry {
     until: Option<Instant>,
 }
 
-/// One overlay shown through `Overlays`, passed to its builder.
+/// One overlay shown through [`Overlays`], passed to its builder.
 #[derive(Clone, Copy)]
 pub struct Shown {
     h: Handle<Overlays>,
@@ -578,7 +578,7 @@ fn entry(e: &Entry, h: Handle<Overlays>) -> Element {
 /// first, and keeps the app open. Leave it out where Back should exit.
 pub struct OnBack(Handler);
 
-/// Handles Back for the screen it's placed in; see `OnBack`.
+/// Handles Back for the screen it's placed in; see [`OnBack`].
 pub fn on_back(f: impl Fn(&mut EventCx) + 'static) -> OnBack {
     OnBack(Box::new(f))
 }

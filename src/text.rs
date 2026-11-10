@@ -61,7 +61,7 @@ struct StoredShape {
     drawn: u64,
 }
 
-/// Index into `Text::faces`.
+/// Index into [`Text::faces`].
 type FaceId = usize;
 
 pub(crate) struct PositionedGlyph {
@@ -95,7 +95,7 @@ struct Cached {
 /// Fonts plus lazily-built glyph outlines, rendered analytically on the GPU.
 pub struct Text {
     /// Parsed fonts by first use, keyed by data address; index 0 is
-    /// `Font::DEFAULT`.
+    /// [`Font::DEFAULT`].
     faces: RefCell<Vec<(*const u8, Face)>>,
     /// Shape plans are costly to build; one per font, script and direction.
     plans: RefCell<Vec<(FaceId, Rc<ShapePlan>)>>,
@@ -104,7 +104,7 @@ pub struct Text {
     // ponytail: cleared whole at WORD_CACHE entries; LRU if apps cycle through more words than that.
     words: RefCell<HashMap<u64, Rc<ShapedWord>>>,
     glyphs: HashMap<(FaceId, GlyphId), Option<Glyph>>,
-    /// `Shape`s by content, stored like glyphs in units of the view's larger side.
+    /// [`Shape`]s by content, stored like glyphs in units of the view's larger side.
     shapes: HashMap<u64, StoredShape>,
     /// Counts painted frames, to age `shapes`.
     frame: u64,

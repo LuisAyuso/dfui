@@ -122,7 +122,7 @@ pub fn watch<E: Into<Element>>(
     )
 }
 
-/// The notifier version a `watch` last built from.
+/// The notifier version a [`watch`] last built from.
 #[derive(Default)]
 pub struct Seen(u64);
 

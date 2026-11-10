@@ -480,7 +480,7 @@ impl Gpu {
     }
 }
 
-/// The platform window a `Renderer` draws into.
+/// The platform window a [`Renderer`] draws into.
 pub(crate) trait Host {
     fn surface(
         &self,

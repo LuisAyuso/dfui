@@ -49,7 +49,7 @@ extern "system" fn backspace<'l>(_: EnvUnowned<'l>, _: JClass<'l>, n: i32) {
     push(Edit::Delete(n.max(0) as usize));
 }
 
-/// Adds the view to this activity; runs once per activity, before any `set_keyboard`.
+/// Adds the view to this activity; runs once per activity, before any [`set_keyboard`].
 pub(crate) fn install(app: &AndroidApp) {
     *WAKER.lock().unwrap() = Some(app.create_waker());
     let a = app.clone();

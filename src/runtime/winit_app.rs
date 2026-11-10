@@ -1,4 +1,4 @@
-//! Desktop and web: `Runtime` as a winit `ApplicationHandler`.
+//! Desktop and web: [`Runtime`] as a winit [`ApplicationHandler`].
 
 use std::sync::Arc;
 

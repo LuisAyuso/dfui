@@ -23,7 +23,7 @@ struct LabelState {
     emphasis: Option<Emphasis>,
 }
 
-/// A run of text built by `text`; see there.
+/// A run of text built by [`text`]; see there.
 pub struct Label {
     text: String,
     font: Font,
@@ -46,7 +46,7 @@ pub fn text(s: impl Into<String>) -> Label {
 }
 
 impl Label {
-    /// `Font::DEFAULT` unless set.
+    /// [`Font::DEFAULT`] unless set.
     pub fn font(mut self, f: Font) -> Self {
         self.font = f;
         self

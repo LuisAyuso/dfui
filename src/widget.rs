@@ -96,11 +96,11 @@ impl Element {
     }
 }
 
-/// Boxes `Widget::scroll` works from, logical px.
+/// Boxes [`Widget::scroll`] works from, logical px.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Placement {
     /// What children are clipped to: the widget's box, or for a
-    /// `Layer::Parent` widget the box its children rest in, moved to stay in
+    /// [`Layer::Parent`] widget the box its children rest in, moved to stay in
     /// the window.
     pub clip: Rect,
     /// Where a layer's children rest before scrolling; `clip` otherwise.
@@ -121,7 +121,7 @@ pub enum Layer {
 }
 
 /// Primitive building block. Composite widgets are plain functions returning
-/// `Element`; implement this only for new layout/paint/input behavior.
+/// [`Element`]; implement this only for new layout/paint/input behavior.
 pub trait Widget {
     fn style(&self) -> Style {
         Style::default()
@@ -135,7 +135,7 @@ pub trait Widget {
     /// lets a widget build its subtree from framework-owned state.
     fn expand(&self, _cx: &mut BuildCx) {}
 
-    /// Takes this subtree out of the layout flow: it covers `Layer`'s box,
+    /// Takes this subtree out of the layout flow: it covers [`Layer`]'s box,
     /// isn't clipped by ancestors, paints above and gets input before the
     /// rest of the tree.
     fn layer(&self) -> Option<Layer> {
@@ -147,7 +147,7 @@ pub trait Widget {
         false
     }
 
-    /// Value made available to descendants through `Scope::get`.
+    /// Value made available to descendants through [`Scope::get`].
     fn provide(&self) -> Option<&dyn Any> {
         None
     }
@@ -287,7 +287,7 @@ impl PaintCx<'_> {
         *self.frame = true;
     }
 
-    /// Re-run placement (`Widget::scroll`) and paint again next frame, for
+    /// Re-run placement ([`Widget::scroll`]) and paint again next frame, for
     /// animated scroll offsets.
     pub fn request_placement(&mut self) {
         *self.frame = true;
@@ -382,7 +382,7 @@ impl PaintCx<'_> {
         self.scene.shadow(r, radius, s, self.clip);
     }
 
-    /// `bitmap` stretched over `r`, multiplied by `tint` (`Color::WHITE` keeps it as is).
+    /// `bitmap` stretched over `r`, multiplied by `tint` ([`Color::WHITE`] keeps it as is).
     pub fn image(&mut self, r: Rect, bitmap: &Bitmap, radius: f32, tint: Color) {
         self.scene.image(r, bitmap, radius, tint, self.clip);
     }

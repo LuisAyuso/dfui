@@ -12,7 +12,7 @@ pub type Quad = [Point; 3];
 
 /// Closed contours of quadratic segments in logical px (y down), filled by
 /// nonzero winding like a glyph. Get one from `PaintCx::glyph_path` or
-/// `Path::polygon`; draw it with `PaintCx::path`.
+/// [`Path::polygon`]; draw it with `PaintCx::path`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Path {
     /// Each contour's segments in order, each starting where the last ended.
@@ -41,7 +41,7 @@ impl Path {
     }
 }
 
-/// A `Path` stored on the GPU once, like a glyph, and drawn into any rect
+/// A [`Path`] stored on the GPU once, like a glyph, and drawn into any rect
 /// with `PaintCx::shape`: scaling it costs nothing. Use it for icons and
 /// other shapes drawn every frame; cheap to clone. Equal shapes share their
 /// storage, which is reused once a shape hasn't been drawn for a while.

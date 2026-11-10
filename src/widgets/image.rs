@@ -5,7 +5,7 @@ use crate::render::{Bitmap, Color};
 use crate::text::Text;
 use crate::widget::{Element, PaintCx, Widget};
 
-/// A bitmap built by `image`; see there.
+/// A bitmap built by [`image`]; see there.
 pub struct Image {
     bitmap: Bitmap,
     radius: f32,

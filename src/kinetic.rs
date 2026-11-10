@@ -126,7 +126,7 @@ impl Drag {
     }
 }
 
-/// Px/s of the pointer over the samples within `VELOCITY_WINDOW` of `now`.
+/// Px/s of the pointer over the samples within [`VELOCITY_WINDOW`] of `now`.
 fn velocity(samples: &[(Instant, f32)], now: Instant) -> f32 {
     let mut recent = samples
         .iter()

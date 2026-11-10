@@ -49,32 +49,32 @@ impl Default for Theme {
     }
 }
 
-/// A `Theme` color by name, resolved where the widget is painted.
+/// A [`Theme`] color by name, resolved where the widget is painted.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Role {
-    /// `Theme::background`.
+    /// [`Theme::background`].
     Background,
-    /// `Theme::surface`.
+    /// [`Theme::surface`].
     Surface,
-    /// `Theme::ink`.
+    /// [`Theme::ink`].
     Ink,
-    /// `Theme::muted`.
+    /// [`Theme::muted`].
     Muted,
-    /// `Theme::accent`.
+    /// [`Theme::accent`].
     Accent,
-    /// `Theme::on_accent`.
+    /// [`Theme::on_accent`].
     OnAccent,
-    /// `Theme::selected`.
+    /// [`Theme::selected`].
     Selected,
-    /// `Theme::track`.
+    /// [`Theme::track`].
     Track,
-    /// `Theme::outline`.
+    /// [`Theme::outline`].
     Outline,
-    /// `Theme::divider`.
+    /// [`Theme::divider`].
     Divider,
-    /// `Theme::inverse`.
+    /// [`Theme::inverse`].
     Inverse,
-    /// `Theme::on_inverse`.
+    /// [`Theme::on_inverse`].
     OnInverse,
 }
 
@@ -108,7 +108,7 @@ pub enum Ink {
     Role(Role),
     #[default]
     /// The content color of the nearest `button` or `container` with `content`;
-    /// `Role::Ink` outside them.
+    /// [`Role::Ink`] outside them.
     Content,
 }
 

@@ -25,7 +25,7 @@ where
     stateful_with(S::default, build)
 }
 
-/// `stateful` starting from `init`, e.g. a form over existing data. `init`
+/// [`stateful`] starting from `init`, e.g. a form over existing data. `init`
 /// runs once; give the element a new `key` to start over from other data.
 pub fn stateful_with<S, E>(
     init: impl FnOnce() -> S + 'static,

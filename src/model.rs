@@ -109,7 +109,7 @@ impl<M: TreeModel> TreeModel for RefCell<M> {
     }
 }
 
-/// In-memory tree of `Keyed` items.
+/// In-memory tree of [`Keyed`] items.
 pub struct Tree<T> {
     roots: Vec<u64>,
     nodes: HashMap<u64, (T, Vec<u64>, Option<u64>)>,
@@ -188,7 +188,7 @@ pub struct Row {
     pub depth: u16,
     /// Whether its children are shown in the rows after it.
     pub expanded: bool,
-    /// Whether it can expand, from `TreeModel::has_children`.
+    /// Whether it can expand, from [`TreeModel::has_children`].
     pub has_children: bool,
 }
 

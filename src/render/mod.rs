@@ -1,4 +1,4 @@
-//! Drawing: value types (`primitives`), the CPU-side frame (`scene`) and wgpu (`gpu`).
+//! Drawing: value types ([`primitives`]), the CPU-side frame ([`scene`]) and wgpu ([`gpu`]).
 
 mod gpu;
 mod primitives;

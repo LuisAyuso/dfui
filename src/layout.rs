@@ -89,7 +89,7 @@ pub(crate) fn flatten<'a>(
     cx.out
 }
 
-/// `flatten` of a tree whose ids it already returned: same nodes, without
+/// [`flatten`] of a tree whose ids it already returned: same nodes, without
 /// hashing ids, touching `states` or expanding.
 pub(crate) fn walk<'a>(root: &'a Element, ids: &[u64]) -> Vec<Node<'a>> {
     fn go<'a>(e: &'a Element, parent: Option<usize>, ids: &[u64], out: &mut Vec<Node<'a>>) {

@@ -34,8 +34,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
       # Broken intra-doc links and malformed docs fail here before docs.rs sees them.
       - run: cargo doc --no-deps -p dfui --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      # The Android runtime is behind cfg, so the host pass never checks its links.
+      - run: cargo doc --no-deps -p dfui --locked --target aarch64-linux-android
         env:
           RUSTDOCFLAGS: -D warnings

@@ -76,7 +76,7 @@ impl TextInput {
         self.placeholder = s.into();
         self
     }
-    /// `Font::DEFAULT` unless set.
+    /// [`Font::DEFAULT`] unless set.
     pub fn font(mut self, f: Font) -> Self {
         self.font = f;
         self
@@ -86,12 +86,12 @@ impl TextInput {
         self.size = s;
         self
     }
-    /// Text color, and faded, the placeholder's; `Role::Ink` by default.
+    /// Text color, and faded, the placeholder's; [`Role::Ink`] by default.
     pub fn color(mut self, c: impl Into<Ink>) -> Self {
         self.color = c.into();
         self
     }
-    /// Color of the caret, selection and focused border; `Role::Accent` by default.
+    /// Color of the caret, selection and focused border; [`Role::Accent`] by default.
     pub fn accent(mut self, c: impl Into<Ink>) -> Self {
         self.accent = c.into();
         self
@@ -101,7 +101,7 @@ impl TextInput {
         self.keyboard = Keyboard::Password;
         self
     }
-    /// The soft keyboard to show; `Keyboard::Password` is the same as `password`.
+    /// The soft keyboard to show; [`Keyboard::Password`] is the same as `password`.
     pub fn keyboard(mut self, k: Keyboard) -> Self {
         self.keyboard = k;
         self

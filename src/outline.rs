@@ -18,7 +18,7 @@ pub(crate) struct OutlineGlyph {
     pub bbox: [f32; 4],
 }
 
-/// Where a stored shape's data sits, to hand back to `Outlines::free`.
+/// Where a stored shape's data sits, to hand back to [`Outlines::free`].
 pub(crate) struct Block {
     curves: Range<usize>,
     bands: Range<usize>,

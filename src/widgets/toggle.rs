@@ -51,7 +51,7 @@ impl Toggle {
         self.on_change = Some(Box::new(f));
         self
     }
-    /// Track color when on; `Role::Accent` by default.
+    /// Track color when on; [`Role::Accent`] by default.
     pub fn accent(mut self, c: impl Into<Ink>) -> Self {
         self.accent = c.into();
         self

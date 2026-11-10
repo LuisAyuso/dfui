@@ -27,7 +27,7 @@ const VIEWPORT: f32 = 800.0;
 /// drawn while it slides out.
 pub(crate) type Thunk = Rc<dyn Fn() -> Element>;
 
-/// What a `List` shows: row count, each row's key, and its builder.
+/// What a [`List`] shows: row count, each row's key, and its builder.
 pub(crate) trait Rows {
     fn len(&self) -> usize;
     fn key(&self, i: usize) -> u64;

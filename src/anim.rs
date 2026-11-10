@@ -7,7 +7,7 @@ use web_time::Instant;
 use crate::path::{Path, Point, Quad};
 use crate::render::Color;
 
-/// Values `Animated` can blend between.
+/// Values [`Animated`] can blend between.
 pub trait Lerp: Copy {
     /// `self` at `t` 0, `to` at `t` 1, exact at both ends.
     fn lerp(self, to: Self, t: f32) -> Self;
@@ -116,7 +116,7 @@ impl<T: Lerp + PartialEq> Animated<T> {
     }
 }
 
-/// Morph between two `Path`s, e.g. two glyphs. Each contour pairs with the
+/// Morph between two [`Path`]s, e.g. two glyphs. Each contour pairs with the
 /// nearest one (by centre) of the other path that winds the same way, so
 /// outlines meet outlines and holes meet holes whatever order the fonts list
 /// them in; one without a partner shrinks to its centre. Paired contours with

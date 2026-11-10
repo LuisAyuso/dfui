@@ -50,7 +50,7 @@ impl Slider {
         self.on_change = Some(Box::new(f));
         self
     }
-    /// Color of the track left of the thumb; `Role::Accent` by default.
+    /// Color of the track left of the thumb; [`Role::Accent`] by default.
     pub fn accent(mut self, c: impl Into<Ink>) -> Self {
         self.accent = c.into();
         self

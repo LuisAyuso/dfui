@@ -70,7 +70,7 @@ impl Progress {
         }
         self
     }
-    /// Color of the unfilled bar; `Role::Track` by default.
+    /// Color of the unfilled bar; [`Role::Track`] by default.
     pub fn track(mut self, c: impl Into<Ink>) -> Self {
         self.track = c.into();
         self
@@ -162,7 +162,7 @@ impl Spinner {
         self.size = px;
         self
     }
-    /// `Role::Accent` by default.
+    /// [`Role::Accent`] by default.
     pub fn color(mut self, c: impl Into<Ink>) -> Self {
         self.color = c.into();
         self
@@ -202,7 +202,7 @@ fn arc(c: Point, r: f32, a0: f32, a1: f32) -> impl Iterator<Item = Quad> {
     })
 }
 
-/// Archimedean spiral of `TURNS` turns fitting a circle of radius `r`,
+/// Archimedean spiral of [`TURNS`] turns fitting a circle of radius `r`,
 /// starting at 12 o'clock and winding clockwise to the centre.
 struct Spiral {
     c: Point,

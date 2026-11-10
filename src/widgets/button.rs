@@ -40,7 +40,7 @@ impl Tap {
         }
         false
     }
-    /// Feeds `ev` to the `Tap` that `field` finds in the widget's state `S`.
+    /// Feeds `ev` to the [`Tap`] that `field` finds in the widget's state `S`.
     /// Returns whether a tap completed and whether its look changed.
     pub fn feed<S: Default + 'static>(
         ev: &Event,
@@ -64,7 +64,7 @@ struct ButtonState {
     press: Animated<f32>,
 }
 
-/// A tappable box built by `button`; see there.
+/// A tappable box built by [`button`]; see there.
 pub struct Button {
     child: [Element; 1],
     on_click: Option<Handler>,
@@ -112,7 +112,7 @@ impl Button {
         self.on_click = Some(Box::new(f));
         self
     }
-    /// Background color; `Role::Accent` by default.
+    /// Background color; [`Role::Accent`] by default.
     pub fn color(mut self, c: impl Into<Ink>) -> Self {
         self.color = c.into();
         self

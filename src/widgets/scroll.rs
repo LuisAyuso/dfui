@@ -108,7 +108,7 @@ impl Widget for Scroll {
     }
 }
 
-/// Wheel, drag and fling for a vertical scroller whose `ScrollState` `get` finds.
+/// Wheel, drag and fling for a vertical scroller whose [`ScrollState`] `get` finds.
 pub(crate) fn drag_scroll(
     ev: &Event,
     cx: &mut EventCx,

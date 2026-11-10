@@ -60,7 +60,7 @@ impl Radio {
         self.on_select = Some(Box::new(f));
         self
     }
-    /// Color of the ring and dot when selected; `Role::Accent` by default.
+    /// Color of the ring and dot when selected; [`Role::Accent`] by default.
     pub fn accent(mut self, c: impl Into<Ink>) -> Self {
         self.accent = c.into();
         self

@@ -19,7 +19,7 @@ const PRESS: Duration = Duration::from_millis(90);
 const RELEASE: Duration = Duration::from_millis(420);
 
 /// Ease-out that passes the target by 25% of the move halfway through and
-/// settles back: from `PRESSED`, the icon peaks ~5% above its size.
+/// settles back: from [`PRESSED`], the icon peaks ~5% above its size.
 fn spring(t: f32) -> f32 {
     let u = t - 1.0;
     1.0 + 4.0 * u * u * u + 3.0 * u * u
@@ -32,7 +32,7 @@ struct IconState {
     emphasis: Option<Emphasis>,
 }
 
-/// A `Shape` drawn `size` px square in one color; a button with `on_click`.
+/// A [`Shape`] drawn `size` px square in one color; a button with `on_click`.
 pub struct Icon {
     shape: Shape,
     size: f32,
@@ -62,7 +62,7 @@ pub fn icon_button(shape: &Shape) -> Icon {
 
 impl Icon {
     /// Width and height of the drawn shape, logical px; 24 by default.
-    /// Padding, as on `icon_button`, comes on top.
+    /// Padding, as on [`icon_button`], comes on top.
     pub fn size(mut self, px: f32) -> Self {
         self.size = px;
         self
@@ -72,7 +72,7 @@ impl Icon {
         self.color = c.into();
         self
     }
-    /// Runs on a release inside the icon, which then animates like `icon_button`.
+    /// Runs on a release inside the icon, which then animates like [`icon_button`].
     pub fn on_click(mut self, f: impl Fn(&mut EventCx) + 'static) -> Self {
         self.on_click = Some(Box::new(f));
         self

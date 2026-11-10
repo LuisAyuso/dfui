@@ -58,7 +58,7 @@ type PendingRenderer = Pin<Box<dyn Future<Output = Result<Renderer, String>>>>;
 pub(crate) struct Runtime<A: App> {
     app: A,
     root: Element,
-    /// Pre-order ids of `root`, so frames that keep the tree skip `flatten`.
+    /// Pre-order ids of `root`, so frames that keep the tree skip [`flatten`].
     ids: Vec<u64>,
     /// Paint order of `ids`' indices; layers last.
     order: Vec<usize>,
