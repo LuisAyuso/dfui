@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use crate::render::Rect;
 
+/// `[x, y]` in logical px, y down.
 pub type Point = [f32; 2];
 /// Quadratic Bézier segment: start, control, end.
 pub type Quad = [Point; 3];
@@ -14,6 +15,7 @@ pub type Quad = [Point; 3];
 /// `Path::polygon`; draw it with `PaintCx::path`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Path {
+    /// Each contour's segments in order, each starting where the last ended.
     pub contours: Vec<Vec<Quad>>,
 }
 
@@ -28,6 +30,7 @@ impl Path {
         }
     }
 
+    /// The path moved by `dx`, `dy` logical px.
     pub fn offset(mut self, dx: f32, dy: f32) -> Path {
         for q in self.contours.iter_mut().flatten() {
             for p in q {
@@ -91,10 +94,12 @@ impl Shape {
         Shape(Rc::new(ShapeData { key, path, view }))
     }
 
+    /// The box mapped onto the target rect when drawn.
     pub fn view(&self) -> Rect {
         self.0.view
     }
 
+    /// The outline, in the coordinates of `view`.
     pub fn path(&self) -> &Path {
         &self.0.path
     }

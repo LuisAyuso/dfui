@@ -108,10 +108,13 @@ pub(crate) struct Notify {
 }
 
 impl Notifier {
+    /// A notifier no `watch` listens to yet.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Makes the `watch` over this notifier rebuild its subtree on the next
+    /// frame. Cheap enough to call after each change.
     pub fn notify(&self) {
         self.0.version.fetch_add(1, Ordering::AcqRel);
         if let Some(w) = &*self.0.waker.lock().unwrap() {
@@ -157,6 +160,7 @@ pub fn sleep(d: Duration) -> Sleep {
     Sleep(now() + d)
 }
 
+/// The future `sleep` returns.
 pub struct Sleep(Instant);
 
 impl Future for Sleep {

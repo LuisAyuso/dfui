@@ -33,6 +33,8 @@ pub use widget::{
 /// Root of the UI. State lives in `stateful` widgets and in external sources
 /// that builders read; `view` runs again whenever any of it changes.
 pub trait App: 'static {
+    /// Builds the whole UI. Runs on every rebuild, so keep it to building
+    /// elements; parse assets and start work elsewhere.
     fn view(&self) -> Element;
     /// Colors for the whole app, read every frame.
     fn theme(&self) -> Theme {
@@ -44,6 +46,8 @@ pub trait App: 'static {
     }
 }
 
+/// Opens a window showing `app` and runs until it's closed. On the web it
+/// returns at once and the browser drives the app; on Android use `run_android`.
 pub fn run<A: App>(app: A) {
     let event_loop = winit::event_loop::EventLoop::new()
         .unwrap_or_else(|e| runtime::startup_failed(&format!("can't start the event loop: {e}")));

@@ -9,6 +9,7 @@ use crate::render::Color;
 
 /// Values `Animated` can blend between.
 pub trait Lerp: Copy {
+    /// `self` at `t` 0, `to` at `t` 1, exact at both ends.
     fn lerp(self, to: Self, t: f32) -> Self;
 }
 
@@ -32,6 +33,7 @@ impl Lerp for Color {
 
 /// Easing curves: map linear progress in 0..=1 to eased progress.
 pub mod ease {
+    /// Constant speed.
     pub fn linear(t: f32) -> f32 {
         t
     }
@@ -41,6 +43,7 @@ pub mod ease {
         1.0 - (1.0 - t).powi(3)
     }
 
+    /// Gentle start and stop, for moves the eye follows from end to end.
     pub fn in_out_cubic(t: f32) -> f32 {
         if t < 0.5 {
             4.0 * t * t * t
@@ -94,10 +97,12 @@ impl<T: Lerp + PartialEq> Animated<T> {
         }
     }
 
+    /// The value at `now`.
     pub fn get(&self, now: Instant) -> T {
         self.from.lerp(self.to, (self.ease)(self.progress(now)))
     }
 
+    /// Still moving at `now`: keep requesting frames while it is.
     pub fn running(&self, now: Instant) -> bool {
         self.progress(now) < 1.0
     }
@@ -128,6 +133,7 @@ pub struct Morph {
 }
 
 impl Morph {
+    /// Pairs `from`'s contours and segments with `to`'s, as described above.
     pub fn new(from: &Path, to: &Path) -> Self {
         let (mut a, mut b) = (Path::default(), Path::default());
         for pair in pairs(from, to) {

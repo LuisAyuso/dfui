@@ -106,6 +106,7 @@ impl Drag {
         self.start.is_some()
     }
 
+    /// A fling started on release and hasn't ended or been stopped.
     pub fn flinging(&self) -> bool {
         self.fling.is_some()
     }
