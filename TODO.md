@@ -55,6 +55,10 @@ Layout:
 - [x] `min_width`/`min_height` modifiers and `fill()` (grow into the space
       left, zero basis and minimum) for flex boxes around a `scroll`, which
       otherwise grows to its whole list; `scroll`'s docs say so.
+- [x] Crash when a container that held a layer (dropdown menu) loses all
+      its children: taffy 0.15 keeps the layer in the leaf's hoisted list
+      and panics on it when rounding. The layout gives such a container a
+      fresh taffy node. Worth reporting upstream.
 
 Custom widgets:
 

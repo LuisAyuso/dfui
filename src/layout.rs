@@ -264,6 +264,20 @@ impl Layout {
             let kids: Vec<NodeId> = children(nodes, i).map(|c| ids[c]).collect();
             let (id, key) = (nodes[i].id, nodes[i].w.measure_key());
             ids[i] = match self.entries.get_mut(&id) {
+                // taffy keeps the absolute boxes a node was the containing
+                // block of once it turns into a leaf, and still visits them
+                // when rounding; a fresh node starts without any.
+                Some(e)
+                    if e.seen != generation
+                        && kids.is_empty()
+                        && !tree.children(e.node).unwrap().is_empty() =>
+                {
+                    e.seen = generation;
+                    e.measure_key = key;
+                    tree.remove(e.node).unwrap();
+                    e.node = tree.new_leaf_with_context(style, id).unwrap();
+                    e.node
+                }
                 Some(e) if e.seen != generation => {
                     e.seen = generation;
                     if *tree.style(e.node).unwrap() != style {
@@ -546,6 +560,19 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(shape(&walked), shape(&flat));
+    }
+
+    #[test]
+    fn container_left_empty_by_a_removed_layer_lays_out() {
+        use crate::widgets::popup;
+        let t = Text::default();
+        let mut kept = Layout::default();
+        for kids in [vec![popup(text("menu")).into()], vec![]] {
+            let root: Element = column([row(kids).into()]).into();
+            let mut states = HashMap::new();
+            let nodes = flatten(&root, &mut states, &mut Default::default());
+            kept.measure(&nodes, &t, (300.0, 400.0), [0.0; 4]);
+        }
     }
 
     #[test]
