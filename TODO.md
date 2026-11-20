@@ -31,10 +31,13 @@ Android lifecycle and platform:
       android-activity directly instead of winit, whose loop ignores
       Destroy and can't be created twice in a process. `run_android`
       returns on Destroy and runs again for a recreated activity.
-- [ ] Packaging beyond cargo-apk: services, resources (launcher icon) and
-      app Java classes can't be declared, so the app builds its APK by hand
-      (javac, d8, aapt2 compile/link, zipalign, apksigner). Ship that as a
-      script/template, or fold it into the cargo-apk replacement (Tooling).
+- [ ] Packaging beyond cargo-apk: services and app Java classes can't be
+      declared, so the app builds its APK by hand (javac, d8, aapt2
+      compile/link, zipalign, apksigner). Ship that as a script/template, or
+      fold it into the cargo-apk replacement (Tooling). Resources do work:
+      busapp ships an adaptive launcher icon with `resources = "res"` and
+      `icon = "@mipmap/ic_launcher"`; worth a line in the README's Android
+      section.
 - [x] JNI helper: `dfui::android::with_activity`; its module docs say how
       to reach app classes from native threads.
 - [x] Logging: `log` + `android_logger`, documented in the README.
@@ -186,6 +189,34 @@ Theming:
 
 - [x] `dialog`, `bottom_sheet` and `dropdown` are white with dark text on a
       dark app: they now follow the `Theme` (`docs/theming.md`).
+
+## Findings from a third app
+
+From building busapp (Innsbruck bus departures and a trip planner on
+Android: stop search, live departures, line badges in IVB colors).
+
+Layout and widgets:
+
+- [ ] `button().flat()` only drops the shadow; the background stays
+      `Role::Accent` and the child is centered. A plain list row took
+      `.flat().color(Color::WHITE).justify(JustifyContent::START)`. A
+      borderless row style, or at least docs saying what `flat` keeps.
+- [ ] Text in a `row` shrinks and wraps by default: a "5 min" label beside a
+      long name broke onto two lines until `.shrink(0.0)`. Consider labels
+      not shrinking below their width by default, or document it.
+- [ ] A fixed `.width()` on a `container` doesn't hold when the content is
+      wider (min-content wins), so badges of "3" and "STB" differ in width.
+      Flex behavior, but surprising; document next to `width`.
+- [ ] Readable text on an arbitrary background: the app computes brightness
+      to pick dark or white text on each line color. `Role::OnAccent`
+      covers theme colors only; a small `Color` helper would cover the rest.
+
+Testing:
+
+- [ ] `snapshot()` renders one frame, so `future_builder`/`stream_builder`
+      never resolve in it and real screens can't be checked headless. Poll
+      ready tasks before rendering (or take a frame count) so an app with
+      stubbed sources can snapshot its actual screens.
 
 ## From the code review
 - [x] Shape storage: equal shapes share one copy, and shapes not drawn for 600
