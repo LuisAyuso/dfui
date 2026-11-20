@@ -13,7 +13,6 @@ allow = [
     "MIT",
     "Unicode-3.0",
     "Unlicense",
-    "WTFPL",
     "Zlib",
 ]
 

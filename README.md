@@ -146,7 +146,8 @@ The docs site in `site/` is static HTML, deployed to GitHub Pages by
 
 - `site/pages/*.md`: hand-written pages (introduction, getting started,
   concepts); `docs/architecture.md` is published as is.
-- `site/examples/<name>.rs`: one standalone program per widget, built to its
+- `examples/<name>.rs` (linked as `site/examples`): one standalone program per
+  widget, `cargo run --example <name>` on desktop, built to its
   own wasm and shown below the live frame, under the text of `<name>.md`. The
   widget's API docs include the same file (`#[doc = example!("<name>")]`), so
   `cargo test --doc` compiles it. New examples are added to `WIDGETS` in
@@ -205,6 +206,6 @@ activity from any thread.
 
 ## License
 
-[WTFPL](LICENSE). The bundled fonts `assets/DejaVuSans*.ttf` keep their own
+[MIT](LICENSE). The bundled fonts `assets/DejaVuSans*.ttf` keep their own
 license, the DejaVu Fonts License derived from Bitstream Vera:
 [`assets/DejaVuSans-LICENSE.txt`](assets/DejaVuSans-LICENSE.txt).

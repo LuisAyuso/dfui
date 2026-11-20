@@ -2,7 +2,7 @@
 name = "svg2path"
 version = "0.1.0"
 edition = "2024"
-license = "WTFPL"
+license = "MIT"
 
 [dependencies]
 usvg = { version = "0.49", default-features = false }

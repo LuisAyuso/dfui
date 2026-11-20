@@ -4,14 +4,14 @@
 //! each widget opts in next to its definition. Third-party widgets can do the
 //! same or use `Element::new`.
 
-/// A site example (`site/examples/<name>.rs`) as a doc section: the same
+/// A site example (`examples/<name>.rs`) as a doc section: the same
 /// code the site shows and runs, compiled as a doc test but not run, since
 /// it opens a window.
 macro_rules! example {
     ($name:literal) => {
         concat!(
             "\n# Example\n\n```no_run\n",
-            include_str!(concat!("../../site/examples/", $name, ".rs")),
+            include_str!(concat!("../../examples/", $name, ".rs")),
             "```"
         )
     };

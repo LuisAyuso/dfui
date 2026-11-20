@@ -2,7 +2,7 @@
 name = "dfui-site"
 version = "0.1.0"
 edition = "2024"
-license = "WTFPL"
+license = "MIT"
 
 # Each examples/<name>.rs is a standalone program, built to its own wasm and
 # embedded in its widget's page under the text of <name>.md; dfui's docs show

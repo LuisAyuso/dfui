@@ -1,0 +1,26 @@
+# Publishes dfui to crates.io when a `v*` tag is pushed, after the tests pass.
+# Needs a CARGO_REGISTRY_TOKEN repository secret.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Tag matches the crate version
+        run: test "${GITHUB_REF_NAME#v}" = "$(cargo pkgid -p dfui | sed 's/.*[#@]//')"
+      - run: cargo publish -p dfui --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
