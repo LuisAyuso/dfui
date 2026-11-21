@@ -77,6 +77,9 @@ pub enum Key {
     Down,
     /// Return, or the D-pad's centre on Android.
     Enter,
+    /// A character key pressed while no text field is focused, e.g. a
+    /// shortcut; a focused field gets it as [`Event::Text`] instead.
+    Char(char),
 }
 
 /// A retained node description. `view` rebuilds the tree; framework-owned

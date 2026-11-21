@@ -276,17 +276,22 @@ fn keys_reach_on_key_unless_a_field_is_focused() {
     rt.viewport = (200.0, 200.0);
     rt.relayout();
     rt.dispatch(Event::Key(Key::Down));
-    rt.dispatch(Event::Key(Key::Enter));
-    assert_eq!(*root::<Vec<Key>, _>(&mut rt), [Key::Down, Key::Enter]);
+    rt.key_pressed(&WKey::Named(NamedKey::Enter), None);
+    rt.key_pressed(&WKey::Character("q".into()), Some("q"));
+    assert_eq!(
+        *root::<Vec<Key>, _>(&mut rt),
+        [Key::Down, Key::Enter, Key::Char('q')]
+    );
     let field = rt.placed.last().unwrap().rect;
     let (x, y) = (field.x + 5.0, field.y + 5.0);
     rt.dispatch(Event::PointerDown { x, y });
     rt.dispatch(Event::PointerUp { x, y });
     rt.dispatch(Event::Key(Key::Up));
+    rt.key_pressed(&WKey::Character("q".into()), Some("q"));
     assert_eq!(
         root::<Vec<Key>, _>(&mut rt).len(),
-        2,
-        "the focused field took it"
+        3,
+        "the focused field took them"
     );
 }
 

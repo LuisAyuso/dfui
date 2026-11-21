@@ -504,8 +504,15 @@ impl<A: App> Runtime<A> {
             _ if shortcut("x") => Some(Key::Cut),
             _ => None,
         };
+        let char_key = || {
+            let mut cs = text?.chars();
+            cs.next()
+                .filter(|c| !c.is_control() && cs.next().is_none() && self.focused.is_none())
+        };
         if let Some(k) = k {
             self.dispatch(Event::Key(k));
+        } else if let Some(c) = char_key() {
+            self.dispatch(Event::Key(Key::Char(c)));
         } else if shortcut("v") {
             // Pasting is typing the clipboard's text.
             if self.focused.is_some()
