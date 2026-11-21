@@ -91,8 +91,22 @@ impl MapBuilder {
             (len > 0.0).then(|| [-dy / len * h, dx / len * h])
         };
         let add = |p: Point, n: Point, s: f32| [p[0] + n[0] * s, p[1] + n[1] * s];
+        let mut pts = points.to_vec();
+        pts.dedup();
+        let n = pts.len();
+        if n < 2 {
+            return;
+        }
+        // Square caps: OSM splits roads into ways that meet at an angle.
+        let extend = |a: Point, b: Point| {
+            let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
+            let k = h / dx.hypot(dy);
+            [a[0] + dx * k, a[1] + dy * k]
+        };
+        pts[0] = extend(pts[0], pts[1]);
+        pts[n - 1] = extend(pts[n - 1], pts[n - 2]);
         let mut last: Option<Point> = None;
-        for w in points.windows(2) {
+        for w in pts.windows(2) {
             let Some(n) = normal(w[0], w[1]) else {
                 continue;
             };

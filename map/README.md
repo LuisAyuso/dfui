@@ -26,7 +26,8 @@ backoff and caches the response in the temp directory.
 - Areas keep their holes by winding: outlines are stored positive, holes
   negative, and the shader fills by nonzero winding.
 - Lines become one rectangle per segment plus a bevel triangle on each side
-  of every joint. They are all wound the same way, so overlaps merge.
+  of every joint, with square caps so ways that meet at an angle close up.
+  They are all wound the same way, so overlaps merge.
 - Each layer is split into quadtree cells until a cell holds at most 128
   segments. Rings are cut to the cell plus a 2 m margin (Sutherland–Hodgman,
   exact for straight edges under nonzero fill). The tile is drawn clipped to
@@ -38,19 +39,19 @@ backoff and caches the response in the temp directory.
 ## Numbers
 
 Central Amsterdam, 2×2 km of OSM data (15.8 MB of Overpass JSON). Six layers,
-7624 shapes, 551k segments. Prepared in ~150 ms on the desktop. A phone-sized
+7671 shapes, 558k segments. Prepared in ~150 ms on the desktop. A phone-sized
 target (1080×2400 at scale 2.625) on a Ryzen 5 3600 and RTX 4060 Ti, using
 `--bench`. CPU is one paint of the scene; GPU is the median render pass from
 timestamps.
 
 | View | CPU paint | GPU frame |
 |---|---|---|
-| Whole map (~0.15 px/m, buildings hidden) | 393 µs | 0.54 ms |
-| 0.3 px/m (buildings hidden) | 228 µs | 0.85 ms |
-| 0.5 px/m (dense: every building) | 259 µs | 1.17 ms |
-| 2 px/m | 52 µs | 0.82 ms |
-| 10 px/m | 40 µs | 0.67 ms |
-| 50 px/m | 27 µs | 0.25 ms |
+| Whole map (~0.15 px/m, buildings hidden) | 221 µs | 0.56 ms |
+| 0.3 px/m (buildings hidden) | 161 µs | 0.86 ms |
+| 0.5 px/m (dense: every building) | 169 µs | 1.20 ms |
+| 2 px/m | 33 µs | 0.82 ms |
+| 10 px/m | 21 µs | 0.67 ms |
+| 50 px/m | 17 µs | 0.25 ms |
 
 For scale, dfui's `gpu/text_wall` is ~0.12 ms on the same machine. How the GPU
 time came down, at 0.5 px/m:
@@ -88,12 +89,12 @@ the Mali-G715 than on the desktop. If the map scales the same way, that is
 - **GPU memory grows with area.** 32 bytes a segment plus band lists, all
   resident while drawn (shapes are freed 600 frames after they were last
   drawn). There is no streaming of data in or out.
-- **Paint walks every tile** each frame (7.6k here, up to ~0.4 ms). A
+- **Paint walks every tile** each frame (7.7k here, up to ~0.2–0.4 ms). A
   quadtree walk would make it proportional to what's on screen.
 - **Projection is for cities.** Equirectangular `f32` metres around one
   origin: fine for tens of km, wrong for countries or the whole world.
 - **Cartography is minimal.** No labels, casings, dashes, round caps or
-  one-way arrows. Bevel joins only. OSM relations keep only member ways that
+  one-way arrows. Bevel joins and square caps only. OSM relations keep only member ways that
   close by themselves.
 - **Seams** are exact while the 2 m margin is at least half a pixel
   (≥ 0.25 px/m). Below that, faint lines could show in large areas; none
