@@ -24,6 +24,21 @@ pub(crate) struct Block {
     bands: Range<usize>,
 }
 
+/// Changed spans of a buffer, in the order written; touching ones merge.
+#[derive(Default)]
+pub(crate) struct Spans(pub Vec<Range<usize>>);
+
+impl Spans {
+    fn add(&mut self, r: Range<usize>) {
+        match self.0.last_mut() {
+            Some(l) if r.start <= l.end && l.start <= r.end => {
+                *l = l.start.min(r.start)..l.end.max(r.end);
+            }
+            _ => self.0.push(r),
+        }
+    }
+}
+
 /// Freed spans of a buffer, sorted and merged.
 #[derive(Default)]
 struct FreeList(Vec<Range<usize>>);
@@ -63,8 +78,8 @@ const TRANSIENT_BANDS: usize = 4096;
 pub(crate) struct Outlines {
     pub curves: Vec<[f32; 4]>,
     pub bands: Vec<u32>,
-    /// Glyphs were added: upload everything.
-    pub dirty: bool,
+    /// Spans of `curves` and of `bands` written since the last upload.
+    pub changed: (Spans, Spans),
     /// Only the transient region changed.
     pub transient_dirty: bool,
     /// Next free curve and band entry in the transient region.
@@ -80,7 +95,7 @@ impl Default for Outlines {
         Outlines {
             curves: vec![[0.0; 4]; 2 * TRANSIENT_CURVES],
             bands: vec![0; TRANSIENT_BANDS],
-            dirty: true,
+            changed: Default::default(),
             transient_dirty: false,
             transient: (0, 0),
             stored: (2 * TRANSIENT_CURVES, TRANSIENT_BANDS),
@@ -126,7 +141,8 @@ impl Outlines {
         if c.is_none() || b.is_none() {
             self.stored = (self.curves.len(), self.bands.len());
         }
-        self.dirty = true;
+        self.changed.0.add(2 * block.curves.start..2 * block.curves.end);
+        self.changed.1.add(block.bands.clone());
         Some((glyph, block))
     }
 
@@ -168,11 +184,12 @@ impl Outlines {
                 return Some(glyph);
             }
         }
-        let first = (self.curves.len() / 2) as u32;
-        let (glyph, bands) = build(&quads, pad, first, self.bands.len() as u32);
+        let (c, b) = (self.curves.len(), self.bands.len());
+        let (glyph, bands) = build(&quads, pad, (c / 2) as u32, b as u32);
         self.curves.extend(encode(&quads).flatten());
         self.bands.extend(bands);
-        self.dirty = true;
+        self.changed.0.add(c..self.curves.len());
+        self.changed.1.add(b..self.bands.len());
         if !transient {
             // ponytail: overflow from this frame sitting before the glyph stays allocated; only a glyph first seen during an overflow frame leaks any.
             self.stored = (self.curves.len(), self.bands.len());
@@ -458,7 +475,7 @@ mod tests {
         for g in [&shapes[0], shapes.last().unwrap()] {
             assert_ne!(winding(&o, g, [5.0, 5.0]), 0);
         }
-        assert!(o.dirty, "the overflow needs uploading");
+        assert!(!o.changed.0.0.is_empty(), "the overflow needs uploading");
 
         let (curves, bands) = (o.curves.len(), o.bands.len());
         o.begin_frame();

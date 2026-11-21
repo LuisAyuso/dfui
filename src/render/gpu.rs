@@ -359,26 +359,35 @@ impl Gpu {
         scissor: Option<[u32; 4]>,
     ) {
         let o = &mut text.outlines;
-        if o.dirty || self.empty {
-            let (cb, bb): (&[u8], &[u8]) = (
-                bytemuck::cast_slice(&o.curves),
-                bytemuck::cast_slice(&o.bands),
-            );
-            if cb.len() as u64 > self.curves.size() || bb.len() as u64 > self.bands.size() {
-                self.curves = storage(&self.device, "curves", cb.len() as u64);
-                self.bands = storage(&self.device, "bands", bb.len() as u64);
-                self.outline_group = outline_group(
-                    &self.device,
-                    &self.outline_layout,
-                    &self.curves,
-                    &self.bands,
-                );
-            }
-            // ponytail: re-uploads all outlines when any glyph is added; append-only writes if fonts get big.
+        let (cb, bb): (&[u8], &[u8]) = (
+            bytemuck::cast_slice(&o.curves),
+            bytemuck::cast_slice(&o.bands),
+        );
+        if cb.len() as u64 > self.curves.size() || bb.len() as u64 > self.bands.size() {
+            self.curves = storage(&self.device, "curves", cb.len() as u64);
+            self.bands = storage(&self.device, "bands", bb.len() as u64);
+            self.outline_group =
+                outline_group(&self.device, &self.outline_layout, &self.curves, &self.bands);
+            self.empty = true;
+        }
+        if self.empty {
             self.queue.write_buffer(&self.curves, 0, cb);
             self.queue.write_buffer(&self.bands, 0, bb);
-            (o.dirty, o.transient_dirty, self.empty) = (false, false, false);
-        } else if o.transient_dirty {
+            (o.transient_dirty, self.empty) = (false, false);
+        } else {
+            for r in &o.changed.0.0 {
+                let r = r.start.min(o.curves.len())..r.end.min(o.curves.len());
+                let data = bytemuck::cast_slice(&o.curves[r.clone()]);
+                self.queue.write_buffer(&self.curves, r.start as u64 * 16, data);
+            }
+            for r in &o.changed.1.0 {
+                let r = r.start.min(o.bands.len())..r.end.min(o.bands.len());
+                let data = bytemuck::cast_slice(&o.bands[r.clone()]);
+                self.queue.write_buffer(&self.bands, r.start as u64 * 4, data);
+            }
+        }
+        o.changed = Default::default();
+        if o.transient_dirty {
             let (c, b) = o.transient_data();
             self.queue
                 .write_buffer(&self.curves, 0, bytemuck::cast_slice(c));

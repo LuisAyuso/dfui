@@ -89,12 +89,6 @@ the Mali-G715 than on the desktop. If the map scales the same way, that is
 
 - **Storing shapes is slow.** The first frame that draws a tile builds its
   band lists; the whole map at once costs 4.4 s on the phone.
-- **New tiles re-upload everything.** dfui uploads the whole outline store
-  whenever any shape is added (a `ponytail:` in `render/gpu.rs`). Opening
-  zoomed in and panning stores tiles as they appear, and each such frame
-  copies the store again (up to ~17 MB of curves here, plus band lists).
-  Expect hitches while panning into new areas. Fix in dfui: write only the
-  ranges that changed.
 - **Cost per pixel, not per feature.** Every covered pixel evaluates the
   curves of each layer's tile under it; that loop is ~90% of the GPU time
   (see `DFUI_SHOW_COST` in `docs/rendering.md`). Partial repaint doesn't help, since

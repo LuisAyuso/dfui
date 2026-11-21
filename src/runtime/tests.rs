@@ -563,6 +563,33 @@ fn new_device_gets_outlines_already_uploaded_elsewhere() {
     assert_eq!(draw(&mut rt.text), first);
 }
 
+struct Label(Cell<&'static str>);
+
+impl App for Label {
+    fn view(&self) -> Element {
+        text(self.0.get()).into()
+    }
+}
+
+#[test]
+#[ignore = "needs a GPU"]
+fn outlines_stored_after_the_first_frame_reach_the_gpu() {
+    let mut rt = Runtime::new(Label(Cell::new("a")));
+    rt.viewport = (40.0, 40.0);
+    rt.relayout();
+    let mut off = crate::render::Offscreen::new((40, 40));
+    let (a, _) = rt.scene(&mut false);
+    off.draw(&a, &mut rt.text, 1.0, None);
+    let first = off.read();
+    rt.app.0.set("bq");
+    rt.rebuild();
+    let (b, _) = rt.scene(&mut false);
+    off.draw(&b, &mut rt.text, 1.0, None);
+    let fresh = render_offscreen(&[(&b, None)], &mut rt.text, (40, 40), 1.0);
+    assert!(off.read() != first, "the new glyphs drew");
+    assert!(off.read() == fresh, "same as uploading everything");
+}
+
 #[derive(Default)]
 struct Controls {
     on: bool,
