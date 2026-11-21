@@ -76,6 +76,44 @@ fn field(rt: &mut Runtime<Field>) -> String {
     root::<String, _>(rt).clone()
 }
 
+/// Two screens whose fields land in the same tree slot, so share an id.
+struct Screens;
+
+#[derive(Default)]
+struct TwoFields {
+    second: bool,
+    a: String,
+    b: String,
+}
+
+impl App for Screens {
+    fn view(&self) -> Element {
+        stateful(|s: &TwoFields, h| match s.second {
+            false => text_input(s.a.clone())
+                .on_change(move |cx, v| cx.update(h, |s: &mut TwoFields| s.a = v)),
+            true => text_input(s.b.clone())
+                .on_change(move |cx, v| cx.update(h, |s: &mut TwoFields| s.b = v)),
+        })
+        .into()
+    }
+}
+
+#[test]
+fn text_input_types_at_the_end_of_text_it_did_not_write() {
+    let mut rt = Runtime::new(Screens);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::Text("abc".into()));
+    rt.dispatch(Event::Key(Key::Home));
+    let s = root::<TwoFields, _>(&mut rt);
+    (s.second, s.b) = (true, "hello".into());
+    rt.rebuild();
+    rt.dispatch(Event::Text("x".into()));
+    assert_eq!(root::<TwoFields, _>(&mut rt).b, "hellox");
+}
+
 #[test]
 fn text_input_edits_only_while_focused() {
     let mut rt = Runtime::new(Field);

@@ -27,6 +27,9 @@ struct Caret {
     dragging: bool,
     /// Start of the blink cycle: the next paint after the caret last moved.
     blink: Option<Instant>,
+    /// The value the caret was placed in. Another value, set by the app or
+    /// shown by a different field in this slot, puts the caret at its end.
+    seen: String,
 }
 
 const BLINK: Duration = Duration::from_millis(500);
@@ -161,9 +164,13 @@ impl TextInput {
         std::iter::once(0).chain(ends).collect()
     }
 
-    /// The stored caret and anchor, snapped back to boundaries if the value changed.
+    /// The stored caret and anchor, at the end of a value this field didn't write.
     fn caret(&self, c: &mut Caret) -> (usize, usize) {
         let bounds = self.boundaries();
+        if c.seen != self.value {
+            let end = *bounds.last().unwrap();
+            (c.pos, c.anchor, c.seen) = (end, end, self.value.clone());
+        }
         let snap = |i: usize| bounds.iter().copied().rfind(|&b| b <= i).unwrap_or(0);
         (c.pos, c.anchor) = (snap(c.pos), snap(c.anchor));
         (c.pos, c.anchor)
@@ -309,6 +316,7 @@ impl Widget for TextInput {
             v.replace_range(self.byte(range.start)..self.byte(range.end), with);
             let at = range.start + with.chars().count();
             select(cx, at, at);
+            cx.state.get::<Caret>().seen = v.clone();
             if let Some(f) = &self.on_change {
                 f(cx, v);
             }
