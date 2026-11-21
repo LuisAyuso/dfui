@@ -314,7 +314,14 @@ Testing:
 - [ ] Async follow-ups: task modifier on `stateful` (results into its own
       state), async event handlers (`cx.spawn`), sync provider reads in
       `stateful` builds, Suspense-style boundaries.
-- [ ] Multi-touch: per-finger dispatch (runtime is single-pointer today).
+- [x] Pinch: two fingers drive one pointer at their midpoint plus
+      `Event::Pinch`; ctrl+wheel and touchpad pinch on desktop.
+- [ ] Multi-touch follow-ups: a two-finger touch held still and released
+      still taps what's under it unless a widget captures; no rotation.
+- [ ] Maps experiment (`map/`, `dfui-map`): OSM geometry cut into
+      quadtree tiles of `Shape`s; numbers and limits in `map/README.md`.
+      Next: measure on the phone, label text, line caps, a cheaper
+      zoomed-out level (simplified geometry per zoom).
 - [x] Kinetic scrolling: a released drag flings with exponential friction,
       stopping at the edges; re-placed per frame via `request_placement`.
 - [ ] Horizontal scroll; overscroll bounce/glow.

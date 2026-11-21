@@ -1,0 +1,16 @@
+[package]
+name = "dfui-map"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Experimental pannable, zoomable vector map widget for dfui"
+
+[dependencies]
+dfui = { path = ".." }
+
+# Downloading and parsing OpenStreetMap data is the app's job.
+[dev-dependencies]
+serde_json = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+ureq = "3.5"

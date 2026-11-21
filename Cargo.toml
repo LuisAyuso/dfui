@@ -38,7 +38,7 @@ name = "gpu"
 harness = false
 
 [workspace]
-members = ["demo", "site", "tools/svg2path"]
+members = ["demo", "map", "site", "tools/svg2path"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = "30"

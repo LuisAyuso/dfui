@@ -580,6 +580,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dfui-map"
+version = "0.1.0"
+dependencies = [
+ "dfui",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "dfui-site"
 version = "0.1.0"
 dependencies = [
