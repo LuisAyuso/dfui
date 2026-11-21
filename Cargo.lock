@@ -583,7 +583,9 @@ dependencies = [
 name = "dfui-map"
 version = "0.1.0"
 dependencies = [
+ "android_logger",
  "dfui",
+ "log",
  "serde_json",
  "ureq",
 ]

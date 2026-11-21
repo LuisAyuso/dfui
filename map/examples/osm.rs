@@ -1,7 +1,7 @@
 //! An OpenStreetMap area as a dfui map: `cargo run -p dfui-map --release
 //! --example osm -- [lat lon km] [--bench]`. The download from the Overpass
-//! API is cached in the temp directory. The wasm build embeds the JSON at
-//! `DFUI_MAP_OSM` instead (see `map/README.md`).
+//! API is cached in the temp directory. The wasm and Android builds embed the
+//! JSON at `DFUI_MAP_OSM` instead (see `map/README.md`).
 
 use std::rc::Rc;
 
@@ -11,7 +11,7 @@ use dfui::{App, Color, Element};
 use dfui_map::{Layer, MapBuilder, MapData, map};
 use serde_json::Value;
 
-struct OsmMap {
+pub struct OsmMap {
     data: Rc<MapData>,
     start: Option<(Point, f32)>,
 }
@@ -96,6 +96,18 @@ fn add(b: &mut MapBuilder, s: &Style, e: &Value) {
     }
 }
 
+/// Central Amsterdam: latitude, longitude and the side of the area in km.
+const AMSTERDAM: (f64, f64, f64) = (52.3731, 4.8926, 2.0);
+
+/// The map of [`AMSTERDAM`].
+pub fn app() -> OsmMap {
+    let (lat, lon, km) = AMSTERDAM;
+    OsmMap {
+        data: prepare(lat, lon, km),
+        start: None,
+    }
+}
+
 fn main() {
     let args: Vec<f64> = std::env::args()
         .skip(1)
@@ -104,8 +116,17 @@ fn main() {
     let (lat, lon, km) = match args[..] {
         [lat, lon, km] => (lat, lon, km),
         [lat, lon] => (lat, lon, 2.0),
-        _ => (52.3731, 4.8926, 2.0),
+        _ => AMSTERDAM,
     };
+    let data = prepare(lat, lon, km);
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    if std::env::args().any(|a| a == "--bench") {
+        return bench(&data);
+    }
+    dfui::run(OsmMap { data, start: None });
+}
+
+fn prepare(lat: f64, lon: f64, km: f64) -> Rc<MapData> {
     let json = load(lat, lon, km);
     let osm: Value = serde_json::from_str(&json).expect("Overpass JSON");
     let t = dfui::Instant::now();
@@ -123,23 +144,18 @@ fn main() {
     }
     let data = b.build();
     eprintln!("{} shapes in {:?}", data.tiles(), t.elapsed());
-    let data = Rc::new(data);
-    #[cfg(not(target_arch = "wasm32"))]
-    if std::env::args().any(|a| a == "--bench") {
-        return bench(&data);
-    }
-    dfui::run(OsmMap { data, start: None });
+    Rc::new(data)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
 fn load(_: f64, _: f64, _: f64) -> String {
     include_str!(env!("DFUI_MAP_OSM")).into()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 use native::{bench, download as load};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 mod native {
     use super::*;
 

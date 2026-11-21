@@ -74,6 +74,8 @@ the Mali-G715 than on the desktop. If the map scales the same way, that is
 
 ## Limitations
 
+- **Storing shapes is slow.** The first frame that draws a tile builds its
+  band lists; the whole map at once costs 4.4 s on the phone.
 - **New tiles re-upload everything.** dfui uploads the whole outline store
   whenever any shape is added (a `ponytail:` in `render/gpu.rs`). Opening
   zoomed in and panning stores tiles as they appear, and each such frame
@@ -116,5 +118,19 @@ wasm-bindgen --target web --no-typescript --out-dir out \
 ```
 
 Then load `out/osm.js` from a page as `site/dist/run.html` does.
+
+## Android
+
+`osm_android` is the same example as an APK, with the data embedded the same
+way (set up `cargo-apk` as in the top-level README):
+
+```sh
+DFUI_MAP_OSM=/path/to/amsterdam.json cargo apk run -p dfui-map \
+    --example osm_android --release
+```
+
+Preparing the data takes ~190 ms on the Pixel. The first frame takes 4.4 s
+(0.65 s on the desktop): it stores every tile's shape, since the whole map is
+in view.
 
 Map data © OpenStreetMap contributors, under the ODbL.
