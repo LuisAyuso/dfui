@@ -151,4 +151,10 @@ Preparing the data takes ~190 ms on the Pixel. The first frame takes 4.4 s
 (0.65 s on the desktop): it stores every tile's shape, since the whole map is
 in view.
 
+## Releasing
+
+Published to crates.io on its own: bump `version` in `map/Cargo.toml`,
+then push a `map-v<version>` tag (`.github/workflows/map-release.yml`). It
+depends on the published dfui, so release dfui first when it needs a new one.
+
 Map data © OpenStreetMap contributors, under the ODbL.

@@ -318,7 +318,7 @@ Testing:
       `Event::Pinch`; ctrl+wheel and touchpad pinch on desktop.
 - [ ] Multi-touch follow-ups: a two-finger touch held still and released
       still taps what's under it unless a widget captures; no rotation.
-- [ ] Maps experiment (`map/`, `dfui-map`): OSM geometry cut into
+- [ ] Maps experiment (`map/`, `dfui-map`, on crates.io): OSM geometry cut into
       quadtree tiles of `Shape`s; numbers and limits in `map/README.md`.
       Runs on the phone (`osm_android`). Maps save to bytes
       (`MapData::to_bytes`) and load with tiles decoded on first draw.
