@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use dfui::path::Point;
 use dfui::widgets::{Styled, column, text};
-use dfui::{App, Color, Element};
+use dfui::{App, Color, Element, Font, Text};
 use dfui_map::{Layer, MapBuilder, MapData, map};
 use serde_json::Value;
 
@@ -40,6 +40,7 @@ struct Style {
     paths: Layer,
     minor: Layer,
     major: Layer,
+    names: Layer,
 }
 
 fn ring(b: &MapBuilder, geometry: &Value) -> Vec<Point> {
@@ -49,7 +50,10 @@ fn ring(b: &MapBuilder, geometry: &Value) -> Vec<Point> {
         .collect()
 }
 
-fn add(b: &mut MapBuilder, s: &Style, e: &Value) {
+/// A street name to place: its line, name and road width.
+type Name = (Vec<Point>, String, f32);
+
+fn add(b: &mut MapBuilder, s: &Style, names: &mut Vec<Name>, e: &Value) {
     let tag = |k: &str| e["tags"][k].as_str().unwrap_or("");
     let area_layer = match () {
         _ if !tag("building").is_empty() => Some(s.buildings),
@@ -91,7 +95,12 @@ fn add(b: &mut MapBuilder, s: &Style, e: &Value) {
         _ => None,
     });
     match (line, area_layer) {
-        (Some((layer, w)), _) => b.line(layer, &pts, w),
+        (Some((layer, w)), _) => {
+            b.line(layer, &pts, w);
+            if let Some(name) = e["tags"]["name"].as_str().filter(|_| road.is_some()) {
+                names.push((pts, name.to_owned(), w));
+            }
+        }
         (None, Some(layer)) if pts.first() == pts.last() => b.area(layer, &[pts], &[]),
         _ => {}
     }
@@ -141,9 +150,17 @@ fn prepare(lat: f64, lon: f64, km: f64) -> Rc<MapData> {
         paths: b.layer(Color::WHITE, 0.4),
         minor: b.layer(Color::WHITE, 0.0),
         major: b.layer(Color::hex(0xf8d49c), 0.0),
+        names: b.layer(Color::hex(0x5c5852), 0.0),
     };
+    let mut names = Vec::new();
     for e in osm["elements"].as_array().into_iter().flatten() {
-        add(&mut b, &style, e);
+        add(&mut b, &style, &mut names, e);
+    }
+    // Earlier labels win the spacing: names of wide roads first.
+    names.sort_by(|a, b| b.2.total_cmp(&a.2));
+    let text = Text::default();
+    for (pts, name, w) in &names {
+        b.label(style.names, pts, &text, Font::DEFAULT, name, w * 0.75);
     }
     let data = b.build();
     eprintln!("{} shapes in {:?}", data.tiles(), t.elapsed());

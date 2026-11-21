@@ -33,25 +33,31 @@ backoff and caches the response in the temp directory.
   exact for straight edges under nonzero fill). The tile is drawn clipped to
   the cell, so the cut edges sit outside the clip and adjacent tiles meet
   without antialiasing seams.
+- Street names are geometry too: `Text::glyph_paths` gives the shaped
+  glyph outlines, and each glyph is turned to the street under its middle
+  and stored in metres, one shape per label. They scale with the map and
+  show once the font reaches 7 px. The same name repeats only 300 px apart
+  on screen: each repeat waits for the zoom where it's that far from the
+  ones placed before it, so names of wide roads go first.
 - Paint walks every tile, skips the ones off screen or below their layer's
   `min_scale`, and draws the rest with `PaintCx::shape`.
 
 ## Numbers
 
-Central Amsterdam, 2×2 km of OSM data (15.8 MB of Overpass JSON). Seven layers,
-9353 shapes, 626k segments. Prepared in ~165 ms on the desktop. A phone-sized
+Central Amsterdam, 2×2 km of OSM data (15.8 MB of Overpass JSON). Eight layers,
+10293 shapes (940 of them labels), 847k segments. Prepared in ~200 ms on the desktop. A phone-sized
 target (1080×2400 at scale 2.625) on a Ryzen 5 3600 and RTX 4060 Ti, using
 `--bench`. CPU is one paint of the scene; GPU is the median render pass from
 timestamps.
 
 | View | CPU paint | GPU frame |
 |---|---|---|
-| Whole map (~0.15 px/m, buildings and paths hidden) | 194 µs | 0.39 ms |
-| 0.3 px/m (buildings and paths hidden) | 149 µs | 0.64 ms |
-| 0.5 px/m (dense: every building) | 206 µs | 1.15 ms |
-| 2 px/m | 41 µs | 0.70 ms |
-| 10 px/m | 23 µs | 0.47 ms |
-| 50 px/m | 21 µs | 0.05 ms |
+| Whole map (~0.15 px/m, buildings and paths hidden) | 204 µs | 0.40 ms |
+| 0.3 px/m (buildings and paths hidden) | 152 µs | 0.64 ms |
+| 0.5 px/m (dense: every building) | 224 µs | 1.15 ms |
+| 2 px/m | 43 µs | 0.74 ms |
+| 10 px/m | 26 µs | 0.47 ms |
+| 50 px/m | 23 µs | 0.05 ms |
 
 For scale, dfui's `gpu/text_wall` is ~0.12 ms on the same machine. How the GPU
 time came down, at 0.5 px/m:
@@ -92,13 +98,17 @@ the Mali-G715 than on the desktop. If the map scales the same way, that is
 - **GPU memory grows with area.** 32 bytes a segment plus band lists, all
   resident while drawn (shapes are freed 600 frames after they were last
   drawn). There is no streaming of data in or out.
-- **Paint walks every tile** each frame (9.4k here, up to ~0.2 ms). A
+- **Paint walks every tile** each frame (10.3k here, up to ~0.2 ms). A
   quadtree walk would make it proportional to what's on screen.
 - **Projection is for cities.** Equirectangular `f32` metres around one
   origin: fine for tens of km, wrong for countries or the whole world.
-- **Cartography is minimal.** No labels, casings, dashes, round caps or
-  one-way arrows. Bevel joins only; caps are polygons, a third of all segments. OSM relations keep only member ways that
+- **Cartography is minimal.** No casings, dashes or one-way arrows. Bevel
+  joins only; caps are polygons. OSM relations keep only member ways that
   close by themselves.
+- **Labels are per OSM way.** A name longer than its way (one block, often)
+  isn't shown; joining a street's ways would fit more. Different names can
+  overlap at junctions, and dual carriageways label each side off the
+  road's middle. Areas (squares, canals) have no names yet.
 - **Seams** are exact while the 2 m margin is at least half a pixel
   (≥ 0.25 px/m). Below that, faint lines could show in large areas; none
   were visible at the whole-map zoom.

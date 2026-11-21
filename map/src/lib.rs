@@ -3,12 +3,13 @@
 //! [`Shape`]s, and [`map`] pans and zooms them. Shapes are stored on the GPU
 //! once, so moving the map only moves the rects they're drawn into.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use dfui::path::Point;
 use dfui::taffy::{Dimension, Size, Style};
 use dfui::widgets::Styled;
-use dfui::{Color, Element, Event, EventCx, PaintCx, Path, Rect, Shape, Widget};
+use dfui::{Color, Element, Event, EventCx, Font, PaintCx, Path, Rect, Shape, Text, Widget};
 
 /// Most segments in one shape: the shader walks a band's segments per pixel.
 const MAX_QUADS: usize = 128;
@@ -21,6 +22,12 @@ const MARGIN: f32 = 2.0;
 const EARTH_RADIUS: f64 = 6_371_000.0;
 /// Edges of a half-disk line cap; flattening stays under 2% of the width.
 const CAP_STEPS: usize = 8;
+/// Font size, logical px, at which a label starts to show.
+const MIN_LABEL_PX: f32 = 7.0;
+/// Least screen distance between labels with the same text, logical px.
+const LABEL_SPACING_PX: f32 = 300.0;
+/// Sharpest turn between neighbouring glyphs of a label, radians.
+const MAX_LABEL_TURN: f32 = 0.35;
 /// Pointer travel before a press becomes a pan, logical px.
 const SLOP: f32 = 6.0;
 
@@ -30,6 +37,10 @@ pub struct MapBuilder {
     origin: (f64, f64),
     cos: f64,
     layers: Vec<LayerData>,
+    /// One shape each, drawn over every layer.
+    labels: Vec<Tile>,
+    /// Centres of the labels placed so far, by text.
+    placed: HashMap<String, Vec<Point>>,
 }
 
 struct LayerData {
@@ -51,6 +62,8 @@ impl MapBuilder {
             origin: (lat, lon),
             cos: lat.to_radians().cos(),
             layers: Vec::new(),
+            labels: Vec::new(),
+            placed: HashMap::new(),
         }
     }
 
@@ -138,6 +151,101 @@ impl MapBuilder {
         }
     }
 
+    /// `s` at `size` metres along the polyline, e.g. a street's name inside
+    /// it: centred, reading left to right, each glyph turned to the line
+    /// under its middle. Shows once `size` reaches [`MIN_LABEL_PX`] and the
+    /// same text placed earlier is [`LABEL_SPACING_PX`] away; false,
+    /// adding nothing, when the text is longer than the line or the line
+    /// bends too sharply under it.
+    pub fn label(
+        &mut self,
+        layer: Layer,
+        points: &[Point],
+        text: &Text,
+        font: Font,
+        s: &str,
+        size: f32,
+    ) -> bool {
+        let mut pts = points.to_vec();
+        pts.dedup();
+        if pts.len() < 2 {
+            return false;
+        }
+        if pts[pts.len() - 1][0] < pts[0][0] {
+            pts.reverse();
+        }
+        let mut along = vec![0.0];
+        for w in pts.windows(2) {
+            along.push(along[along.len() - 1] + (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]));
+        }
+        let length = along[along.len() - 1];
+        let layout = text.layout(s, font, size, None);
+        if layout.width + size > length {
+            return false;
+        }
+        let start = (length - layout.width) / 2.0;
+        // Point and unit direction at distance `d` along the line.
+        let at = |d: f32| {
+            let i = along.partition_point(|&a| a <= d).clamp(1, pts.len() - 1);
+            let (a, b) = (pts[i - 1], pts[i]);
+            let len = along[i] - along[i - 1];
+            let t = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+            let k = d - along[i - 1];
+            ([a[0] + t[0] * k, a[1] + t[1] * k], t)
+        };
+        let mid_y = layout.height / 2.0;
+        let mut contours = Vec::new();
+        let mut last: Option<f32> = None;
+        for g in text.glyph_paths(s, font, size) {
+            let xs = g.contours.iter().flatten().flatten().map(|p| p[0]);
+            let (lo, hi) = xs.fold((f32::MAX, f32::MIN), |(l, h), x| (l.min(x), h.max(x)));
+            let mid_x = (lo + hi) / 2.0;
+            let (o, t) = at(start + mid_x);
+            let angle = t[1].atan2(t[0]);
+            if let Some(a) = last {
+                let turn = (angle - a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU);
+                if (turn - std::f32::consts::PI).abs() > MAX_LABEL_TURN {
+                    return false;
+                }
+            }
+            last = Some(angle);
+            // Glyph x runs along the line and y (down) to its right.
+            let place = |[x, y]: Point| {
+                let (u, v) = (x - mid_x, y - mid_y);
+                [o[0] + u * t[0] - v * t[1], o[1] + u * t[1] + v * t[0]]
+            };
+            contours.extend(
+                g.contours
+                    .into_iter()
+                    .map(|c| c.into_iter().map(|q| q.map(place)).collect::<Vec<_>>()),
+            );
+        }
+        let path = Path { contours };
+        let Some(view) = bounds(path.contours.iter().flatten().flatten()) else {
+            return false;
+        };
+        let (c, _) = at(length / 2.0);
+        let near = self.placed.entry(s.to_owned()).or_default();
+        let d = near.iter().map(|p| (p[0] - c[0]).hypot(p[1] - c[1]));
+        let spaced = LABEL_SPACING_PX / d.fold(f32::MAX, f32::min);
+        near.push(c);
+        let l = &self.layers[layer.0];
+        let pad = size / 4.0;
+        self.labels.push(Tile {
+            shape: Shape::new(path, view),
+            view,
+            cell: Rect::new(
+                view.x - pad,
+                view.y - pad,
+                view.w + 2.0 * pad,
+                view.h + 2.0 * pad,
+            ),
+            color: l.color,
+            min_scale: l.min_scale.max(MIN_LABEL_PX / size).max(spaced),
+        });
+        true
+    }
+
     fn ring(&mut self, layer: Layer, mut ring: Vec<Point>, outer: bool) {
         let area = signed_area(&ring);
         if ring.len() < 3 || area == 0.0 {
@@ -158,6 +266,7 @@ impl MapBuilder {
             }
         }
         let bounds = tiles.iter().map(|t| t.cell).reduce(|a, b| a.union(&b));
+        tiles.extend(self.labels);
         MapData {
             tiles,
             bounds: bounds.unwrap_or_default(),
@@ -498,6 +607,32 @@ mod tests {
             assert!(n <= MAX_QUADS, "{n} segments");
         }
         assert_eq!(data.bounds, Rect::new(0.0, 0.0, 390.0, 390.0));
+    }
+
+    #[test]
+    fn labels_run_along_upright_and_spaced() {
+        let text = Text::default();
+        let mut b = MapBuilder::new(48.0, 11.0);
+        let l = b.layer(Color::BLACK, 0.0);
+        let label =
+            |b: &mut MapBuilder, pts: &[Point]| b.label(l, pts, &text, Font::DEFAULT, "Hi", 10.0);
+        assert!(!label(&mut b, &[[0.0, 0.0], [10.0, 0.0]]), "too short");
+        let bend = [[0.0, 0.0], [50.0, 0.0], [50.0, 50.0]];
+        assert!(!label(&mut b, &bend), "turns under the text");
+        // Drawn right to left, still read left to right: 'H' comes first.
+        assert!(label(&mut b, &[[100.0, 0.0], [0.0, 0.0]]));
+        let t = &b.labels[0];
+        assert!((t.view.x + t.view.w / 2.0 - 50.0).abs() < 2.0);
+        assert!(
+            (t.view.y + t.view.h / 2.0).abs() < 4.0,
+            "centred on the line"
+        );
+        let first = t.shape.path().contours[0][0][0][0];
+        assert!(first < 50.0);
+        assert_eq!(t.min_scale, MIN_LABEL_PX / 10.0);
+        // The same text 100 m on waits until they're far enough apart on screen.
+        assert!(label(&mut b, &[[100.0, 0.0], [200.0, 0.0]]));
+        assert_eq!(b.labels[1].min_scale, LABEL_SPACING_PX / 100.0);
     }
 
     #[test]

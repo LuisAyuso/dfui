@@ -321,8 +321,9 @@ Testing:
 - [ ] Maps experiment (`map/`, `dfui-map`): OSM geometry cut into
       quadtree tiles of `Shape`s; numbers and limits in `map/README.md`.
       Runs on the phone (`osm_android`). Next: phone frame times while
-      panning, a faster first frame (4.4 s storing 10k shapes), label text,
-      a cheaper zoomed-out level (simplified geometry per zoom).
+      panning, a faster first frame (4.4 s storing 10k shapes), labels for
+      whole streets and areas, a cheaper zoomed-out level (simplified
+      geometry per zoom).
 - [x] Kinetic scrolling: a released drag flings with exponential friction,
       stopping at the edges; re-placed per frame via `request_placement`.
 - [ ] Horizontal scroll; overscroll bounce/glow.
