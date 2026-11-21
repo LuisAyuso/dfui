@@ -49,6 +49,14 @@ pub trait App: 'static {
     fn background(&self) -> Color {
         self.theme().background
     }
+    /// Desktop window title, read when the window opens.
+    fn title(&self) -> String {
+        "dfui".into()
+    }
+    /// Opens the desktop window borderless fullscreen, e.g. for a TV.
+    fn fullscreen(&self) -> bool {
+        false
+    }
 }
 
 /// A function returning the view is an app with the default theme:

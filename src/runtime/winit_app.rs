@@ -61,7 +61,13 @@ impl Host for Arc<Window> {
 impl<A: App> ApplicationHandler for Runtime<A> {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         #[allow(unused_mut)]
-        let mut attrs = Window::default_attributes().with_title("dfui");
+        let mut attrs = Window::default_attributes()
+            .with_title(self.app.title())
+            .with_fullscreen(
+                self.app
+                    .fullscreen()
+                    .then_some(winit::window::Fullscreen::Borderless(None)),
+            );
         // The page sizes the canvas with CSS.
         #[cfg(target_arch = "wasm32")]
         {
