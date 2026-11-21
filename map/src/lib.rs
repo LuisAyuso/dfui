@@ -450,14 +450,18 @@ pub fn map(data: &Rc<MapData>) -> Map {
             ..Style::default()
         },
         start: None,
+        on_tap: None,
     }
 }
+
+type TapFn = dyn Fn(&mut EventCx, Point);
 
 /// See [`map`].
 pub struct Map {
     data: Rc<MapData>,
     style: Style,
     start: Option<(Point, f32)>,
+    on_tap: Option<Rc<TapFn>>,
 }
 
 impl Map {
@@ -465,6 +469,13 @@ impl Map {
     /// logical px per metre, instead of fitting the whole map.
     pub fn start(mut self, center: Point, scale: f32) -> Self {
         self.start = Some((center, scale));
+        self
+    }
+
+    /// Runs on a tap that didn't pan or pinch, with the map point under it
+    /// in [`MapBuilder::point`] metres.
+    pub fn on_tap(mut self, f: impl Fn(&mut EventCx, Point) + 'static) -> Self {
+        self.on_tap = Some(Rc::new(f));
         self
     }
 }
@@ -513,7 +524,7 @@ impl Widget for Map {
     fn event(&self, ev: &Event, cx: &mut EventCx) {
         let (r, data) = (cx.rect, &*self.data);
         let inside = |x, y| cx.rect.contains(x, y) && cx.clip.contains(x, y);
-        let (mut capture, mut stop) = (false, false);
+        let (mut capture, mut stop, mut tap) = (false, false, None);
         let v = cx.state.get::<View>();
         v.fit(data, r, self.start);
         match *ev {
@@ -534,7 +545,17 @@ impl Widget for Map {
                     capture = true;
                 }
             }
-            Event::PointerUp { .. } | Event::Cancel => v.press = None,
+            Event::PointerUp { x, y } => {
+                if v.press.take().is_some() && !v.panning && inside(x, y) {
+                    let s = v.scale;
+                    let c = v.center;
+                    tap = Some([
+                        c[0] + (x - r.x - r.w / 2.0) / s,
+                        c[1] + (y - r.y - r.h / 2.0) / s,
+                    ]);
+                }
+            }
+            Event::Cancel => v.press = None,
             Event::Wheel { x, y, dy } if inside(x, y) => {
                 v.zoom(data, r, x, y, (-dy / 200.0).exp());
                 stop = true;
@@ -551,6 +572,9 @@ impl Widget for Map {
         }
         if stop {
             cx.stop();
+        }
+        if let (Some(p), Some(f)) = (tap, &self.on_tap) {
+            f(cx, p);
         }
         cx.request_redraw();
     }
@@ -655,5 +679,33 @@ mod tests {
         assert_eq!(v.scale, 3.0);
         let after = at(&v);
         assert!((before[0] - after[0]).abs() < 1e-4 && (before[1] - after[1]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn taps_report_the_map_point_and_pans_dont() {
+        use std::cell::RefCell;
+
+        struct App(Rc<MapData>, Rc<RefCell<Vec<Point>>>);
+        impl dfui::App for App {
+            fn view(&self) -> Element {
+                let taps = self.1.clone();
+                map(&self.0)
+                    .on_tap(move |_, p| taps.borrow_mut().push(p))
+                    .into()
+            }
+        }
+        let data = Rc::new(MapData {
+            tiles: Vec::new(),
+            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+        });
+        let taps = Rc::new(RefCell::new(Vec::new()));
+        let mut b = dfui::Bench::new(App(data, taps.clone()), (100.0, 100.0));
+        b.settle();
+        b.event(Event::PointerDown { x: 80.0, y: 20.0 });
+        b.event(Event::PointerUp { x: 80.0, y: 20.0 });
+        b.event(Event::PointerDown { x: 50.0, y: 50.0 });
+        b.event(Event::PointerMove { x: 10.0, y: 50.0 });
+        b.event(Event::PointerUp { x: 10.0, y: 50.0 });
+        assert_eq!(*taps.borrow(), [[80.0, 20.0]]);
     }
 }
