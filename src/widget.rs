@@ -38,7 +38,8 @@ pub enum Event {
     Leave,
     /// Text typed while this widget has focus.
     Text(String),
-    /// Editing key pressed while this widget has focus.
+    /// Key pressed while this widget has focus; with nothing focused, offered
+    /// to every widget topmost first (see [`on_key`](crate::widgets::on_key)).
     Key(Key),
     /// Escape, or the Android back button: sent topmost first, so the
     /// uppermost overlay can dismiss itself and stop it.
@@ -72,6 +73,10 @@ pub enum Key {
     SelectAll,
     Copy,
     Cut,
+    Up,
+    Down,
+    /// Return, or the D-pad's centre on Android.
+    Enter,
 }
 
 /// A retained node description. `view` rebuilds the tree; framework-owned

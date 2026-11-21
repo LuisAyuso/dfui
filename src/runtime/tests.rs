@@ -12,8 +12,8 @@ use crate::text::Font;
 use crate::widget::{Handle, PaintCx, Scope, Widget};
 use crate::widgets::{
     Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon, icon_button, on_back,
-    overlays, popup, provide, radio, row, scroll, segmented, slider, snackbar, spacer, stateful,
-    stream_builder, text, text_input, toggle, tooltip, watch,
+    on_key, overlays, popup, provide, radio, row, scroll, segmented, slider, snackbar, spacer,
+    stateful, stream_builder, text, text_input, toggle, tooltip, watch,
 };
 
 /// State of the root `stateful`.
@@ -254,6 +254,40 @@ fn on_back_runs_and_keeps_the_app_open() {
     rt.relayout();
     assert!(rt.dispatch(Event::Back), "handled, so Android doesn't exit");
     assert_eq!(*root::<i32, _>(&mut rt), 1);
+}
+
+struct Keys;
+
+impl App for Keys {
+    fn view(&self) -> Element {
+        stateful(|_: &Vec<Key>, h| {
+            column([
+                on_key(move |cx, k| cx.update(h, move |v: &mut Vec<Key>| v.push(k))).into(),
+                text_input("").into(),
+            ])
+        })
+        .into()
+    }
+}
+
+#[test]
+fn keys_reach_on_key_unless_a_field_is_focused() {
+    let mut rt = Runtime::new(Keys);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.dispatch(Event::Key(Key::Down));
+    rt.dispatch(Event::Key(Key::Enter));
+    assert_eq!(*root::<Vec<Key>, _>(&mut rt), [Key::Down, Key::Enter]);
+    let field = rt.placed.last().unwrap().rect;
+    let (x, y) = (field.x + 5.0, field.y + 5.0);
+    rt.dispatch(Event::PointerDown { x, y });
+    rt.dispatch(Event::PointerUp { x, y });
+    rt.dispatch(Event::Key(Key::Up));
+    assert_eq!(
+        root::<Vec<Key>, _>(&mut rt).len(),
+        2,
+        "the focused field took it"
+    );
 }
 
 struct Log;

@@ -349,6 +349,9 @@ impl<A: App> Runtime<A> {
         let captured = self.captured.filter(|_| !matches!(ev, Event::Back));
         let find = |id: u64| self.ids.iter().position(|&n| n == id);
         let targets: Vec<usize> = match (keyboard, captured) {
+            (true, _) if self.focused.is_none() && matches!(ev, Event::Key(_)) => {
+                self.order.iter().rev().copied().collect()
+            }
             (true, _) => self.focused.and_then(find).into_iter().collect(),
             (false, Some(id)) => find(id).into_iter().collect(),
             (false, None) if matches!(ev, Event::Cancel | Event::Back) => {
@@ -487,6 +490,9 @@ impl<A: App> Runtime<A> {
             WKey::Named(NamedKey::Delete) => Some(Key::Delete),
             WKey::Named(NamedKey::ArrowLeft) => Some(Key::Left),
             WKey::Named(NamedKey::ArrowRight) => Some(Key::Right),
+            WKey::Named(NamedKey::ArrowUp) => Some(Key::Up),
+            WKey::Named(NamedKey::ArrowDown) => Some(Key::Down),
+            WKey::Named(NamedKey::Enter) => Some(Key::Enter),
             WKey::Named(NamedKey::Home) => Some(Key::Home),
             WKey::Named(NamedKey::End) => Some(Key::End),
             WKey::Named(NamedKey::Escape) => {

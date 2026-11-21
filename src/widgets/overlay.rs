@@ -15,7 +15,7 @@ use crate::render::{Color, Shadow};
 use crate::runtime::task::{self, sleep};
 use crate::theme::Role;
 use crate::widget::{
-    Element, Event, EventCx, Handle, Layer, PaintCx, Placement, Scope, State, Widget,
+    Element, Event, EventCx, Handle, Key, Layer, PaintCx, Placement, Scope, State, Widget,
 };
 
 use super::button::Handler;
@@ -600,6 +600,33 @@ impl Widget for OnBack {
         if let Event::Back = ev {
             (self.0)(cx);
             cx.stop();
+        }
+    }
+}
+
+/// Runs `f` for keys pressed while no text field is focused, e.g. arrows and
+/// Enter from a keyboard, remote or D-pad. Topmost first: one that handles a
+/// key calls [`EventCx::stop`] to keep it from those below.
+pub struct OnKey(KeyHandler);
+
+type KeyHandler = Box<dyn Fn(&mut EventCx, Key)>;
+
+/// Handles keys for the screen it's placed in; see [`OnKey`].
+#[doc = example!("on_key")]
+pub fn on_key(f: impl Fn(&mut EventCx, Key) + 'static) -> OnKey {
+    OnKey(Box::new(f))
+}
+
+impl From<OnKey> for Element {
+    fn from(w: OnKey) -> Self {
+        Element::new(w)
+    }
+}
+
+impl Widget for OnKey {
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
+        if let Event::Key(k) = ev {
+            (self.0)(cx, *k);
         }
     }
 }

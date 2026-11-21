@@ -14,6 +14,8 @@ use crate::text::{Font, Text};
 use crate::theme::{Ink, Role};
 use crate::widget::{Element, Event, EventCx, Key, Keyboard, PaintCx, Widget};
 
+use super::button::Handler;
+
 type OnChange = Box<dyn Fn(&mut EventCx, String)>;
 
 /// Caret and selection anchor in chars, always on grapheme boundaries; the
@@ -39,6 +41,7 @@ pub struct TextInput {
     accent: Ink,
     keyboard: Keyboard,
     on_change: Option<OnChange>,
+    on_submit: Option<Handler>,
     style: Style,
 }
 
@@ -54,6 +57,7 @@ pub fn text_input(value: impl Into<String>) -> TextInput {
         accent: Role::Accent.into(),
         keyboard: Keyboard::Text,
         on_change: None,
+        on_submit: None,
         style: Style {
             padding: taffy::Rect {
                 left: LengthPercentage::length(12.0),
@@ -70,6 +74,11 @@ impl TextInput {
     /// Called with the edited value; without it the field is read-only.
     pub fn on_change(mut self, f: impl Fn(&mut EventCx, String) + 'static) -> Self {
         self.on_change = Some(Box::new(f));
+        self
+    }
+    /// Called on Enter while the field is focused.
+    pub fn on_submit(mut self, f: impl Fn(&mut EventCx) + 'static) -> Self {
+        self.on_submit = Some(Box::new(f));
         self
     }
     /// Faded hint shown while the value is empty.
@@ -266,6 +275,9 @@ impl Widget for TextInput {
         });
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
+        if matches!(ev, Event::Key(_)) && !cx.focused {
+            return;
+        }
         let (caret, anchor) = self.caret(cx.state.get::<Caret>());
         let sel = caret.min(anchor)..caret.max(anchor);
         let bounds = self.boundaries();
@@ -334,6 +346,11 @@ impl Widget for TextInput {
                     _ => *bounds.last().unwrap(),
                 };
                 select(cx, to, if cx.shift { anchor } else { to });
+            }
+            Event::Key(Key::Enter) => {
+                if let Some(f) = &self.on_submit {
+                    f(cx);
+                }
             }
             Event::Key(Key::SelectAll) => select(cx, *bounds.last().unwrap(), 0),
             Event::Key(k @ (Key::Copy | Key::Cut)) if !sel.is_empty() && !self.is_password() => {

@@ -41,6 +41,7 @@ const WIDGETS: &[&str] = &[
     "bottom_sheet",
     "snackbar",
     "on_back",
+    "on_key",
 ];
 
 struct Page {

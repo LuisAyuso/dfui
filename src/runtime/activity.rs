@@ -190,6 +190,11 @@ fn input<A: App>(rt: &mut Runtime<A>, app: &AndroidApp, ev: &InputEvent) -> Inpu
                 Keycode::ForwardDel => Some(NamedKey::Delete),
                 Keycode::DpadLeft => Some(NamedKey::ArrowLeft),
                 Keycode::DpadRight => Some(NamedKey::ArrowRight),
+                Keycode::DpadUp => Some(NamedKey::ArrowUp),
+                Keycode::DpadDown => Some(NamedKey::ArrowDown),
+                Keycode::DpadCenter | Keycode::Enter | Keycode::NumpadEnter => {
+                    Some(NamedKey::Enter)
+                }
                 Keycode::MoveHome => Some(NamedKey::Home),
                 Keycode::MoveEnd => Some(NamedKey::End),
                 _ => None,
