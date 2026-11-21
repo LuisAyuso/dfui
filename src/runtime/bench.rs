@@ -94,6 +94,18 @@ impl<A: App> Bench<A> {
         self.0.reposition();
     }
 
+    /// The current frame as a [`GpuBench`] at `scale` physical px per
+    /// logical px, e.g. once [`Bench::settle`] has let content stream in.
+    pub fn gpu(mut self, scale: f32) -> GpuBench {
+        let rt = &mut self.0;
+        let size = (
+            (rt.viewport.0 * scale).round() as u32,
+            (rt.viewport.1 * scale).round() as u32,
+        );
+        let (scene, _) = rt.scene(&mut false);
+        GpuBench::ready(scene, std::mem::take(&mut rt.text), size, scale)
+    }
+
     /// Renders the current frame offscreen at `scale` physical px per logical px.
     pub fn shot(&mut self, scale: f32) -> Pixels {
         let rt = &mut self.0;
@@ -122,9 +134,13 @@ impl GpuBench {
         rt.viewport = (size.0 as f32 / scale, size.1 as f32 / scale);
         rt.relayout();
         let (scene, _) = rt.scene(&mut false);
+        Self::ready(scene, rt.text, size, scale)
+    }
+
+    fn ready(scene: Scene, text: Text, size: (u32, u32), scale: f32) -> Self {
         let mut g = GpuBench {
             scene,
-            text: rt.text,
+            text,
             off: Offscreen::new(size),
             scale,
         };
