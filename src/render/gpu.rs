@@ -366,8 +366,12 @@ impl Gpu {
         if cb.len() as u64 > self.curves.size() || bb.len() as u64 > self.bands.size() {
             self.curves = storage(&self.device, "curves", cb.len() as u64);
             self.bands = storage(&self.device, "bands", bb.len() as u64);
-            self.outline_group =
-                outline_group(&self.device, &self.outline_layout, &self.curves, &self.bands);
+            self.outline_group = outline_group(
+                &self.device,
+                &self.outline_layout,
+                &self.curves,
+                &self.bands,
+            );
             self.empty = true;
         }
         if self.empty {
@@ -378,12 +382,14 @@ impl Gpu {
             for r in &o.changed.0.0 {
                 let r = r.start.min(o.curves.len())..r.end.min(o.curves.len());
                 let data = bytemuck::cast_slice(&o.curves[r.clone()]);
-                self.queue.write_buffer(&self.curves, r.start as u64 * 16, data);
+                self.queue
+                    .write_buffer(&self.curves, r.start as u64 * 16, data);
             }
             for r in &o.changed.1.0 {
                 let r = r.start.min(o.bands.len())..r.end.min(o.bands.len());
                 let data = bytemuck::cast_slice(&o.bands[r.clone()]);
-                self.queue.write_buffer(&self.bands, r.start as u64 * 4, data);
+                self.queue
+                    .write_buffer(&self.bands, r.start as u64 * 4, data);
             }
         }
         o.changed = Default::default();

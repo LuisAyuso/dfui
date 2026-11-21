@@ -141,7 +141,9 @@ impl Outlines {
         if c.is_none() || b.is_none() {
             self.stored = (self.curves.len(), self.bands.len());
         }
-        self.changed.0.add(2 * block.curves.start..2 * block.curves.end);
+        self.changed
+            .0
+            .add(2 * block.curves.start..2 * block.curves.end);
         self.changed.1.add(block.bands.clone());
         Some((glyph, block))
     }

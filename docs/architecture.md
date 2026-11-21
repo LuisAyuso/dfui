@@ -234,5 +234,5 @@ Details and design decisions, including partial redraws: `rendering.md`.
 ## Known limits
 
 Tracked in `TODO.md` and as `ponytail:` comments in the code: no IME composition on desktop,
-no bidi, fallback only to the default font, single pointer, full `view` rebuild and paint per change, all
-outlines re-uploaded when a glyph is added, linear hit-testing.
+no bidi, fallback only to the default font, single pointer, full `view` rebuild and paint per change,
+linear hit-testing.

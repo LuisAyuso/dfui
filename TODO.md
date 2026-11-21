@@ -393,7 +393,7 @@ repeated on the phone; lists and text input have no bench.
 - [x] Paint culling: nodes whose box (plus a 48px overdraw margin for
       shadows) is outside their clip aren't painted. 1000 cards: edit frame
       12.1 → 8.5 ms, scroll frame 4.6 → 1.2 ms (desktop).
-- [ ] Upload only newly added glyph data (all outlines re-uploaded today).
+- [x] Upload only the outline spans that changed, not the whole store.
 - [x] Flatten once per rebuild: ids cached, other passes re-walk the tree
       (`docs/tree.md`). Pointer move −57%, scroll frame −21% at 1000 cards.
 - [x] Pointer events visit only the nodes under the pointer, the ones it
