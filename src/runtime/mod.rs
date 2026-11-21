@@ -97,6 +97,8 @@ pub(crate) struct Runtime<A: App> {
     rebuild_due: bool,
     /// Hidden windows don't animate; presents would be throttled anyway.
     occluded: bool,
+    /// [`App::zoom`] as last applied.
+    zoom: f32,
     focused: Option<u64>,
     /// The focused widget takes typing, so character keys arrive as text.
     typing: bool,
@@ -186,6 +188,7 @@ impl<A: App> Runtime<A> {
             place: false,
             rebuild_due: false,
             occluded: false,
+            zoom: 1.0,
             focused: None,
             typing: false,
             focus_visible: false,
@@ -212,7 +215,9 @@ impl<A: App> Runtime<A> {
     }
 
     fn scale(&self) -> f32 {
-        self.renderer.as_ref().map_or(1.0, |r| r.window().scale())
+        self.renderer
+            .as_ref()
+            .map_or(1.0, |r| r.window().scale() * self.zoom)
     }
 
     /// The only way `root` changes, so `ids` always matches it.
@@ -266,7 +271,7 @@ impl<A: App> Runtime<A> {
                 Err(e) => startup_failed(&e),
             };
             // Resizes during setup were scaled without the window's factor.
-            let ((w, h), s) = (r.window().size(), r.window().scale());
+            let ((w, h), s) = (r.window().size(), r.window().scale() * self.zoom);
             self.viewport = (w as f32 / s, h as f32 / s);
             self.renderer = Some(r);
             self.update_insets();
@@ -302,7 +307,7 @@ impl<A: App> Runtime<A> {
         let (Some(a), Some(r)) = (&self.android, &self.renderer) else {
             return;
         };
-        let s = r.window().scale();
+        let s = r.window().scale() * self.zoom;
         self.insets = android::insets(a).map(|v| v as f32 / s);
         log::info!("insets {:?}", self.insets);
     }
@@ -514,6 +519,8 @@ impl<A: App> Runtime<A> {
             WKey::Named(NamedKey::ArrowUp) => Some(Key::Up),
             WKey::Named(NamedKey::ArrowDown) => Some(Key::Down),
             WKey::Named(NamedKey::Enter) => Some(Key::Enter),
+            WKey::Named(NamedKey::PageUp) => Some(Key::PageUp),
+            WKey::Named(NamedKey::PageDown) => Some(Key::PageDown),
             WKey::Named(NamedKey::Home) => Some(Key::Home),
             WKey::Named(NamedKey::End) => Some(Key::End),
             WKey::Named(NamedKey::Escape) => {
@@ -634,6 +641,15 @@ impl<A: App> Runtime<A> {
     }
 
     fn paint(&mut self) {
+        let zoom = self.app.zoom();
+        if zoom != self.zoom
+            && let Some(r) = &mut self.renderer
+        {
+            self.zoom = zoom;
+            r.set_zoom(zoom);
+            let (w, h) = r.window().size();
+            self.resized(w, h);
+        }
         let start = Instant::now();
         let mut frame = false;
         let (scene, spans) = self.scene(&mut frame);

@@ -57,6 +57,11 @@ pub trait App: 'static {
     fn fullscreen(&self) -> bool {
         false
     }
+    /// Multiplies the window's scale factor, so everything grows or shrinks,
+    /// e.g. for a user's size setting. Read every frame.
+    fn zoom(&self) -> f32 {
+        1.0
+    }
 }
 
 /// A function returning the view is an app with the default theme:

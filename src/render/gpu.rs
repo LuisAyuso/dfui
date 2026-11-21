@@ -512,6 +512,8 @@ pub(crate) struct Renderer {
     show_damage: Option<usize>,
     /// Last presented frame carries the overlay tint; next one must present.
     tinted: bool,
+    /// The app's zoom on top of the window's scale factor.
+    zoom: f32,
     /// Last, so it's dropped after the surface drawing into it.
     window: Box<dyn Host>,
 }
@@ -601,6 +603,7 @@ impl Renderer {
             fresh: true,
             show_damage: std::env::var_os("DFUI_SHOW_DAMAGE").map(|_| 0),
             tinted: false,
+            zoom: 1.0,
             window,
         })
     }
@@ -626,8 +629,12 @@ impl Renderer {
 
     /// Redraws `damage` (logical px; empty redraws nothing), or everything when
     /// `None`.
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom;
+    }
+
     pub fn render(&mut self, scene: &Scene, text: &mut Text, damage: Option<Rect>) -> Outcome {
-        let scale = self.window.scale();
+        let scale = self.window.scale() * self.zoom;
         let viewport = [
             self.config.width as f32 / scale,
             self.config.height as f32 / scale,

@@ -195,6 +195,10 @@ fn input<A: App>(rt: &mut Runtime<A>, app: &AndroidApp, ev: &InputEvent) -> Inpu
                 Keycode::DpadCenter | Keycode::Enter | Keycode::NumpadEnter => {
                     Some(NamedKey::Enter)
                 }
+                Keycode::PageUp | Keycode::ButtonL1 | Keycode::ButtonL2 => Some(NamedKey::PageUp),
+                Keycode::PageDown | Keycode::ButtonR1 | Keycode::ButtonR2 => {
+                    Some(NamedKey::PageDown)
+                }
                 Keycode::MoveHome => Some(NamedKey::Home),
                 Keycode::MoveEnd => Some(NamedKey::End),
                 _ => None,

@@ -86,6 +86,10 @@ pub enum Key {
     Down,
     /// Return, or the D-pad's centre on Android.
     Enter,
+    /// Page Up, or a gamepad's left shoulder button or trigger on Android.
+    PageUp,
+    /// Page Down, or a gamepad's right shoulder button or trigger on Android.
+    PageDown,
     /// A character key pressed while no text field is focused, e.g. a
     /// shortcut; a focused field gets it as [`Event::Text`] instead.
     Char(char),

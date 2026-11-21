@@ -2,11 +2,12 @@ use std::borrow::Cow;
 use std::cell::Cell;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
+use std::time::Duration;
 
 use taffy::{AvailableSpace, Size, Style};
 
 use super::Styled;
-use crate::anim::{Lerp, Morph};
+use crate::anim::{Animated, Lerp, Morph, ease};
 use crate::render::Color;
 use crate::text::{Font, Text};
 use crate::theme::Ink;
@@ -21,7 +22,12 @@ pub(crate) struct Emphasis(pub Rc<Cell<f32>>, pub Rc<Cell<bool>>, pub Ink);
 #[derive(Default)]
 struct LabelState {
     emphasis: Option<Emphasis>,
+    /// Toward bold for [`Label::emphasized`].
+    bold: Animated<f32>,
 }
+
+/// How long [`Label::emphasized`] takes to morph.
+const MORPH: Duration = Duration::from_millis(160);
 
 /// A run of text built by [`text`]; see there.
 pub struct Label {
@@ -30,6 +36,7 @@ pub struct Label {
     size: f32,
     color: Ink,
     max_lines: Option<usize>,
+    emphasized: bool,
     style: Style,
 }
 
@@ -42,6 +49,7 @@ pub fn text(s: impl Into<String>) -> Label {
         size: 16.0,
         color: Ink::Content,
         max_lines: None,
+        emphasized: false,
         style: Style::default(),
     }
 }
@@ -62,15 +70,21 @@ impl Label {
         self.color = c.into();
         self
     }
+    /// Morphs the glyphs to bold while `on`, e.g. for the focused item. Takes
+    /// a one-line label in [`Font::DEFAULT`]; others switch font halfway.
+    pub fn emphasized(mut self, on: bool) -> Self {
+        self.emphasized = on;
+        self
+    }
     /// At most `n` lines; cut text ends in "…".
     pub fn max_lines(mut self, n: usize) -> Self {
         self.max_lines = Some(n.max(1));
         self
     }
 
-    fn shown<'a>(&'a self, text: &Text, max_width: Option<f32>) -> Cow<'a, str> {
+    fn shown<'a>(&'a self, text: &Text, font: Font, max_width: Option<f32>) -> Cow<'a, str> {
         match (self.max_lines, max_width) {
-            (Some(n), Some(w)) => text.truncate(&self.text, self.font, self.size, w, n),
+            (Some(n), Some(w)) => text.truncate(&self.text, font, self.size, w, n),
             _ => Cow::Borrowed(&self.text),
         }
     }
@@ -103,7 +117,7 @@ impl Widget for Label {
             AvailableSpace::MinContent => Some(0.0),
             AvailableSpace::MaxContent => None,
         });
-        let l = text.layout(&self.shown(text, max), self.font, self.size, max);
+        let l = text.layout(&self.shown(text, self.font, max), self.font, self.size, max);
         Size {
             width: known.width.unwrap_or(l.width),
             height: known.height.unwrap_or(l.height),
@@ -118,12 +132,19 @@ impl Widget for Label {
         cx.state.get::<LabelState>().emphasis = cx.scope.get::<Emphasis>().cloned();
     }
     fn paint(&self, cx: &mut PaintCx) {
-        let (r, s) = (cx.rect, self.size);
+        let (r, s, now) = (cx.rect, self.size, cx.now);
         let st = cx.state.get::<LabelState>();
-        let (t, dim, content) = st
+        let (pressed, dim, content) = st
             .emphasis
             .as_ref()
             .map_or((0.0, false, Ink::Content), |e| (e.0.get(), e.1.get(), e.2));
+        let target = if self.emphasized { 1.0 } else { 0.0 };
+        st.bold.to(target, now, MORPH, ease::out_cubic);
+        let (own, moving) = (st.bold.get(now), st.bold.running(now));
+        if moving {
+            cx.request_frame();
+        }
+        let t = pressed.max(own);
         let ink = if self.color == Ink::Content {
             content
         } else {
@@ -132,18 +153,32 @@ impl Widget for Label {
         let c = cx.color(ink);
         let c = if dim { c.alpha(c.a * 0.5) } else { c };
         let regular = std::ptr::eq(self.font.0, Font::DEFAULT.0);
-        if t > 0.0 && regular && self.max_lines.is_none() && !self.text.contains('\n') {
-            return weight(cx, &self.text, s, c, t, (r.x, r.w), r.y);
-        }
         let max = Some(r.w + 1.0);
-        let shown = self.shown(cx.text, max);
-        cx.text(&shown, self.font, s, c, max, (r.x, r.y));
+        // A button centers its label; an emphasized one keeps its start.
+        let center = pressed > 0.0;
+        if t > 0.0 && regular && !self.text.contains('\n') {
+            let fits = match self.max_lines {
+                None => true,
+                Some(_) => cx.text.layout(&self.text, Font::BOLD, s, None).width <= r.w + 1.0,
+            };
+            if fits {
+                return weight(cx, &self.text, s, c, t, (r.x, r.w), r.y, center);
+            }
+        }
+        let font = if regular && t >= 0.5 {
+            Font::BOLD
+        } else {
+            self.font
+        };
+        let shown = self.shown(cx.text, font, max);
+        cx.text(&shown, font, s, c, max, (r.x, r.y));
     }
 }
 
-/// One line of `s` between regular (`t` 0) and bold (`t` 1), centered in
-/// `x..x + w` with its top at `y`. Between the two, each glyph's outline
-/// morphs and the glyphs slide between the two spacings.
+/// One line of `s` between regular (`t` 0) and bold (`t` 1) in `x..x + w`,
+/// centered or from `x`, with its top at `y`. Between the two, each glyph's
+/// outline morphs and the glyphs slide between the two spacings.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn weight(
     cx: &mut PaintCx,
     s: &str,
@@ -152,17 +187,19 @@ pub(crate) fn weight(
     t: f32,
     (x, w): (f32, f32),
     y: f32,
+    center: bool,
 ) {
+    let start = |lw: f32| if center { x + (w - lw) / 2.0 } else { x };
     if t <= 0.0 || t >= 1.0 {
         let font = if t >= 1.0 { Font::BOLD } else { Font::DEFAULT };
         let lw = cx.text.layout(s, font, size, None).width;
-        cx.text(s, font, size, color, None, (x + (w - lw) / 2.0, y));
+        cx.text(s, font, size, color, None, (start(lw), y));
         return;
     }
     let a = cx.text.caret_stops(s, Font::DEFAULT, size);
     let b = cx.text.caret_stops(s, Font::BOLD, size);
     let lw = a[a.len() - 1].lerp(b[b.len() - 1], t);
-    let (x0, base) = (x + (w - lw) / 2.0, y + cx.text.ascent(Font::DEFAULT, size));
+    let (x0, base) = (start(lw), y + cx.text.ascent(Font::DEFAULT, size));
     for (i, ch) in s.chars().enumerate() {
         let regular = cx.glyph_path(Font::DEFAULT, ch, size);
         let bold = cx.glyph_path(Font::BOLD, ch, size);

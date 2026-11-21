@@ -162,7 +162,7 @@ impl Segmented {
     /// A tab's label at weight `t`, centered in its slot.
     fn tab_label(&self, cx: &mut PaintCx, l: &str, t: f32, slot: (f32, f32), y: f32) {
         let c = cx.theme.muted.lerp(cx.color(self.accent), t);
-        weight(cx, l, SIZE, c, t, slot, y);
+        weight(cx, l, SIZE, c, t, slot, y, true);
     }
 }
 
