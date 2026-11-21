@@ -125,9 +125,12 @@ impl MapBuilder {
                 add(w[0], n, -1.0),
             ];
             self.ring(layer, quad, true);
-            // Overlapping outlines fill as one under nonzero winding.
+            // Only the outside of a bend has a notch; overlaps fill as one
+            // under nonzero winding.
             if let Some(m) = last {
-                for s in [1.0, -1.0] {
+                let turn = m[0] * n[1] - m[1] * n[0];
+                if turn != 0.0 {
+                    let s = -turn.signum();
                     self.ring(layer, vec![w[0], add(w[0], m, s), add(w[0], n, s)], true);
                 }
             }
@@ -465,8 +468,8 @@ mod tests {
             .iter()
             .map(|r| signed_area(r) > 0.0)
             .collect();
-        // Outline, hole, two caps, two segments and a bevel each side of the bend.
-        assert_eq!(signs, [true, false, true, true, true, true, true, true]);
+        // Outline, hole, two caps, two segments and a bevel outside the bend.
+        assert_eq!(signs, [true, false, true, true, true, true, true]);
     }
 
     #[test]

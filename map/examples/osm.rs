@@ -37,6 +37,7 @@ struct Style {
     water: Layer,
     buildings: Layer,
     rail: Layer,
+    paths: Layer,
     minor: Layer,
     major: Layer,
 }
@@ -80,7 +81,7 @@ fn add(b: &mut MapBuilder, s: &Style, e: &Value) {
         "residential" | "unclassified" | "living_street" => Some((s.minor, 9.0)),
         "service" | "pedestrian" => Some((s.minor, 5.0)),
         "" => None,
-        _ => Some((s.minor, 2.5)),
+        _ => Some((s.paths, 2.5)),
     };
     let line = road.or(match tag("waterway") {
         "river" => Some((s.water, 20.0)),
@@ -136,6 +137,8 @@ fn prepare(lat: f64, lon: f64, km: f64) -> Rc<MapData> {
         water: b.layer(Color::hex(0xaad3df), 0.0),
         buildings: b.layer(Color::hex(0xd9d0c9), 0.4),
         rail: b.layer(Color::hex(0x9a9a9a), 0.0),
+        // Footways, cycleways, steps: under a px wide below this.
+        paths: b.layer(Color::WHITE, 0.4),
         minor: b.layer(Color::WHITE, 0.0),
         major: b.layer(Color::hex(0xf8d49c), 0.0),
     };
