@@ -101,7 +101,12 @@ would cost about 4× fill for no visible change.
 ## Timing
 
 `Renderer` logs fps, CPU time (excluding vsync wait) and GPU time every two
-seconds, each with its slowest frame in the window to show hitches. GPU time comes from timestamp queries around the render pass, with
+seconds, each with its slowest frame in the window to show hitches.
+
+`DFUI_SHOW_COST=1` swaps in a debug blend: each pixel's red channel counts
+the curves its fragments tested, and green the instances drawn there. Read a
+snapshot's channels as counts (they saturate at 255) to see where the
+fragment shader spends its time. GPU time comes from timestamp queries around the render pass, with
 one sample in flight. Baselines are in `TODO.md`.
 
 ## GPU benchmarks

@@ -8,6 +8,11 @@ struct Globals {
 
 @group(0) @binding(0) var<uniform> g: Globals;
 
+// DFUI_SHOW_COST: blended additively, red counts curves tested and green
+// counts instances drawn at each pixel.
+override show_cost: bool = false;
+var<private> cost: u32;
+
 // Outline glyphs: each curve is two vec4s, (p0, p1) and (p2, _), em units, y up.
 @group(1) @binding(0) var<storage, read> curves: array<vec4<f32>>;
 // Per glyph: [start, count] per horizontal band, then per vertical band; then curve indices.
@@ -116,6 +121,7 @@ fn ray_coverage(p_in: vec2<f32>, header: u32, band_count: f32, lo: f32, hi: f32,
     var sum = 0.0;
     var weight = 0.0;
     for (var i = 0u; i < count; i++) {
+        cost += 1u;
         let ci = bands[start + i];
         let a = curves[2u * ci];
         let b = curves[2u * ci + 1u];
@@ -202,6 +208,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
             }
             color = vec4(fill.rgb, fill.a * coverage);
         }
+    }
+    if show_cost {
+        return vec4(f32(cost) / 255.0, 1.0 / 255.0, 0.0, 0.0);
     }
     return vec4(color.rgb * color.a, color.a);
 }

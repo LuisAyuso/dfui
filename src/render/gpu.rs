@@ -254,6 +254,12 @@ impl Gpu {
             bind_group_layouts: &[Some(&bgl), Some(&outline_layout), Some(&image_layout)],
             immediate_size: 0,
         });
+        let show_cost = std::env::var_os("DFUI_SHOW_COST").is_some();
+        let add = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor: wgpu::BlendFactor::One,
+            operation: wgpu::BlendOperation::Add,
+        };
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("sdf"),
             layout: Some(&layout),
@@ -276,10 +282,19 @@ impl Gpu {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs"),
-                compilation_options: Default::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[("show_cost", f64::from(u8::from(show_cost)))],
+                    ..Default::default()
+                },
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    blend: Some(match show_cost {
+                        true => wgpu::BlendState {
+                            color: add,
+                            alpha: add,
+                        },
+                        false => wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
+                    }),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
