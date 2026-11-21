@@ -10,7 +10,7 @@ use read_fonts::types::GlyphId;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::outline::{Block, Outlines};
-use crate::path::{Path, Shape};
+use crate::path::{Path, Point, Quad, Shape};
 use crate::render::{Color, Rect, Scene};
 
 /// TrueType/OpenType font data. Fonts are told apart by address, so keep each
@@ -59,6 +59,16 @@ struct StoredShape {
     /// `None` for a shape with nothing to fill.
     stored: Option<(Glyph, Block)>,
     drawn: u64,
+}
+
+/// Em-unit contours (y up) at `size` px, y down, pen moved to `at`.
+fn scaled(contours: Vec<Vec<Quad>>, size: f32, at: Point) -> Path {
+    let at = |[x, y]: Point| [at[0] + x * size, at[1] - y * size];
+    Path {
+        contours: (contours.into_iter())
+            .map(|c| c.into_iter().map(|q| q.map(at)).collect())
+            .collect(),
+    }
 }
 
 /// Index into [`Text::faces`].
@@ -363,17 +373,24 @@ impl Text {
         let (f, id) = [face, 0]
             .into_iter()
             .find_map(|f| Some((f, faces[f].1.charmap().map_unicode(c)?)))?;
-        let contours = crate::outline::contours(&faces[f].1, id)?;
-        Some(Path {
-            contours: contours
-                .into_iter()
-                .map(|c| {
-                    c.into_iter()
-                        .map(|q| q.map(|[x, y]| [x * size, -y * size]))
-                        .collect()
-                })
-                .collect(),
-        })
+        Some(scaled(
+            crate::outline::contours(&faces[f].1, id)?,
+            size,
+            [0.0; 2],
+        ))
+    }
+
+    /// `s` shaped like [`Text::layout`] without wrapping, as one outline per
+    /// glyph placed in the layout's box (top left at the origin, y down):
+    /// for text drawn along a curve or packed into other geometry. Spaces
+    /// have no outline.
+    pub fn glyph_paths(&self, s: &str, font: Font, size: f32) -> Vec<Path> {
+        let layout = self.layout(s, font, size, None);
+        let faces = self.faces.borrow();
+        let outline = |g: &PositionedGlyph| crate::outline::contours(&faces[g.face].1, g.id);
+        (layout.glyphs.iter())
+            .filter_map(|g| Some(scaled(outline(g)?, size, [g.x, g.y])))
+            .collect()
     }
 
     /// Drops cached layouts not used since the last call; the runtime calls
@@ -781,6 +798,20 @@ mod tests {
             from.contours[0].iter().filter(|q| on_base(&q[0])).count(),
             4
         );
+    }
+
+    #[test]
+    fn glyph_paths_follow_the_layout() {
+        let t = Text::default();
+        let paths = t.glyph_paths("i i", Font::DEFAULT, 20.0);
+        assert_eq!(paths.len(), 2, "the space has no outline");
+        let x = |p: &Path| p.contours[0][0][0][0];
+        let layout = t.layout("i i", Font::DEFAULT, 20.0, None);
+        assert!(x(&paths[1]) - x(&paths[0]) > layout.width / 2.0);
+        let single = t.glyph_path(Font::DEFAULT, 'i', 20.0).unwrap();
+        assert_eq!(paths[0].contours.len(), single.contours.len());
+        let ys = paths[0].contours.iter().flatten().flatten().map(|p| p[1]);
+        assert!(ys.fold(f32::MAX, f32::min) >= 0.0, "inside the box, y down");
     }
 
     #[test]
