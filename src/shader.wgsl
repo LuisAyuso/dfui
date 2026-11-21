@@ -41,12 +41,10 @@ struct VsOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) local: vec2<f32>,
     @location(1) uv: vec2<f32>,
-    @location(2) world: vec2<f32>,
     @location(3) @interpolate(flat) rect: vec4<f32>,
     @location(4) @interpolate(flat) color: vec4<f32>,
     @location(5) @interpolate(flat) border_color: vec4<f32>,
     @location(6) @interpolate(flat) params: vec4<f32>,
-    @location(7) @interpolate(flat) clip: vec4<f32>,
     @location(8) @interpolate(flat) uv_rect: vec4<f32>,
 }
 
@@ -80,7 +78,8 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Instance) -> VsOut {
     } else if strip > 0u {
         hi = lo;
     }
-    // Fragments outside the clip are discarded anyway; don't rasterize them.
+    // The clip: the rasterizer gives a pixel on a shared edge to exactly one
+    // of two adjacent clips, which a test per fragment can't.
     lo = max(lo, inst.clip.xy);
     hi = max(min(hi, inst.clip.xy + inst.clip.zw), lo);
     let world = mix(lo, hi, c);
@@ -91,12 +90,10 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Instance) -> VsOut {
     // Extrapolates past the uv rect into the padding.
     out.uv = inst.uv.xy + (world - inst.rect.xy) / inst.rect.zw * (inst.uv.zw - inst.uv.xy);
     out.uv_rect = inst.uv;
-    out.world = world;
     out.rect = inst.rect;
     out.color = inst.color;
     out.border_color = inst.border_color;
     out.params = inst.params;
-    out.clip = inst.clip;
     return out;
 }
 
@@ -159,11 +156,6 @@ fn ray_coverage(p_in: vec2<f32>, header: u32, band_count: f32, lo: f32, hi: f32,
 
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
-    if in.world.x < in.clip.x || in.world.y < in.clip.y
-        || in.world.x > in.clip.x + in.clip.z || in.world.y > in.clip.y + in.clip.w {
-        discard;
-    }
-
     if in.params.w > 1.5 {
         // Explicit level: no mips, and sampling isn't in uniform control flow.
         let s = textureSampleLevel(image, image_sampler, in.uv, 0.0);
