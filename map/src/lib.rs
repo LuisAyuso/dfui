@@ -410,20 +410,25 @@ struct View {
     /// Where the press began and the last pointer position.
     press: Option<(Point, Point)>,
     panning: bool,
+    /// The last [`Map::focus`] applied.
+    focused: Option<(Point, f32)>,
 }
 
 impl View {
-    fn fit(&mut self, data: &MapData, r: Rect, start: Option<(Point, f32)>) {
-        if self.scale > 0.0 || data.bounds.w <= 0.0 {
-            return;
+    fn fit(&mut self, map: &Map, r: Rect) {
+        let b = map.data.bounds;
+        if self.scale <= 0.0 && b.w > 0.0 {
+            (self.center, self.scale) = map.start.unwrap_or((
+                [b.x + b.w / 2.0, b.y + b.h / 2.0],
+                (r.w / b.w).min(r.h / b.h),
+            ));
         }
-        if let Some((center, scale)) = start {
-            (self.center, self.scale) = (center, scale);
-            return;
+        if map.focus != self.focused {
+            if let Some((center, scale)) = map.focus {
+                (self.center, self.scale) = (center, self.scale.max(scale));
+            }
+            self.focused = map.focus;
         }
-        let b = data.bounds;
-        self.center = [b.x + b.w / 2.0, b.y + b.h / 2.0];
-        self.scale = (r.w / b.w).min(r.h / b.h);
     }
 
     /// Zooms by `k` keeping the metre under `(x, y)` in place.
@@ -450,18 +455,23 @@ pub fn map(data: &Rc<MapData>) -> Map {
             ..Style::default()
         },
         start: None,
+        focus: None,
         on_tap: None,
+        overlay: None,
     }
 }
 
 type TapFn = dyn Fn(&mut EventCx, Point);
+type OverlayFn = dyn Fn(&mut PaintCx, &dyn Fn(Point) -> Point);
 
 /// See [`map`].
 pub struct Map {
     data: Rc<MapData>,
     style: Style,
     start: Option<(Point, f32)>,
+    focus: Option<(Point, f32)>,
     on_tap: Option<Rc<TapFn>>,
+    overlay: Option<Rc<OverlayFn>>,
 }
 
 impl Map {
@@ -469,6 +479,20 @@ impl Map {
     /// logical px per metre, instead of fitting the whole map.
     pub fn start(mut self, center: Point, scale: f32) -> Self {
         self.start = Some((center, scale));
+        self
+    }
+
+    /// Centres on `center` and zooms in to at least `scale` whenever this
+    /// differs from the focus of the last build, e.g. to show a search result.
+    pub fn focus(mut self, focus: Option<(Point, f32)>) -> Self {
+        self.focus = focus;
+        self
+    }
+
+    /// Paints over the map, given a function from map points to logical px,
+    /// e.g. to draw markers that keep their size while zooming.
+    pub fn overlay(mut self, f: impl Fn(&mut PaintCx, &dyn Fn(Point) -> Point) + 'static) -> Self {
+        self.overlay = Some(Rc::new(f));
         self
     }
 
@@ -500,7 +524,7 @@ impl Widget for Map {
     fn paint(&self, cx: &mut PaintCx) {
         let r = cx.rect;
         let v = cx.state.get::<View>();
-        v.fit(&self.data, r, self.start);
+        v.fit(self, r);
         let (s, c) = (v.scale, v.center);
         let visible = Rect::new(c[0] - r.w / 2.0 / s, c[1] - r.h / 2.0 / s, r.w / s, r.h / s);
         let screen = |b: Rect| {
@@ -518,6 +542,15 @@ impl Widget for Map {
                     cx.shape(&t.shape, screen(t.view), t.color);
                 });
             }
+            if let Some(f) = &self.overlay {
+                let at = |p: Point| {
+                    [
+                        r.x + r.w / 2.0 + (p[0] - c[0]) * s,
+                        r.y + r.h / 2.0 + (p[1] - c[1]) * s,
+                    ]
+                };
+                f(cx, &at);
+            }
         });
     }
 
@@ -526,7 +559,7 @@ impl Widget for Map {
         let inside = |x, y| cx.rect.contains(x, y) && cx.clip.contains(x, y);
         let (mut capture, mut stop, mut tap) = (false, false, None);
         let v = cx.state.get::<View>();
-        v.fit(data, r, self.start);
+        v.fit(self, r);
         match *ev {
             Event::PointerDown { x, y } if inside(x, y) => {
                 v.press = Some(([x, y], [x, y]));
@@ -661,13 +694,13 @@ mod tests {
 
     #[test]
     fn zoom_keeps_the_point_under_the_pointer() {
-        let data = MapData {
+        let data = Rc::new(MapData {
             tiles: Vec::new(),
             bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-        };
+        });
         let r = Rect::new(0.0, 0.0, 100.0, 100.0);
         let mut v = View::default();
-        v.fit(&data, r, None);
+        v.fit(&map(&data), r);
         let at = |v: &View| {
             [
                 v.center[0] + (80.0 - 50.0) / v.scale,
@@ -707,5 +740,21 @@ mod tests {
         b.event(Event::PointerMove { x: 10.0, y: 50.0 });
         b.event(Event::PointerUp { x: 10.0, y: 50.0 });
         assert_eq!(*taps.borrow(), [[80.0, 20.0]]);
+    }
+
+    #[test]
+    fn focus_moves_the_view_once_per_change() {
+        let data = Rc::new(MapData {
+            tiles: Vec::new(),
+            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+        });
+        let r = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let mut v = View::default();
+        let focused = map(&data).focus(Some(([10.0, 20.0], 5.0)));
+        v.fit(&focused, r);
+        assert_eq!((v.center, v.scale), ([10.0, 20.0], 5.0));
+        v.center = [0.0, 0.0];
+        v.fit(&focused, r);
+        assert_eq!(v.center, [0.0, 0.0]);
     }
 }
