@@ -19,6 +19,8 @@ const MIN_CELL: f32 = 16.0;
 /// while it is half a px or more: from 0.25 px per metre.
 const MARGIN: f32 = 2.0;
 const EARTH_RADIUS: f64 = 6_371_000.0;
+/// Edges of a half-disk line cap; flattening stays under 2% of the width.
+const CAP_STEPS: usize = 8;
 /// Pointer travel before a press becomes a pan, logical px.
 const SLOP: f32 = 6.0;
 
@@ -97,14 +99,20 @@ impl MapBuilder {
         if n < 2 {
             return;
         }
-        // Square caps: OSM splits roads into ways that meet at an angle.
-        let extend = |a: Point, b: Point| {
+        // Round caps: OSM splits roads into ways that meet at any angle.
+        for (a, b) in [(pts[0], pts[1]), (pts[n - 1], pts[n - 2])] {
             let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
             let k = h / dx.hypot(dy);
-            [a[0] + dx * k, a[1] + dy * k]
-        };
-        pts[0] = extend(pts[0], pts[1]);
-        pts[n - 1] = extend(pts[n - 1], pts[n - 2]);
+            let (ux, uy) = (dx * k, dy * k);
+            let cap = (0..=CAP_STEPS)
+                .map(|i| {
+                    let t = std::f32::consts::PI * (i as f32 / CAP_STEPS as f32 - 0.5);
+                    let (s, c) = t.sin_cos();
+                    [a[0] + ux * c - uy * s, a[1] + uy * c + ux * s]
+                })
+                .collect();
+            self.ring(layer, cap, true);
+        }
         let mut last: Option<Point> = None;
         for w in pts.windows(2) {
             let Some(n) = normal(w[0], w[1]) else {
@@ -457,8 +465,8 @@ mod tests {
             .iter()
             .map(|r| signed_area(r) > 0.0)
             .collect();
-        // Outline, hole, two segments and a bevel each side of the bend.
-        assert_eq!(signs, [true, false, true, true, true, true]);
+        // Outline, hole, two caps, two segments and a bevel each side of the bend.
+        assert_eq!(signs, [true, false, true, true, true, true, true, true]);
     }
 
     #[test]
