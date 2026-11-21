@@ -112,7 +112,11 @@ pub(crate) struct Runtime<A: App> {
     pending_renderer: Option<PendingRenderer>,
     viewport: (f32, f32),
     cursor: (f32, f32),
-    touch: Option<u64>,
+    /// Fingers down, by id, at most two.
+    fingers: Vec<(u64, (f32, f32))>,
+    /// Added to the fingers' midpoint so the pointer doesn't jump when one
+    /// lands or lifts.
+    finger_shift: (f32, f32),
     clipboard: Clipboard,
     stats: Stats,
     insets: Insets,
@@ -201,7 +205,8 @@ impl<A: App> Runtime<A> {
             pending_renderer: None,
             viewport: (0.0, 0.0),
             cursor: (0.0, 0.0),
-            touch: None,
+            fingers: Vec::new(),
+            finger_shift: (0.0, 0.0),
             clipboard: Clipboard::default(),
             stats: Stats::default(),
             insets: [0.0; 4],
@@ -593,32 +598,84 @@ impl<A: App> Runtime<A> {
         self.reposition();
     }
 
-    /// A finger's touch, logical px.
+    /// A finger's touch, logical px. Two fingers move one pointer with their
+    /// midpoint and send [`Event::Pinch`]; a third is ignored.
     fn touch(&mut self, id: u64, phase: TouchPhase, x: f32, y: f32) {
-        // ponytail: single-pointer only; multi-touch gestures need per-finger dispatch.
-        if self.touch.is_some_and(|t| t != id) {
-            return;
-        }
-        match phase {
-            TouchPhase::Started => {
-                self.touch = Some(id);
+        let i = self.fingers.iter().position(|f| f.0 == id);
+        match (phase, i) {
+            (TouchPhase::Started, None) if self.fingers.is_empty() => {
+                self.fingers.push((id, (x, y)));
+                self.finger_shift = (0.0, 0.0);
                 self.dispatch(Event::PointerDown { x, y });
             }
-            TouchPhase::Moved => {
-                self.dispatch(Event::PointerMove { x, y });
+            (TouchPhase::Started, None) if self.fingers.len() == 1 => {
+                let p = self.finger_pointer();
+                self.fingers.push((id, (x, y)));
+                self.keep_pointer(p);
             }
-            TouchPhase::Ended => {
-                self.touch = None;
+            (TouchPhase::Moved, Some(i)) => {
+                let before = self.spread();
+                self.fingers[i].1 = (x, y);
+                let (px, py) = self.finger_pointer();
+                self.dispatch(Event::PointerMove { x: px, y: py });
+                if let (Some(a), Some(b)) = (before, self.spread())
+                    && a > 0.0
+                {
+                    let (mx, my) = self.midpoint();
+                    let scale = b / a;
+                    self.dispatch(Event::Pinch {
+                        x: mx,
+                        y: my,
+                        scale,
+                    });
+                }
+            }
+            (TouchPhase::Ended, Some(i)) if self.fingers.len() == 2 => {
+                let p = self.finger_pointer();
+                self.fingers.remove(i);
+                self.keep_pointer(p);
+            }
+            (TouchPhase::Ended, Some(_)) => {
+                let (x, y) = self.finger_pointer();
+                self.fingers.clear();
                 self.dispatch(Event::PointerUp { x, y });
                 self.dispatch(Event::Leave);
             }
-            TouchPhase::Cancelled => {
-                self.touch = None;
+            (TouchPhase::Cancelled, Some(_)) => {
+                self.fingers.clear();
                 self.captured = None;
                 self.dispatch(Event::Cancel);
                 self.dispatch(Event::Leave);
             }
+            _ => {}
         }
+    }
+
+    fn midpoint(&self) -> (f32, f32) {
+        let n = self.fingers.len().max(1) as f32;
+        let (x, y) = self
+            .fingers
+            .iter()
+            .fold((0.0, 0.0), |a, f| (a.0 + f.1.0, a.1 + f.1.1));
+        (x / n, y / n)
+    }
+
+    fn finger_pointer(&self) -> (f32, f32) {
+        let (x, y) = self.midpoint();
+        (x + self.finger_shift.0, y + self.finger_shift.1)
+    }
+
+    fn keep_pointer(&mut self, p: (f32, f32)) {
+        let (x, y) = self.midpoint();
+        self.finger_shift = (p.0 - x, p.1 - y);
+    }
+
+    /// Distance between two fingers down.
+    fn spread(&self) -> Option<f32> {
+        let [(_, a), (_, b)] = self.fingers[..] else {
+            return None;
+        };
+        Some((a.0 - b.0).hypot(a.1 - b.1))
     }
 
     /// Returns whether focus changed.
@@ -784,7 +841,8 @@ fn pointer_at(ev: &Event) -> Option<(f32, f32)> {
         Event::PointerDown { x, y }
         | Event::PointerMove { x, y }
         | Event::PointerUp { x, y }
-        | Event::Wheel { x, y, .. } => Some((x, y)),
+        | Event::Wheel { x, y, .. }
+        | Event::Pinch { x, y, .. } => Some((x, y)),
         _ => None,
     }
 }

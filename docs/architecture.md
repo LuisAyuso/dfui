@@ -141,7 +141,10 @@ per-frame rebuilds of the same strings are cheap.
 Events are offered in reverse paint order (deepest / topmost first). A widget can
 `stop()` propagation or `capture()` the pointer; on capture every other widget
 receives `Event::Cancel` and subsequent pointer events go only to the captor
-until pointer up. Touch is single-pointer.
+until pointer up. Touch takes up to two fingers: a second finger moves the
+one pointer with the fingers' midpoint (shifted so it doesn't jump when a
+finger lands or lifts) and sends `Event::Pinch` with the spread's change. On
+desktop, ctrl+wheel and touchpad pinch gestures send `Event::Pinch` too.
 
 `scroll` captures the pointer once a drag passes a 6px slop. On release it
 flings: the offset speed (from the last 100ms of pointer samples) decays as

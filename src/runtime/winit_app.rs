@@ -158,7 +158,17 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                     MouseScrollDelta::PixelDelta(p) => -p.y as f32 / scale,
                 };
                 let (x, y) = self.cursor;
-                self.dispatch(Event::Wheel { x, y, dy });
+                if self.mods.control_key() {
+                    let scale = (-dy / 200.0).exp();
+                    self.dispatch(Event::Pinch { x, y, scale });
+                } else {
+                    self.dispatch(Event::Wheel { x, y, dy });
+                }
+            }
+            WindowEvent::PinchGesture { delta, .. } => {
+                let (x, y) = self.cursor;
+                let scale = 1.0 + delta as f32;
+                self.dispatch(Event::Pinch { x, y, scale });
             }
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {

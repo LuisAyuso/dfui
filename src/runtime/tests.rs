@@ -1664,3 +1664,59 @@ mod fast_sources {
         assert!(drive_returns(|| NotifiedInView(crate::Notifier::new())));
     }
 }
+
+thread_local! {
+    static SEEN: RefCell<Vec<Event>> = const { RefCell::new(Vec::new()) };
+}
+
+struct Recorder;
+
+impl Widget for Recorder {
+    fn style(&self) -> taffy::Style {
+        taffy::Style {
+            size: taffy::Size::from_lengths(200.0, 200.0),
+            ..Default::default()
+        }
+    }
+    fn event(&self, ev: &Event, _: &mut EventCx) {
+        SEEN.with(|s| s.borrow_mut().push(ev.clone()));
+    }
+}
+
+struct Pinchy;
+
+impl App for Pinchy {
+    fn view(&self) -> Element {
+        Element::new(Recorder)
+    }
+}
+
+#[test]
+fn two_fingers_pinch_and_keep_the_pointer_steady() {
+    let mut rt = Runtime::new(Pinchy);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.touch(1, TouchPhase::Started, 50.0, 50.0);
+    rt.touch(2, TouchPhase::Started, 150.0, 50.0);
+    rt.touch(2, TouchPhase::Moved, 250.0, 50.0);
+    rt.touch(1, TouchPhase::Ended, 50.0, 50.0);
+    rt.touch(2, TouchPhase::Moved, 260.0, 50.0);
+    rt.touch(2, TouchPhase::Ended, 260.0, 50.0);
+    let seen = SEEN.with(|s| s.take());
+    assert_eq!(
+        seen,
+        [
+            Event::PointerDown { x: 50.0, y: 50.0 },
+            // Midpoint moved 50 px: the pointer follows by as much.
+            Event::PointerMove { x: 100.0, y: 50.0 },
+            Event::Pinch {
+                x: 150.0,
+                y: 50.0,
+                scale: 2.0
+            },
+            Event::PointerMove { x: 110.0, y: 50.0 },
+            Event::PointerUp { x: 110.0, y: 50.0 },
+            Event::Leave,
+        ]
+    );
+}

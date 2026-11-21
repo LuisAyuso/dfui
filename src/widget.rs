@@ -32,6 +32,13 @@ pub enum Event {
         y: f32,
         dy: f32,
     },
+    /// Two fingers spread (`scale` > 1) or closed by this factor since the
+    /// last one, about their midpoint; ctrl+wheel or a touchpad pinch on desktop.
+    Pinch {
+        x: f32,
+        y: f32,
+        scale: f32,
+    },
     /// Another widget captured the pointer; drop any in-progress gesture.
     Cancel,
     /// The pointer is gone: finger lifted or cursor left the window.
