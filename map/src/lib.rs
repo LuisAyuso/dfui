@@ -1,17 +1,21 @@
 //! Experimental vector maps for dfui: the app projects its geometry (e.g.
 //! from OpenStreetMap) with a [`MapBuilder`], which packs it into tiled
-//! [`Shape`]s, and [`map`] pans and zooms them. Shapes are stored on the GPU
-//! once, so moving the map only moves the rects they're drawn into.
+//! [`Shape`]s at a few levels of detail, and [`map`] pans and zooms them.
+//! Shapes are stored on the GPU as they come into view, so moving the map
+//! mostly moves the rects they're drawn into.
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
+use std::time::Duration;
 
-use dfui::path::Point;
+use dfui::path::{Point, Quad};
 use dfui::taffy::{Dimension, Size, Style};
 use dfui::widgets::Styled;
-use dfui::{Color, Element, Event, EventCx, Font, PaintCx, Path, Rect, Shape, Text, Widget};
+use dfui::{
+    Color, Element, Event, EventCx, Font, Instant, PaintCx, Path, Rect, Shape, Text, Widget,
+};
 
 /// Most segments in one shape: the shader walks a band's segments per pixel.
 const MAX_QUADS: usize = 128;
@@ -32,6 +36,25 @@ const LABEL_SPACING_PX: f32 = 300.0;
 const MAX_LABEL_TURN: f32 = 0.35;
 /// Pointer travel before a press becomes a pan, logical px.
 const SLOP: f32 = 6.0;
+/// Scales, logical px per metre, where a finer level of detail takes over;
+/// from the last one up the map draws at full detail.
+const LEVELS: [f32; 6] = [1.0 / 32.0, 1.0 / 16.0, 1.0 / 8.0, 0.25, 0.5, 1.0];
+const FULL: usize = LEVELS.len();
+/// How far a simplified line may stray, px at the largest scale of its level.
+const TOLERANCE_PX: f32 = 0.25;
+/// Features smaller than this, px, are left out of a level.
+const MIN_FEATURE_PX: f32 = 0.75;
+/// Narrower lines get no caps or bevels in a level, px.
+const JOIN_PX: f32 = 1.5;
+/// Largest tile side, px at the largest scale of its level: a tile costs
+/// every pixel it covers, so a sparse layer (a single bus line) mustn't
+/// spread few segments over a large cell.
+const MAX_CELL_PX: f32 = 256.0;
+/// Scale [`MAX_CELL_PX`] is measured at for full detail, px per metre.
+const FULL_CELL_SCALE: f32 = 4.0;
+/// Time a frame spends storing new tiles before leaving the rest for the
+/// next frames, coarser levels standing in.
+const BUDGET: Duration = Duration::from_millis(4);
 
 /// Collects areas and lines in metres around an origin and packs them into
 /// [`MapData`]. Layers draw in the order they were added.
@@ -39,7 +62,7 @@ pub struct MapBuilder {
     origin: (f64, f64),
     cos: f64,
     layers: Vec<LayerData>,
-    /// One shape each, drawn over every layer.
+    /// One tile each, drawn over every layer.
     labels: Vec<Tile>,
     /// Centres of the labels placed so far, by text.
     placed: HashMap<String, Vec<Point>>,
@@ -51,6 +74,18 @@ struct LayerData {
     /// Closed rings, outlines wound positive and holes negative, so they
     /// fill by nonzero winding however they're cut into tiles.
     rings: Vec<Vec<Point>>,
+    lines: Vec<Run>,
+}
+
+/// A line by its middle, stroked when its tile is drawn.
+#[derive(Clone, Debug, PartialEq)]
+struct Run {
+    points: Vec<Point>,
+    width: f32,
+    /// Round caps at the first and last point; none where a tile cut it.
+    caps: [bool; 2],
+    /// Fill the outside of each bend.
+    bevels: bool,
 }
 
 /// One of a [`MapBuilder`]'s layers.
@@ -84,6 +119,7 @@ impl MapBuilder {
             color,
             min_scale,
             rings: Vec::new(),
+            lines: Vec::new(),
         });
         Layer(self.layers.len() - 1)
     }
@@ -91,65 +127,26 @@ impl MapBuilder {
     /// A filled area, e.g. an OSM multipolygon: `outers` filled, `holes` cut
     /// out of them. Rings may wind either way.
     pub fn area(&mut self, layer: Layer, outers: &[Vec<Point>], holes: &[Vec<Point>]) {
-        for r in outers {
-            self.ring(layer, r.clone(), true);
-        }
-        for r in holes {
-            self.ring(layer, r.clone(), false);
-        }
+        let rings = &mut self.layers[layer.0].rings;
+        let all = outers.iter().map(|r| (r, true));
+        rings.extend(
+            all.chain(holes.iter().map(|r| (r, false)))
+                .filter_map(|(r, outer)| orient(r.clone(), outer)),
+        );
     }
 
-    /// A line `width` metres wide through `points`, with bevelled joins.
+    /// A line `width` metres wide through `points`, with round caps and
+    /// bevelled joins.
     pub fn line(&mut self, layer: Layer, points: &[Point], width: f32) {
-        let h = width / 2.0;
-        let normal = |a: Point, b: Point| {
-            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-            let len = dx.hypot(dy);
-            (len > 0.0).then(|| [-dy / len * h, dx / len * h])
-        };
-        let add = |p: Point, n: Point, s: f32| [p[0] + n[0] * s, p[1] + n[1] * s];
-        let mut pts = points.to_vec();
-        pts.dedup();
-        let n = pts.len();
-        if n < 2 {
-            return;
-        }
-        // Round caps: OSM splits roads into ways that meet at any angle.
-        for (a, b) in [(pts[0], pts[1]), (pts[n - 1], pts[n - 2])] {
-            let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
-            let k = h / dx.hypot(dy);
-            let (ux, uy) = (dx * k, dy * k);
-            let cap = (0..=CAP_STEPS)
-                .map(|i| {
-                    let t = std::f32::consts::PI * (i as f32 / CAP_STEPS as f32 - 0.5);
-                    let (s, c) = t.sin_cos();
-                    [a[0] + ux * c - uy * s, a[1] + uy * c + ux * s]
-                })
-                .collect();
-            self.ring(layer, cap, true);
-        }
-        let mut last: Option<Point> = None;
-        for w in pts.windows(2) {
-            let Some(n) = normal(w[0], w[1]) else {
-                continue;
-            };
-            let quad = vec![
-                add(w[0], n, 1.0),
-                add(w[1], n, 1.0),
-                add(w[1], n, -1.0),
-                add(w[0], n, -1.0),
-            ];
-            self.ring(layer, quad, true);
-            // Only the outside of a bend has a notch; overlaps fill as one
-            // under nonzero winding.
-            if let Some(m) = last {
-                let turn = m[0] * n[1] - m[1] * n[0];
-                if turn != 0.0 {
-                    let s = -turn.signum();
-                    self.ring(layer, vec![w[0], add(w[0], m, s), add(w[0], n, s)], true);
-                }
-            }
-            last = Some(n);
+        let mut points = points.to_vec();
+        points.dedup();
+        if points.len() >= 2 {
+            self.layers[layer.0].lines.push(Run {
+                points,
+                width,
+                caps: [true, true],
+                bevels: true,
+            });
         }
     }
 
@@ -222,8 +219,8 @@ impl MapBuilder {
                     .map(|c| c.into_iter().map(|q| q.map(place)).collect::<Vec<_>>()),
             );
         }
-        let path = Path { contours };
-        let Some(view) = bounds(path.contours.iter().flatten().flatten()) else {
+        let glyphs = Path { contours };
+        let Some(view) = bounds(glyphs.contours.iter().flatten().flatten()) else {
             return false;
         };
         let (c, _) = at(length / 2.0);
@@ -233,48 +230,208 @@ impl MapBuilder {
         near.push(c);
         let l = &self.layers[layer.0];
         let pad = size / 4.0;
-        self.labels.push(Tile {
-            shape: OnceCell::from(Shape::new(path, view)),
-            at: 0..0,
-            view,
-            cell: Rect::new(
-                view.x - pad,
-                view.y - pad,
-                view.w + 2.0 * pad,
-                view.h + 2.0 * pad,
-            ),
-            color: l.color,
-            min_scale: l.min_scale.max(MIN_LABEL_PX / size).max(spaced),
-        });
+        let cell = Rect::new(
+            view.x - pad,
+            view.y - pad,
+            view.w + 2.0 * pad,
+            view.h + 2.0 * pad,
+        );
+        let min_scale = l.min_scale.max(MIN_LABEL_PX / size).max(spaced);
+        let geo = Geometry {
+            glyphs,
+            ..Geometry::default()
+        };
+        self.labels.push(Tile::new(
+            cell,
+            l.color,
+            min_scale,
+            (layer.0 as u32, LABELS),
+            geo,
+        ));
         true
     }
 
-    fn ring(&mut self, layer: Layer, mut ring: Vec<Point>, outer: bool) {
-        let area = signed_area(&ring);
-        if ring.len() < 3 || area == 0.0 {
-            return;
-        }
-        if (area > 0.0) != outer {
-            ring.reverse();
-        }
-        self.layers[layer.0].rings.push(ring);
-    }
-
-    /// Cuts every layer into quadtree cells of at most [`MAX_QUADS`] segments.
+    /// Cuts every layer at each level of detail into quadtree cells of at
+    /// most [`MAX_QUADS`] segments.
     pub fn build(self) -> MapData {
-        let mut tiles = Vec::new();
-        for l in &self.layers {
-            if let Some(b) = bounds(l.rings.iter().flatten()) {
-                split(l, b, l.rings.clone(), &mut tiles);
+        let (mut tiles, mut table) = (Vec::new(), Vec::new());
+        for (i, l) in self.layers.iter().enumerate() {
+            let mut serve = [FULL as u8; FULL + 1];
+            let mut finer = usize::MAX;
+            for level in (level_of(l.min_scale)..=FULL).rev() {
+                let (rings, runs) = detail(l, level);
+                // Not worth a level unless it halves what the finer one draws.
+                let c = cost(&rings, &runs);
+                if c.saturating_mul(2) > finer {
+                    serve[level] = serve[level + 1];
+                    continue;
+                }
+                (serve[level], finer) = (level as u8, c);
+                let lines = runs.iter().flat_map(|r| {
+                    let h = r.width / 2.0;
+                    r.points
+                        .iter()
+                        .flat_map(move |p| [[p[0] - h, p[1] - h], [p[0] + h, p[1] + h]])
+                });
+                let all: Vec<Point> = rings.iter().flatten().copied().chain(lines).collect();
+                if let Some(b) = bounds(all.iter()) {
+                    let from = tiles.len();
+                    split(l, (i as u32, level as u32), b, rings, runs, &mut tiles);
+                    tiles[from..].sort_by(|a, b| a.cell.x.total_cmp(&b.cell.x));
+                }
+            }
+            table.push((l.color, serve));
+        }
+        let full = tiles.iter().filter(|t| t.level == FULL as u32);
+        let bounds = full.map(|t| t.cell).reduce(|a, b| a.union(&b));
+        let mut labels = self.labels;
+        labels.sort_by(|a, b| a.cell.x.total_cmp(&b.cell.x));
+        tiles.extend(labels);
+        MapData::new(tiles, table, bounds.unwrap_or_default(), &[])
+    }
+}
+
+/// Which level draws at `scale`.
+fn level_of(scale: f32) -> usize {
+    LEVELS.iter().filter(|&&s| s <= scale).count()
+}
+
+/// A layer's rings and lines as drawn at `level`: simplified, small features
+/// left out, thin lines without caps or bevels.
+fn detail(l: &LayerData, level: usize) -> (Vec<Vec<Point>>, Vec<Run>) {
+    let Some(&px) = LEVELS.get(level) else {
+        return (l.rings.clone(), l.lines.clone());
+    };
+    let tol = TOLERANCE_PX / px;
+    let big = |pts: &[Point], pad: f32| {
+        bounds(pts.iter()).is_some_and(|b| (b.w.max(b.h) + pad) * px >= MIN_FEATURE_PX)
+    };
+    let rings = l.rings.iter().filter(|r| big(r, 0.0)).filter_map(|r| {
+        let mut closed = r.clone();
+        closed.push(r[0]);
+        let mut s = simplify(&closed, tol);
+        s.pop();
+        let outer = signed_area(r) > 0.0;
+        (s.len() >= 3 && (signed_area(&s) > 0.0) == outer && signed_area(&s) != 0.0).then_some(s)
+    });
+    let runs = l.lines.iter().filter(|r| big(&r.points, r.width)).map(|r| {
+        let fine = r.width * px >= JOIN_PX;
+        Run {
+            points: simplify(&r.points, tol),
+            width: r.width,
+            caps: r.caps.map(|c| c && fine),
+            bevels: r.bevels && fine,
+        }
+    });
+    (rings.collect(), runs.collect())
+}
+
+/// `pts` with the points that move it by no more than `tol` left out
+/// (Douglas–Peucker); the ends stay.
+fn simplify(pts: &[Point], tol: f32) -> Vec<Point> {
+    let n = pts.len();
+    if n < 3 {
+        return pts.to_vec();
+    }
+    let mut keep = vec![false; n];
+    (keep[0], keep[n - 1]) = (true, true);
+    let mut todo = vec![(0, n - 1)];
+    while let Some((a, b)) = todo.pop() {
+        let (mut far, mut most) = (0, tol);
+        for (i, &p) in pts.iter().enumerate().take(b).skip(a + 1) {
+            let d = distance(p, pts[a], pts[b]);
+            if d > most {
+                (far, most) = (i, d);
             }
         }
-        let bounds = tiles.iter().map(|t| t.cell).reduce(|a, b| a.union(&b));
-        tiles.extend(self.labels);
-        MapData {
-            tiles,
-            bounds: bounds.unwrap_or_default(),
-            bytes: &[],
+        if far != 0 {
+            keep[far] = true;
+            todo.extend([(a, far), (far, b)]);
         }
+    }
+    pts.iter()
+        .zip(keep)
+        .filter(|(_, k)| *k)
+        .map(|(p, _)| *p)
+        .collect()
+}
+
+/// From `p` to the segment `a`–`b`.
+fn distance(p: Point, a: Point, b: Point) -> f32 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = dx * dx + dy * dy;
+    let t = match len2 > 0.0 {
+        true => (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2).clamp(0.0, 1.0),
+        false => 0.0,
+    };
+    (p[0] - a[0] - t * dx).hypot(p[1] - a[1] - t * dy)
+}
+
+/// `ring` wound positive for an outline, negative for a hole; `None` when
+/// it encloses nothing.
+fn orient(mut ring: Vec<Point>, outer: bool) -> Option<Vec<Point>> {
+    let area = signed_area(&ring);
+    if ring.len() < 3 || area == 0.0 {
+        return None;
+    }
+    if (area > 0.0) != outer {
+        ring.reverse();
+    }
+    Some(ring)
+}
+
+/// The run as outlines: a rectangle per segment, a triangle filling the
+/// outside of each bend and half-disk caps. They're all wound positive, so
+/// overlaps fill as one.
+fn stroke(run: &Run, out: &mut Vec<Vec<Point>>) {
+    let h = run.width / 2.0;
+    let normal = |a: Point, b: Point| {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len = dx.hypot(dy);
+        (len > 0.0).then(|| [-dy / len * h, dx / len * h])
+    };
+    let add = |p: Point, n: Point, s: f32| [p[0] + n[0] * s, p[1] + n[1] * s];
+    let pts = &run.points;
+    let n = pts.len();
+    if n < 2 {
+        return;
+    }
+    // Round caps: OSM splits roads into ways that meet at any angle.
+    let ends = [(pts[0], pts[1]), (pts[n - 1], pts[n - 2])];
+    for ((a, b), _) in ends.into_iter().zip(run.caps).filter(|(_, c)| *c) {
+        let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
+        let k = h / dx.hypot(dy);
+        let (ux, uy) = (dx * k, dy * k);
+        let cap = (0..=CAP_STEPS)
+            .map(|i| {
+                let t = std::f32::consts::PI * (i as f32 / CAP_STEPS as f32 - 0.5);
+                let (s, c) = t.sin_cos();
+                [a[0] + ux * c - uy * s, a[1] + uy * c + ux * s]
+            })
+            .collect();
+        out.extend(orient(cap, true));
+    }
+    let mut last: Option<Point> = None;
+    for w in pts.windows(2) {
+        let Some(n) = normal(w[0], w[1]) else {
+            continue;
+        };
+        let quad = vec![
+            add(w[0], n, 1.0),
+            add(w[1], n, 1.0),
+            add(w[1], n, -1.0),
+            add(w[0], n, -1.0),
+        ];
+        out.extend(orient(quad, true));
+        // Only the outside of a bend has a notch; the inside is covered.
+        if let Some(m) = last.filter(|_| run.bevels) {
+            let turn = m[0] * n[1] - m[1] * n[0];
+            if turn != 0.0 {
+                let s = -turn.signum();
+                out.extend(orient(vec![w[0], add(w[0], m, s), add(w[0], n, s)], true));
+            }
+        }
+        last = Some(n);
     }
 }
 
@@ -298,39 +455,55 @@ fn bounds<'a>(points: impl Iterator<Item = &'a Point>) -> Option<Rect> {
     (lo[0] <= hi[0]).then(|| Rect::new(lo[0], lo[1], hi[0] - lo[0], hi[1] - lo[1]))
 }
 
-/// One tile for `rings` (already cut to `cell` plus [`MARGIN`]), or four
-/// for its quarters while it holds too many segments.
-fn split(l: &LayerData, cell: Rect, rings: Vec<Vec<Point>>, tiles: &mut Vec<Tile>) {
-    let n: usize = rings.iter().map(Vec::len).sum();
-    let Some(view) = bounds(rings.iter().flatten()) else {
+fn grow(r: Rect, by: f32) -> Rect {
+    Rect::new(r.x - by, r.y - by, r.w + 2.0 * by, r.h + 2.0 * by)
+}
+
+/// Segments the shape of these rings and runs will have, roughly.
+fn cost(rings: &[Vec<Point>], runs: &[Run]) -> usize {
+    let lines = runs.iter().map(|r| {
+        let n = r.points.len() - 1;
+        let caps = r.caps.iter().filter(|c| **c).count();
+        4 * n + if r.bevels { 3 * (n - 1) } else { 0 } + caps * (CAP_STEPS + 1)
+    });
+    rings.iter().map(Vec::len).sum::<usize>() + lines.sum::<usize>()
+}
+
+/// One tile for `rings` and `runs` (already cut to `cell` plus [`MARGIN`]),
+/// or four for its quarters while it holds too many segments.
+fn split(
+    l: &LayerData,
+    at: (u32, u32),
+    cell: Rect,
+    rings: Vec<Vec<Point>>,
+    runs: Vec<Run>,
+    tiles: &mut Vec<Tile>,
+) {
+    if rings.is_empty() && runs.is_empty() {
         return;
-    };
-    if n <= MAX_QUADS || cell.w.max(cell.h) < MIN_CELL {
-        let contours = rings
-            .iter()
-            .flat_map(|r| Path::polygon(r).contours)
-            .collect();
-        tiles.push(Tile {
-            shape: OnceCell::from(Shape::new(Path { contours }, view)),
-            at: 0..0,
-            view,
-            cell,
-            color: l.color,
-            min_scale: l.min_scale,
-        });
+    }
+    let px = LEVELS
+        .get(at.1 as usize)
+        .copied()
+        .unwrap_or(FULL_CELL_SCALE);
+    let side = cell.w.max(cell.h);
+    if (cost(&rings, &runs) <= MAX_QUADS && side * px <= MAX_CELL_PX) || side < MIN_CELL {
+        let geo = Geometry {
+            rings,
+            runs,
+            glyphs: Path::default(),
+        };
+        tiles.push(Tile::new(cell, l.color, l.min_scale, at, geo));
         return;
     }
     let (w, h) = (cell.w / 2.0, cell.h / 2.0);
     for (i, j) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
         let c = Rect::new(cell.x + i * w, cell.y + j * h, w, h);
-        let m = Rect::new(
-            c.x - MARGIN,
-            c.y - MARGIN,
-            w + 2.0 * MARGIN,
-            h + 2.0 * MARGIN,
-        );
+        let m = grow(c, MARGIN);
         let cut = rings.iter().filter_map(|r| clip(r, m)).collect();
-        split(l, c, cut, tiles);
+        // Past the margin by half the width, a segment's outline can't reach it.
+        let pieces = runs.iter().flat_map(|r| cut_run(r, grow(m, r.width / 2.0)));
+        split(l, at, c, cut, pieces.collect(), tiles);
     }
 }
 
@@ -373,142 +546,424 @@ fn clip(ring: &[Point], r: Rect) -> Option<Vec<Point>> {
     (out.len() >= 3 && signed_area(&out) != 0.0).then_some(out)
 }
 
+/// The pieces of `run` inside `r`; ends made by the cut get no cap.
+fn cut_run(run: &Run, r: Rect) -> Vec<Run> {
+    let Some(b) = bounds(run.points.iter()) else {
+        return Vec::new();
+    };
+    if b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h {
+        return vec![run.clone()];
+    }
+    let (mut out, mut cur, mut cap) = (Vec::new(), Vec::new(), false);
+    let mut flush = |cur: &mut Vec<Point>, caps: [bool; 2]| {
+        let mut points = std::mem::take(cur);
+        points.dedup();
+        if points.len() >= 2 {
+            out.push(Run {
+                points,
+                caps,
+                ..*run
+            });
+        }
+    };
+    let last = run.points.len() - 2;
+    for (i, w) in run.points.windows(2).enumerate() {
+        let Some((a, z, t0, t1)) = clip_segment(w[0], w[1], r) else {
+            flush(&mut cur, [cap, false]);
+            continue;
+        };
+        if cur.is_empty() {
+            cur.push(a);
+            cap = run.caps[0] && i == 0 && t0 == 0.0;
+        }
+        cur.push(z);
+        if t1 < 1.0 {
+            flush(&mut cur, [cap, false]);
+        } else if i == last {
+            flush(&mut cur, [cap, run.caps[1]]);
+        }
+    }
+    out
+}
+
+/// The part of `a`–`b` inside `r` and where it starts and ends along it
+/// (Liang–Barsky).
+fn clip_segment(a: Point, b: Point, r: Rect) -> Option<(Point, Point, f32, f32)> {
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let (mut t0, mut t1) = (0.0f32, 1.0f32);
+    for (p, q) in [
+        (-d[0], a[0] - r.x),
+        (d[0], r.x + r.w - a[0]),
+        (-d[1], a[1] - r.y),
+        (d[1], r.y + r.h - a[1]),
+    ] {
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            }
+        } else if p < 0.0 {
+            t0 = t0.max(q / p);
+        } else {
+            t1 = t1.min(q / p);
+        }
+    }
+    let at = |t: f32| [a[0] + t * d[0], a[1] + t * d[1]];
+    (t0 <= t1).then(|| (at(t0), at(t1), t0, t1))
+}
+
+/// What a tile draws: areas cut to its cell, lines by their middle and,
+/// for a label, glyph outlines.
+#[derive(Default, Debug, PartialEq)]
+struct Geometry {
+    rings: Vec<Vec<Point>>,
+    runs: Vec<Run>,
+    glyphs: Path,
+}
+
+impl Geometry {
+    /// Everything as one path, lines stroked and cut to `margin`.
+    fn path(&self, margin: Rect) -> Path {
+        let mut stroked = Vec::new();
+        for r in &self.runs {
+            stroke(r, &mut stroked);
+        }
+        let cut = stroked.iter().filter_map(|r| clip(r, margin));
+        let rings = self.rings.iter().cloned().chain(cut);
+        let mut contours: Vec<Vec<Quad>> = rings.flat_map(|r| Path::polygon(&r).contours).collect();
+        contours.extend(self.glyphs.contours.iter().cloned());
+        Path { contours }
+    }
+}
+
+/// The level of label tiles, drawn over every layer at every scale.
+const LABELS: u32 = u32::MAX;
+
 struct Tile {
-    /// Built here, or decoded from `at` on first use.
-    shape: OnceCell<Shape>,
-    /// Where the shape lies in [`MapData::bytes`], for a map read from bytes.
-    at: Range<usize>,
-    /// The shape's view box, metres.
-    view: Rect,
     /// What the tile covers and is clipped to when drawn, metres.
     cell: Rect,
     color: Color,
     min_scale: f32,
+    layer: u32,
+    /// Index into [`LEVELS`], [`FULL`], or [`LABELS`].
+    level: u32,
+    /// Set for a built map; a map read from bytes decodes it from `at`.
+    geo: Option<Geometry>,
+    at: Range<usize>,
+    /// The shape and its view box, made on first use.
+    shape: OnceCell<Option<(Shape, Rect)>>,
+    /// Drawn at least once, so its shape is on the GPU.
+    stored: Cell<bool>,
 }
 
-/// Geometry ready to draw, from [`MapBuilder::build`]. Build it once and
-/// share it, e.g. in the `App`.
+impl Tile {
+    fn new(
+        cell: Rect,
+        color: Color,
+        min_scale: f32,
+        (layer, level): (u32, u32),
+        geo: Geometry,
+    ) -> Tile {
+        Tile {
+            cell,
+            color,
+            min_scale,
+            layer,
+            level,
+            geo: Some(geo),
+            at: 0..0,
+            shape: OnceCell::new(),
+            stored: Cell::new(false),
+        }
+    }
+}
+
+/// Tiles of one layer at one level, or the labels, sorted by their cell's
+/// left edge.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Group {
+    tiles: Range<usize>,
+    /// The widest cell, to find the tiles that may reach into a view.
+    widest: f32,
+}
+
+/// Geometry ready to draw, from [`MapBuilder::build`] or
+/// [`MapData::from_bytes`]. Make it once and share it, e.g. in the `App`.
 pub struct MapData {
+    /// By layer then level, labels last.
     tiles: Vec<Tile>,
+    /// Each layer's tiles at each level.
+    layers: Vec<[Group; FULL + 1]>,
+    /// Each layer's color and the level that draws in place of each.
+    table: Vec<(Color, [u8; FULL + 1])>,
+    labels: Group,
     bounds: Rect,
-    /// What [`MapData::from_bytes`] read; the tiles' shapes lie in it.
+    /// What [`MapData::from_bytes`] read; the tiles' geometry lies in it.
     bytes: &'static [u8],
 }
 
 /// Coordinates are stored on this grid, metres: fine enough at the deepest zoom.
 const GRID: f32 = 0.001;
 
-/// A shape's outline, compactly: a varint count of contours, then for each a
-/// count of quads and its start point, then each quad's end point and, for a
-/// curve, its control point. Points are millimetres from the view's corner,
-/// stored as zigzag varint deltas; a straight edge, whose control point is
-/// its middle, stores none and flags that in the low bit of its first delta.
-fn encode(path: &Path, view: Rect) -> Vec<u8> {
-    let q = |p: Point| {
-        let g = |v: f32, o: f32| ((v - o) / GRID).round() as i64;
-        [g(p[0], view.x), g(p[1], view.y)]
-    };
-    let mut out = Vec::new();
-    let put = |v: i64, out: &mut Vec<u8>| {
-        let mut u = ((v << 1) ^ (v >> 63)) as u64;
-        while u >= 0x80 {
-            out.push(u as u8 | 0x80);
-            u >>= 7;
-        }
-        out.push(u as u8);
-    };
-    put(path.contours.len() as i64, &mut out);
-    let mut at = [0, 0];
-    for c in &path.contours {
-        put(c.len() as i64, &mut out);
-        let start = q(c.first().map_or([0.0; 2], |s| s[0]));
-        put(start[0] - at[0], &mut out);
-        put(start[1] - at[1], &mut out);
-        at = start;
-        for &[a, ctl, b] in c {
-            let curve = ctl != [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
-            let (e, k) = (q(b), q(ctl));
-            put((e[0] - at[0]) * 2 + i64::from(curve), &mut out);
-            put(e[1] - at[1], &mut out);
-            if curve {
-                put(k[0] - at[0], &mut out);
-                put(k[1] - at[1], &mut out);
-            }
-            at = e;
-        }
-    }
-    out
+/// Zigzag varints of grid coordinates, as deltas from the previous point.
+struct Writer {
+    out: Vec<u8>,
+    origin: Point,
+    at: [i64; 2],
 }
 
-/// The outline [`encode`] wrote; `None` if `bytes` are truncated.
-fn decode(bytes: &[u8], view: Rect) -> Option<Path> {
-    let mut it = bytes.iter();
-    let mut get = || -> Option<i64> {
+impl Writer {
+    fn put(&mut self, v: i64) {
+        let mut u = ((v << 1) ^ (v >> 63)) as u64;
+        while u >= 0x80 {
+            self.out.push(u as u8 | 0x80);
+            u >>= 7;
+        }
+        self.out.push(u as u8);
+    }
+
+    fn grid(&self, p: Point) -> [i64; 2] {
+        let g = |v: f32, o: f32| ((v - o) / GRID).round() as i64;
+        [g(p[0], self.origin[0]), g(p[1], self.origin[1])]
+    }
+
+    fn point(&mut self, p: Point) {
+        let q = self.grid(p);
+        self.put(q[0] - self.at[0]);
+        self.put(q[1] - self.at[1]);
+        self.at = q;
+    }
+
+    fn points(&mut self, pts: &[Point]) {
+        self.put(pts.len() as i64);
+        for &p in pts {
+            self.point(p);
+        }
+    }
+}
+
+struct Reader<'a> {
+    bytes: std::slice::Iter<'a, u8>,
+    origin: Point,
+    at: [i64; 2],
+}
+
+impl Reader<'_> {
+    fn get(&mut self) -> Option<i64> {
         let (mut u, mut shift) = (0u64, 0);
         loop {
-            let b = *it.next()?;
-            u |= u64::from(b & 0x7f) << shift;
+            let b = *self.bytes.next()?;
+            u |= u64::from(b & 0x7f) << shift.min(63);
             if b < 0x80 {
                 return Some((u >> 1) as i64 ^ -((u & 1) as i64));
             }
             shift += 7;
         }
+    }
+
+    fn count(&mut self) -> Option<usize> {
+        usize::try_from(self.get()?).ok()
+    }
+
+    fn pos(&self, q: [i64; 2]) -> Point {
+        [
+            self.origin[0] + q[0] as f32 * GRID,
+            self.origin[1] + q[1] as f32 * GRID,
+        ]
+    }
+
+    fn point(&mut self) -> Option<Point> {
+        self.at = [self.at[0] + self.get()?, self.at[1] + self.get()?];
+        Some(self.pos(self.at))
+    }
+
+    fn points(&mut self) -> Option<Vec<Point>> {
+        (0..self.count()?).map(|_| self.point()).collect()
+    }
+}
+
+/// A tile's geometry, compactly: its rings as counted point lists; its
+/// runs each with a width in grid steps, a flags varint (caps at either
+/// end, bevels) and the points; then the glyph contours, each a count of
+/// quads, its start point and each quad's end point and, for a curve, its
+/// control point. Points are grid steps from the cell's corner, stored as
+/// zigzag varint deltas; a straight glyph edge, whose control point is its
+/// middle, stores none and flags that in the low bit of its first delta.
+fn encode(geo: &Geometry, origin: Point) -> Vec<u8> {
+    let mut w = Writer {
+        out: Vec::new(),
+        origin,
+        at: [0, 0],
     };
-    let p = |q: [i64; 2]| [view.x + q[0] as f32 * GRID, view.y + q[1] as f32 * GRID];
+    w.put(geo.rings.len() as i64);
+    for r in &geo.rings {
+        w.points(r);
+    }
+    w.put(geo.runs.len() as i64);
+    for r in &geo.runs {
+        w.put((r.width / GRID).round() as i64);
+        let flags = [r.caps[0], r.caps[1], r.bevels];
+        w.put(flags.iter().rev().fold(0, |f, &b| f << 1 | i64::from(b)));
+        w.points(&r.points);
+    }
+    w.put(geo.glyphs.contours.len() as i64);
+    for c in &geo.glyphs.contours {
+        w.put(c.len() as i64);
+        w.point(c.first().map_or(origin, |s| s[0]));
+        for &[a, ctl, b] in c {
+            let curve = ctl != [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+            let (e, k) = (w.grid(b), w.grid(ctl));
+            let at = w.at;
+            w.put((e[0] - at[0]) * 2 + i64::from(curve));
+            w.put(e[1] - at[1]);
+            if curve {
+                w.put(k[0] - at[0]);
+                w.put(k[1] - at[1]);
+            }
+            w.at = e;
+        }
+    }
+    w.out
+}
+
+/// The geometry [`encode`] wrote; `None` if `bytes` are truncated.
+fn decode(bytes: &[u8], origin: Point) -> Option<Geometry> {
+    let mut r = Reader {
+        bytes: bytes.iter(),
+        origin,
+        at: [0, 0],
+    };
+    let rings = (0..r.count()?).map(|_| r.points()).collect::<Option<_>>()?;
+    let mut runs = Vec::new();
+    for _ in 0..r.count()? {
+        let width = r.get()? as f32 * GRID;
+        let f = r.get()?;
+        runs.push(Run {
+            width,
+            caps: [f & 1 != 0, f & 2 != 0],
+            bevels: f & 4 != 0,
+            points: r.points()?,
+        });
+    }
     let mut contours = Vec::new();
-    let mut at = [0, 0];
-    for _ in 0..get()? {
-        let n = get()?;
-        at = [at[0] + get()?, at[1] + get()?];
+    for _ in 0..r.count()? {
+        let n = r.count()?;
+        r.point()?;
         let mut quads = Vec::new();
         for _ in 0..n {
-            let (dx, dy) = (get()?, get()?);
-            let (a, curve) = (p(at), dx & 1 == 1);
-            let e = [at[0] + (dx - i64::from(curve)) / 2, at[1] + dy];
+            let (dx, dy) = (r.get()?, r.get()?);
+            let (a, curve) = (r.pos(r.at), dx & 1 == 1);
+            let e = [r.at[0] + (dx - i64::from(curve)) / 2, r.at[1] + dy];
             let ctl = match curve {
-                true => p([at[0] + get()?, at[1] + get()?]),
-                false => [(a[0] + p(e)[0]) / 2.0, (a[1] + p(e)[1]) / 2.0],
+                true => {
+                    let k = [r.at[0] + r.get()?, r.at[1] + r.get()?];
+                    r.pos(k)
+                }
+                false => [(a[0] + r.pos(e)[0]) / 2.0, (a[1] + r.pos(e)[1]) / 2.0],
             };
-            quads.push([a, ctl, p(e)]);
-            at = e;
+            quads.push([a, ctl, r.pos(e)]);
+            r.at = e;
         }
         contours.push(quads);
     }
-    Some(Path { contours })
+    Some(Geometry {
+        rings,
+        runs,
+        glyphs: Path { contours },
+    })
 }
 
-/// Words per tile in the index: cell, view, color, min_scale, shape length.
-const INDEX_WORDS: usize = 14;
+/// Words per tile in the index: cell, min_scale, layer and level, and the
+/// length of its geometry.
+const INDEX_WORDS: usize = 7;
 
 impl MapData {
-    /// The map as [`MapData::from_bytes`] reads it, little-endian: `DFM1`,
-    /// the bounds as four f32, a u32 count of tiles, an index entry per
-    /// tile (cell, view and color as four f32 each, min_scale, the length
-    /// of its shape), then each shape as [`encode`] writes it.
+    fn new(
+        tiles: Vec<Tile>,
+        table: Vec<(Color, [u8; FULL + 1])>,
+        bounds: Rect,
+        bytes: &'static [u8],
+    ) -> MapData {
+        let mut layers: Vec<[Group; FULL + 1]> = vec![Default::default(); table.len()];
+        let mut labels = Group::default();
+        let span = |g: &mut Group, i: usize| {
+            let r = &mut g.tiles;
+            *r = if r.start == r.end {
+                i..i + 1
+            } else {
+                r.start.min(i)..r.end.max(i + 1)
+            };
+            g.widest = g.widest.max(tiles[i].cell.w);
+        };
+        for (i, t) in tiles.iter().enumerate() {
+            if t.level == LABELS {
+                span(&mut labels, i);
+                continue;
+            }
+            if let Some(l) = layers.get_mut(t.layer as usize) {
+                span(&mut l[(t.level as usize).min(FULL)], i);
+            }
+        }
+        for (l, (_, serve)) in layers.iter_mut().zip(&table) {
+            *l = serve.map(|k| l[(k as usize).min(FULL)].clone());
+        }
+        MapData {
+            tiles,
+            layers,
+            table,
+            labels,
+            bounds,
+            bytes,
+        }
+    }
+
+    /// The map as [`MapData::from_bytes`] reads it, little-endian: `DFM2`,
+    /// the bounds as four f32; a u32 count of layers and for each its color
+    /// as four f32 and a u32 of the level drawn in place of each, four bits
+    /// a level; a u32 count of tiles and for each its cell as four f32,
+    /// min_scale, a u32 of its layer and (high byte, 255 for labels) level
+    /// and a u32 length of its geometry; then each tile's geometry as
+    /// [`encode`] writes it.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let shapes: Vec<Vec<u8>> = self
+        let geos: Vec<Vec<u8>> = self
             .tiles
             .iter()
-            .map(|t| encode(self.shape(t).path(), t.view))
+            .map(|t| match &t.geo {
+                Some(g) => encode(g, [t.cell.x, t.cell.y]),
+                None => self.bytes[t.at.clone()].to_vec(),
+            })
             .collect();
         let b = self.bounds;
-        let mut words = vec![b.x, b.y, b.w, b.h, f32::from_bits(self.tiles.len() as u32)];
-        for (t, shape) in self.tiles.iter().zip(&shapes) {
-            let (c, v, k) = (t.cell, t.view, t.color);
-            words.extend([c.x, c.y, c.w, c.h, v.x, v.y, v.w, v.h, k.r, k.g, k.b, k.a]);
-            words.extend([t.min_scale, f32::from_bits(shape.len() as u32)]);
+        let bits = f32::from_bits;
+        let mut words = vec![b.x, b.y, b.w, b.h, bits(self.table.len() as u32)];
+        for (k, serve) in &self.table {
+            let packed = serve.iter().rev().fold(0, |p, &l| p << 4 | u32::from(l));
+            words.extend([k.r, k.g, k.b, k.a, bits(packed)]);
         }
-        let mut out = b"DFM1".to_vec();
+        words.push(bits(self.tiles.len() as u32));
+        for (t, geo) in self.tiles.iter().zip(&geos) {
+            let c = t.cell;
+            let at = t.layer | t.level.min(255) << 24;
+            words.extend([
+                c.x,
+                c.y,
+                c.w,
+                c.h,
+                t.min_scale,
+                bits(at),
+                bits(geo.len() as u32),
+            ]);
+        }
+        let mut out = b"DFM2".to_vec();
         out.extend(words.iter().flat_map(|w| w.to_le_bytes()));
-        out.extend(shapes.concat());
+        out.extend(geos.concat());
         out
     }
 
     /// A map written by [`MapData::to_bytes`], usually `include_bytes!`d.
-    /// Only the index is read here; each tile's shape is decoded the first
-    /// time it's drawn. `None` if `bytes` aren't one or are truncated.
+    /// Only the index is read here; each tile is decoded the first time
+    /// it's drawn. `None` if `bytes` aren't one or are truncated.
     pub fn from_bytes(bytes: &'static [u8]) -> Option<MapData> {
-        let body = bytes.strip_prefix(b"DFM1")?;
+        let body = bytes.strip_prefix(b"DFM2")?;
         let word = |i: usize| {
             let w = body.get(i * 4..i * 4 + 4)?;
             Some(f32::from_le_bytes(w.try_into().ok()?))
@@ -521,54 +976,88 @@ impl MapData {
                 word(i + 3)?,
             ))
         };
-        let (bounds, n) = (rect(0)?, word(4)?.to_bits() as usize);
-        let mut at = 4 + (5 + n * INDEX_WORDS) * 4;
-        let mut tiles = Vec::with_capacity(n);
-        for i in (0..n).map(|i| 5 + i * INDEX_WORDS) {
-            let len = word(i + 13)?.to_bits() as usize;
-            let k = rect(i + 8)?;
+        let bits = |i: usize| Some(word(i)?.to_bits());
+        let (bounds, layers) = (rect(0)?, bits(4)? as usize);
+        let mut table = Vec::new();
+        for i in (0..layers).map(|i| 5 + i * 5) {
+            let (k, packed) = (rect(i)?, bits(i + 4)?);
+            let color = Color {
+                r: k.x,
+                g: k.y,
+                b: k.w,
+                a: k.h,
+            };
+            let serve: [u8; FULL + 1] = std::array::from_fn(|l| (packed >> (4 * l) & 15) as u8);
+            table.push((color, serve));
+        }
+        let first = 5 + layers.checked_mul(5)? + 1;
+        let n = bits(first - 1)? as usize;
+        let mut at = 4 + (first + n.checked_mul(INDEX_WORDS)?) * 4;
+        let mut tiles = Vec::with_capacity(n.min(bytes.len()));
+        for i in (0..n).map(|i| first + i * INDEX_WORDS) {
+            let (packed, len) = (bits(i + 5)?, bits(i + 6)? as usize);
+            let layer = packed & 0xff_ffff;
+            let level = match packed >> 24 {
+                255 => LABELS,
+                l => l,
+            };
             tiles.push(Tile {
-                shape: OnceCell::new(),
-                at: at..at + len,
                 cell: rect(i)?,
-                view: rect(i + 4)?,
-                color: Color {
-                    r: k.x,
-                    g: k.y,
-                    b: k.w,
-                    a: k.h,
-                },
-                min_scale: word(i + 12)?,
+                color: table.get(layer as usize)?.0,
+                min_scale: word(i + 4)?,
+                layer,
+                level,
+                geo: None,
+                at: at..at + len,
+                shape: OnceCell::new(),
+                stored: Cell::new(false),
             });
             at += len;
         }
-        (at <= bytes.len()).then_some(MapData {
-            tiles,
-            bounds,
-            bytes,
-        })
+        (at <= bytes.len()).then(|| MapData::new(tiles, table, bounds, bytes))
     }
 
-    /// The tile's shape, decoded on first use; empty if its bytes are corrupt.
-    fn shape<'a>(&self, t: &'a Tile) -> &'a Shape {
-        t.shape.get_or_init(|| {
-            let path = decode(&self.bytes[t.at.clone()], t.view).unwrap_or_default();
-            Shape::new(path, t.view)
-        })
+    /// The tile's shape and view box, made on first use; `None` if it has
+    /// nothing to draw or its bytes are corrupt.
+    fn shape<'a>(&self, t: &'a Tile) -> Option<&'a (Shape, Rect)> {
+        t.shape
+            .get_or_init(|| {
+                let decoded;
+                let geo = match &t.geo {
+                    Some(g) => g,
+                    None => {
+                        decoded = decode(&self.bytes[t.at.clone()], [t.cell.x, t.cell.y])?;
+                        &decoded
+                    }
+                };
+                let path = geo.path(grow(t.cell, MARGIN));
+                let view = bounds(path.contours.iter().flatten().flatten())?;
+                Some((Shape::new(path, view), view))
+            })
+            .as_ref()
     }
 
-    /// The shapes stored, for gauging how heavy a map is.
+    /// The group's tiles whose cells may overlap `view`.
+    fn near(&self, g: &Group, view: Rect) -> &[Tile] {
+        let tiles = &self.tiles[g.tiles.clone()];
+        let lo = tiles.partition_point(|t| t.cell.x + g.widest < view.x);
+        let hi = tiles.partition_point(|t| t.cell.x <= view.x + view.w);
+        &tiles[lo..hi.max(lo)]
+    }
+
+    /// The tiles across every level, for gauging how heavy a map is.
     pub fn tiles(&self) -> usize {
         self.tiles.len()
     }
 
-    /// The segments across all shapes, each 32 bytes on the GPU.
+    /// The segments across all tiles, each 32 bytes on the GPU once drawn.
     pub fn segments(&self) -> usize {
         let quads = self
             .tiles
             .iter()
-            .map(|t| self.shape(t).path().contours.iter().map(Vec::len));
-        quads.flatten().sum()
+            .filter_map(|t| self.shape(t))
+            .map(|(s, _)| s.path().contours.iter().map(Vec::len).sum::<usize>());
+        quads.sum()
     }
 }
 
@@ -612,7 +1101,6 @@ impl View {
         self.scale = to;
     }
 }
-
 /// A pannable, zoomable map of `data`: drag to pan; wheel, ctrl+wheel or
 /// pinch to zoom. Fills its parent's space by default.
 pub fn map(data: &Rc<MapData>) -> Map {
@@ -703,15 +1191,79 @@ impl Widget for Map {
             let y = r.y + r.h / 2.0 + (b.y - c[1]) * s;
             Rect::new(x, y, b.w * s, b.h * s)
         };
+        let data = &*self.data;
+        let (level, start) = (level_of(s), Instant::now());
+        let mut pending = false;
+        let seen = |c: Rect| {
+            let hit = visible.intersect(&c);
+            hit.w > 0.0 && hit.h > 0.0
+        };
+        let draw = |cx: &mut PaintCx, t: &Tile, clip: Rect| {
+            if let Some((shape, view)) = data.shape(t) {
+                cx.with_clip(screen(clip), |cx| cx.shape(shape, screen(*view), t.color));
+            }
+            t.stored.set(true);
+        };
         cx.with_clip(r, |cx| {
-            for t in &self.data.tiles {
-                let hit = visible.intersect(&t.cell);
-                if s < t.min_scale || hit.w <= 0.0 || hit.h <= 0.0 {
+            for levels in &data.layers {
+                let tiles = data.near(&levels[level], visible);
+                if tiles.first().is_none_or(|t| s < t.min_scale) {
                     continue;
                 }
-                cx.with_clip(screen(t.cell), |cx| {
-                    cx.shape(self.data.shape(t), screen(t.view), t.color);
-                });
+                let mut holes = Vec::new();
+                for t in tiles.iter().filter(|t| seen(t.cell)) {
+                    if t.stored.get() || start.elapsed() < BUDGET {
+                        draw(cx, t, t.cell);
+                    } else {
+                        holes.push(t.cell);
+                    }
+                }
+                if holes.is_empty() {
+                    continue;
+                }
+                pending = true;
+                // Coarser levels in view, finest first, skipping ones that
+                // reuse a finer level's tiles.
+                let mut coarser: Vec<Vec<&Tile>> = Vec::new();
+                let mut used = vec![levels[level].clone()];
+                for l in (0..level).rev() {
+                    if !used.contains(&levels[l]) {
+                        used.push(levels[l].clone());
+                        let tiles = data.near(&levels[l], visible);
+                        coarser.push(tiles.iter().filter(|t| seen(t.cell)).collect());
+                    }
+                }
+                // The finest that has all it needs stored stands in, else the coarsest.
+                for hole in holes {
+                    let over = |t: &&&Tile| {
+                        let hit = t.cell.intersect(&hole);
+                        hit.w > 0.0 && hit.h > 0.0
+                    };
+                    let mut cover: Vec<&Tile> = Vec::new();
+                    for tiles in &coarser {
+                        let here: Vec<&Tile> = tiles.iter().filter(over).copied().collect();
+                        if here.is_empty() {
+                            continue;
+                        }
+                        cover = here;
+                        if cover.iter().all(|t| t.stored.get()) {
+                            break;
+                        }
+                    }
+                    for t in cover {
+                        draw(cx, t, t.cell.intersect(&hole));
+                    }
+                }
+            }
+            for t in data.near(&data.labels, visible) {
+                if s < t.min_scale || !seen(t.cell) {
+                    continue;
+                }
+                if t.stored.get() || start.elapsed() < BUDGET {
+                    draw(cx, t, t.cell);
+                } else {
+                    pending = true;
+                }
             }
             if let Some(f) = &self.overlay {
                 let at = |p: Point| {
@@ -723,6 +1275,9 @@ impl Widget for Map {
                 f(cx, &at);
             }
         });
+        if pending {
+            cx.request_frame();
+        }
     }
 
     fn event(&self, ev: &Event, cx: &mut EventCx) {
@@ -792,6 +1347,32 @@ mod tests {
         vec![[x, y], [x + side, y], [x + side, y + side], [x, y + side]]
     }
 
+    /// Nonzero winding of `rings` around `p`.
+    fn covers(rings: &[Vec<Point>], p: Point) -> bool {
+        let mut w = 0;
+        for r in rings {
+            for (k, &a) in r.iter().enumerate() {
+                let b = r[(k + 1) % r.len()];
+                let side = (b[0] - a[0]) * (p[1] - a[1]) - (p[0] - a[0]) * (b[1] - a[1]);
+                if a[1] <= p[1] && b[1] > p[1] && side > 0.0 {
+                    w += 1;
+                } else if a[1] > p[1] && b[1] <= p[1] && side < 0.0 {
+                    w -= 1;
+                }
+            }
+        }
+        w != 0
+    }
+
+    fn empty() -> Rc<MapData> {
+        Rc::new(MapData::new(
+            Vec::new(),
+            Vec::new(),
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            &[],
+        ))
+    }
+
     #[test]
     fn lines_and_holes_wind_by_role() {
         let mut b = MapBuilder::new(48.0, 11.0);
@@ -805,8 +1386,12 @@ mod tests {
             .iter()
             .map(|r| signed_area(r) > 0.0)
             .collect();
-        // Outline, hole, two caps, two segments and a bevel outside the bend.
-        assert_eq!(signs, [true, false, true, true, true, true, true]);
+        assert_eq!(signs, [true, false]);
+        let mut stroked = Vec::new();
+        stroke(&b.layers[0].lines[0], &mut stroked);
+        // Two caps, two segments and a bevel outside the bend.
+        assert_eq!(stroked.len(), 5);
+        assert!(stroked.iter().all(|r| signed_area(r) > 0.0));
     }
 
     #[test]
@@ -820,6 +1405,92 @@ mod tests {
     }
 
     #[test]
+    fn cut_lines_stroke_the_same_inside_the_margin() {
+        let run = Run {
+            points: vec![
+                [-30.0, 5.0],
+                [12.0, 18.0],
+                [3.0, 26.0],
+                [40.0, 31.0],
+                [9.0, -20.0],
+            ],
+            width: 6.0,
+            caps: [true, true],
+            bevels: true,
+        };
+        let margin = Rect::new(0.0, 0.0, 30.0, 30.0);
+        let pieces = cut_run(&run, grow(margin, run.width / 2.0));
+        assert!(pieces.len() > 1);
+        assert!(
+            pieces.iter().all(|p| p.caps == [false, false]),
+            "every end is a cut"
+        );
+        let (mut whole, mut cut) = (Vec::new(), Vec::new());
+        stroke(&run, &mut whole);
+        for p in &pieces {
+            stroke(p, &mut cut);
+        }
+        let cut: Vec<_> = cut.iter().filter_map(|r| clip(r, margin)).collect();
+        for i in 0..60 {
+            for j in 0..60 {
+                let p = [0.25 + i as f32 * 0.5, 0.25 + j as f32 * 0.5];
+                assert_eq!(covers(&whole, p), covers(&cut, p), "at {p:?}");
+            }
+        }
+        let inside = cut_run(&run, Rect::new(-100.0, -100.0, 200.0, 200.0));
+        assert_eq!(inside, [run]);
+    }
+
+    #[test]
+    fn simplify_keeps_the_ends_and_the_corners() {
+        let pts = [[0.0, 0.0], [5.0, 0.1], [10.0, 0.0], [10.0, 10.0]];
+        assert_eq!(
+            simplify(&pts, 0.25),
+            [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]
+        );
+        assert_eq!(simplify(&pts, 0.05), pts);
+    }
+
+    #[test]
+    fn coarse_levels_are_lighter() {
+        let mut b = MapBuilder::new(48.0, 11.0);
+        let l = b.layer(Color::BLACK, 0.0);
+        let wiggle: Vec<Point> = (0..400)
+            .map(|i| [i as f32 * 5.0, (i % 2) as f32 * 0.5])
+            .collect();
+        b.line(l, &wiggle, 3.0);
+        b.area(l, &[square(0.0, 50.0, 2.0)], &[]);
+        let data = b.build();
+        let weight = |level: usize| {
+            let tiles = &data.tiles[data.layers[0][level].tiles.clone()];
+            let shapes = tiles.iter().filter_map(|t| data.shape(t));
+            shapes
+                .map(|(s, _)| s.path().contours.iter().map(Vec::len).sum::<usize>())
+                .sum::<usize>()
+        };
+        assert!(
+            weight(0) * 10 < weight(FULL),
+            "{} vs {}",
+            weight(0),
+            weight(FULL)
+        );
+        let coarse = &data.tiles[data.layers[0][0].tiles.clone()];
+        let geo = coarse.iter().map(|t| t.geo.as_ref().unwrap());
+        assert!(
+            geo.clone().all(|g| g.rings.is_empty()),
+            "the 2 m square is too small"
+        );
+        assert!(
+            geo.flat_map(|g| &g.runs)
+                .all(|r| r.caps == [false, false] && !r.bevels)
+        );
+        assert_eq!(
+            (level_of(0.01), level_of(0.25), level_of(5.0)),
+            (0, 4, FULL)
+        );
+    }
+
+    #[test]
     fn dense_layers_split_into_small_tiles() {
         let mut b = MapBuilder::new(48.0, 11.0);
         let l = b.layer(Color::BLACK, 0.0);
@@ -829,20 +1500,16 @@ mod tests {
             }
         }
         let data = b.build();
-        assert!(data.tiles() > 1);
+        assert!(data.layers[0][FULL].tiles.len() > 1);
         for t in &data.tiles {
-            let n: usize = t
-                .shape
-                .get()
-                .unwrap()
-                .path()
-                .contours
-                .iter()
-                .map(Vec::len)
-                .sum();
+            let (shape, _) = data.shape(t).unwrap();
+            let n: usize = shape.path().contours.iter().map(Vec::len).sum();
             assert!(n <= MAX_QUADS, "{n} segments");
         }
         assert_eq!(data.bounds, Rect::new(0.0, 0.0, 390.0, 390.0));
+        // Too small for the coarsest level, too plain to simplify in between.
+        assert!(data.layers[0][0].tiles.is_empty());
+        assert_eq!(data.layers[0][3], data.layers[0][FULL]);
     }
 
     #[test]
@@ -858,13 +1525,11 @@ mod tests {
         // Drawn right to left, still read left to right: 'H' comes first.
         assert!(label(&mut b, &[[100.0, 0.0], [0.0, 0.0]]));
         let t = &b.labels[0];
-        assert!((t.view.x + t.view.w / 2.0 - 50.0).abs() < 2.0);
-        assert!(
-            (t.view.y + t.view.h / 2.0).abs() < 4.0,
-            "centred on the line"
-        );
-        let first = t.shape.get().unwrap().path().contours[0][0][0][0];
-        assert!(first < 50.0);
+        let glyphs = &t.geo.as_ref().unwrap().glyphs;
+        let v = bounds(glyphs.contours.iter().flatten().flatten()).unwrap();
+        assert!((v.x + v.w / 2.0 - 50.0).abs() < 2.0);
+        assert!((v.y + v.h / 2.0).abs() < 4.0, "centred on the line");
+        assert!(glyphs.contours[0][0][0][0] < 50.0);
         assert_eq!(t.min_scale, MIN_LABEL_PX / 10.0);
         // The same text 100 m on waits until they're far enough apart on screen.
         assert!(label(&mut b, &[[100.0, 0.0], [200.0, 0.0]]));
@@ -877,6 +1542,7 @@ mod tests {
         let roads = b.layer(Color::WHITE, 0.0);
         let names = b.layer(Color::BLACK, 0.5);
         b.line(roads, &[[0.0, 0.0], [300.0, 40.0], [600.0, 0.0]], 10.0);
+        b.area(roads, &[square(100.0, 100.0, 50.0)], &[]);
         b.label(
             names,
             &[[0.0, 0.0], [600.0, 0.0]],
@@ -893,18 +1559,65 @@ mod tests {
             (read.tiles(), read.segments()),
             (built.tiles(), built.segments())
         );
-        let (a, z) = (&built.tiles[1], &read.tiles[1]);
-        assert_eq!((a.cell, a.view, a.min_scale), (z.cell, z.view, z.min_scale));
+        assert_eq!(
+            (read.layers.clone(), read.labels.clone()),
+            (built.layers.clone(), built.labels.clone())
+        );
+        for (a, z) in built.tiles.iter().zip(&read.tiles) {
+            assert_eq!(
+                (a.cell, a.min_scale, a.level),
+                (z.cell, z.min_scale, z.level)
+            );
+            let (va, vz) = (data_view(&built, a), data_view(&read, z));
+            // Grid rounding moves edges met at a shallow angle by more.
+            assert!((va.x - vz.x).abs() < 1e-2 && (va.w - vz.w).abs() < 1e-2);
+        }
         assert!(MapData::from_bytes(&bytes[..bytes.len() - 1]).is_none());
+    }
+
+    fn data_view(d: &MapData, t: &Tile) -> Rect {
+        d.shape(t).unwrap().1
+    }
+
+    #[test]
+    fn panning_in_stores_the_tiles_in_view() {
+        struct App(Rc<MapData>);
+        impl dfui::App for App {
+            fn view(&self) -> Element {
+                map(&self.0).start([200.0, 200.0], 4.0).into()
+            }
+        }
+        let mut b = MapBuilder::new(48.0, 11.0);
+        let l = b.layer(Color::BLACK, 0.0);
+        for i in 0..40 {
+            b.line(
+                l,
+                &[[0.0, i as f32 * 10.0], [400.0, i as f32 * 10.0 + 3.0]],
+                2.0,
+            );
+        }
+        let data = Rc::new(b.build());
+        let mut bench = dfui::Bench::new(App(data.clone()), (100.0, 100.0));
+        bench.settle();
+        let view = Rect::new(187.5, 187.5, 25.0, 25.0);
+        let stored = |t: &Tile| t.stored.get();
+        let shown = data.tiles[data.layers[0][FULL].tiles.clone()]
+            .iter()
+            .filter(|t| {
+                let hit = t.cell.intersect(&view);
+                hit.w > 0.0 && hit.h > 0.0
+            });
+        assert!(shown.clone().count() > 0 && shown.clone().all(stored));
+        let off = data
+            .tiles
+            .iter()
+            .filter(|t| t.cell.intersect(&view).w <= 0.0 || t.cell.intersect(&view).h <= 0.0);
+        assert!(!off.clone().any(stored), "nothing out of view is stored");
     }
 
     #[test]
     fn zoom_keeps_the_point_under_the_pointer() {
-        let data = Rc::new(MapData {
-            tiles: Vec::new(),
-            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-            bytes: &[],
-        });
+        let data = empty();
         let r = Rect::new(0.0, 0.0, 100.0, 100.0);
         let mut v = View::default();
         v.fit(&map(&data), r);
@@ -934,13 +1647,8 @@ mod tests {
                     .into()
             }
         }
-        let data = Rc::new(MapData {
-            tiles: Vec::new(),
-            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-            bytes: &[],
-        });
         let taps = Rc::new(RefCell::new(Vec::new()));
-        let mut b = dfui::Bench::new(App(data, taps.clone()), (100.0, 100.0));
+        let mut b = dfui::Bench::new(App(empty(), taps.clone()), (100.0, 100.0));
         b.settle();
         b.event(Event::PointerDown { x: 80.0, y: 20.0 });
         b.event(Event::PointerUp { x: 80.0, y: 20.0 });
@@ -952,11 +1660,7 @@ mod tests {
 
     #[test]
     fn focus_moves_the_view_once_per_change() {
-        let data = Rc::new(MapData {
-            tiles: Vec::new(),
-            bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
-            bytes: &[],
-        });
+        let data = empty();
         let r = Rect::new(0.0, 0.0, 100.0, 100.0);
         let mut v = View::default();
         let focused = map(&data).focus(Some(([10.0, 20.0], 5.0)));

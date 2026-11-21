@@ -25,49 +25,82 @@ backoff and caches the response in the temp directory.
 - Projection: equirectangular metres around the builder's origin, `f32`.
 - Areas keep their holes by winding: outlines are stored positive, holes
   negative, and the shader fills by nonzero winding.
-- Lines become one rectangle per segment plus a bevel triangle on the
-  outside of every bend, with round caps (half-disks) so ways that meet at
-  any angle close up. They are all wound the same way, so overlaps merge.
-- Each layer is split into quadtree cells until a cell holds at most 128
-  segments. Rings are cut to the cell plus a 2 m margin (Sutherland–Hodgman,
-  exact for straight edges under nonzero fill). The tile is drawn clipped to
-  the cell, so the cut edges sit outside the clip and adjacent tiles meet
-  without antialiasing seams.
+- Lines are kept by their middle and stroked when their tile is first
+  drawn: one rectangle per segment plus a bevel triangle on the outside of
+  every bend, with round caps (half-disks) so ways that meet at any angle
+  close up. They are all wound the same way, so overlaps merge.
+- **Levels of detail.** Each layer is prepared for zoom bands that start at
+  1/32, 1/16, 1/8, 1/4, 1/2 and 1 px/m, plus full detail. A level drops
+  points that move a line by under a quarter pixel at its largest scale
+  (Douglas–Peucker), leaves out features under 0.75 px and draws lines
+  under 1.5 px without caps or bevels. A level that doesn't halve the
+  segments of the finer one isn't kept; that one draws in its place.
+- Each level is split into quadtree cells until a cell holds at most 128
+  segments and spans at most 256 px at the level's largest scale (64 m at
+  full detail): a tile costs every pixel it covers, so a sparse layer, a
+  single bus line, mustn't spread over a large cell. Rings are cut to the
+  cell plus a 2 m margin (Sutherland–Hodgman, exact for straight edges under
+  nonzero fill); lines are cut further out, by half their width, and their
+  stroke is cut to the margin, which is the same as cutting the stroke of
+  the whole line. The tile is drawn clipped to the cell, so the cut edges
+  sit outside the clip and adjacent tiles meet without antialiasing seams.
 - Street names are geometry too: `Text::glyph_paths` gives the shaped
   glyph outlines, and each glyph is turned to the street under its middle
   and stored in metres, one shape per label. They scale with the map and
   show once the font reaches 7 px. The same name repeats only 300 px apart
   on screen: each repeat waits for the zoom where it's that far from the
   ones placed before it, so names of wide roads go first.
+- **Streaming.** Paint draws the level for the current scale. A tile is
+  decoded, stroked and stored on the GPU the first time it's drawn, up to
+  4 ms of that a frame; dfui then uploads only the new outlines. Where a
+  tile has to wait, the finest coarser level that's stored draws in its
+  place, clipped to its cell, and the map asks for another frame. Tiles are
+  sorted by their left edge, so paint looks at the strip of them under the
+  view rather than at all of them.
 - `MapData::to_bytes` saves a built map so an app can bundle it instead of
-  building at startup: an index of tiles, then each tile's outline with
-  points on a millimetre grid as varint deltas, straight edges without a
-  control point. `MapData::from_bytes` reads only the index; each tile is
-  decoded the first time it's drawn. Innsbruck (4×4 km, 1.4M edges) is
-  8.9 MB (6.8 MB gzipped) against 6.7 MB of stripped Overpass JSON (1 MB
-  gzipped), and loads in ~5 ms instead of ~530 ms of building.
-- Paint walks every tile, skips the ones off screen or below their layer's
-  `min_scale`, and draws the rest with `PaintCx::shape`.
+  building at startup: a table of layers, an index of tiles, then each
+  tile's geometry with points on a millimetre grid as varint deltas: areas
+  as rings, lines by their middle, labels as glyph outlines.
+  `MapData::from_bytes` reads only the index.
 
 ## Numbers
 
 Central Amsterdam, 2×2 km of OSM data (15.8 MB of Overpass JSON). Eight layers,
-10293 shapes (940 of them labels), 847k segments. Prepared in ~200 ms on the desktop. A phone-sized
+17726 shapes across all levels, 1.03M segments. Prepared in ~150 ms on the desktop. A phone-sized
 target (1080×2400 at scale 2.625) on a Ryzen 5 3600 and RTX 4060 Ti, using
-`--bench`. CPU is one paint of the scene; GPU is the median render pass from
-timestamps.
+`--bench`. CPU is one paint of the scene once its tiles are stored; GPU is
+the median render pass from timestamps.
 
 | View | CPU paint | GPU frame |
 |---|---|---|
-| Whole map (~0.15 px/m, buildings and paths hidden) | 204 µs | 0.40 ms |
-| 0.3 px/m (buildings and paths hidden) | 152 µs | 0.64 ms |
-| 0.5 px/m (dense: every building) | 224 µs | 1.15 ms |
-| 2 px/m | 43 µs | 0.74 ms |
-| 10 px/m | 26 µs | 0.47 ms |
-| 50 px/m | 23 µs | 0.05 ms |
+| Whole map (~0.15 px/m, buildings and paths hidden) | 183 µs | 0.27 ms |
+| 0.3 px/m (buildings and paths hidden) | 228 µs | 0.53 ms |
+| 0.5 px/m (dense: every building) | 271 µs | 0.94 ms |
+| 2 px/m | 33 µs | 0.72 ms |
+| 10 px/m | 6 µs | 0.43 ms |
+| 50 px/m | 3.5 µs | 0.05 ms |
 
-For scale, dfui's `gpu/text_wall` is ~0.12 ms on the same machine. How the GPU
-time came down, at 0.5 px/m:
+On the phone, the Innsbruck map of the bus app (10×7.5 km, 24 layers: one
+per bus line), on a Pixel 10a (Mali-G715) at its 1080×2400:
+
+| View | GPU frame, one tile per layer per 128 segments | Now |
+|---|---|---|
+| Whole city (0.04 px/m) | 10.3 ms | 8.3 ms |
+| 0.2 px/m | 26 ms | 11.8 ms |
+| 0.7 px/m | 40 ms | 10.3 ms |
+| 1.5 px/m | 49 ms | 10.3 ms |
+| 5 px/m | 50 ms | 8.3 ms |
+
+Most of that was the tile size: a bus line's tiles were up to 3 km across
+and each covered the whole screen. Frames that store new tiles take 4–9 ms
+of CPU on the phone while they stream in. Its saved map is 19.7 MB (13 MB
+gzipped), of which labels are 4.5 MB and the index 5.2 MB; it was 23 MB
+with roads stored stroked and no levels. Rendered side by side, views from
+0.7 px/m up match the stroked map's pixels (no channel off by more than
+8/255); coarser ones differ on ~1% of pixels, mostly in the shape of small
+circles.
+
+How the GPU time came down, Amsterdam at 0.5 px/m, before levels:
 
 | Tiling | Segments | GPU frame |
 |---|---|---|
@@ -81,26 +114,21 @@ shapes, each walking its band. A view of empty land at 50 px/m still cost
 2.5 ms. Smaller tiles cost CPU (more tiles to walk) and duplicate more
 geometry into the margins, so 128 segments per tile is the balance.
 
-Not measured on the phone yet. dfui's other GPU benches run 22–32× slower on
-the Mali-G715 than on the desktop. If the map scales the same way, that is
-6–37 ms a frame, so the dense views would miss 60 fps.
-
 ## Limitations
 
-- **Storing shapes is slow.** The first frame that draws a tile builds its
-  band lists; the whole map at once costs 4.4 s on the phone.
 - **Cost per pixel, not per feature.** Every covered pixel evaluates the
   curves of each layer's tile under it; that loop is ~90% of the GPU time
   (see `DFUI_SHOW_COST` in `docs/rendering.md`). Partial repaint doesn't help, since
   a pan changes every pixel of the map.
-- **No levels of detail.** Only per-layer `min_scale`. Zoomed out over a
-  bigger area, curves per pixel grow without bound. Needs simplified
-  geometry per zoom level, or rasterized tiles for far zooms.
-- **GPU memory grows with area.** 32 bytes a segment plus band lists, all
-  resident while drawn (shapes are freed 600 frames after they were last
-  drawn). There is no streaming of data in or out.
-- **Paint walks every tile** each frame (10.3k here, up to ~0.2 ms). A
-  quadtree walk would make it proportional to what's on screen.
+- **Pop-in.** A layer with no coarser level (its levels didn't simplify
+  enough to keep) has nothing to stand in while its tiles stream, so it
+  appears a frame or two late; buildings do this when zooming in.
+- **GPU memory grows with what was seen.** 32 bytes a segment plus band
+  lists, resident while drawn; shapes are freed 600 frames after they were
+  last drawn. Decoded tiles stay in memory on the CPU side.
+- **Labels are large.** They're stored as glyph outlines, a quarter of the
+  saved map. Storing the text and laying it out on first draw would shrink
+  them.
 - **Projection is for cities.** Equirectangular `f32` metres around one
   origin: fine for tens of km, wrong for countries or the whole world.
 - **Cartography is minimal.** No casings, dashes or one-way arrows. Bevel
@@ -141,9 +169,7 @@ DFUI_MAP_OSM=/path/to/amsterdam.json cargo apk run -p dfui-map \
     --example osm_android --release
 ```
 
-Preparing the data takes ~190 ms on the Pixel. The first frame takes 4.4 s
-(0.65 s on the desktop): it stores every tile's shape, since the whole map is
-in view.
+Tiles stream in over the first frames rather than all in the first one.
 
 ## Releasing
 

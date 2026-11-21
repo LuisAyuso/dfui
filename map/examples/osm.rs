@@ -256,12 +256,13 @@ mod native {
                 start: scale.map(|s| ([0.0, 0.0], s)),
             };
             let mut cpu = dfui::Bench::new(app(), logical);
+            cpu.settle();
             let t = std::time::Instant::now();
             for _ in 0..200 {
                 cpu.paint();
             }
             let paint = t.elapsed() / 200;
-            let mut gpu = dfui::GpuBench::new(app(), SIZE, SCALE);
+            let mut gpu = cpu.gpu(SCALE);
             let mut times: Vec<_> = (0..60).map(|_| gpu.draw(None)).collect();
             times.sort();
             let name = scale.map_or("whole map".into(), |s| format!("{s} px/m"));
