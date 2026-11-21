@@ -7,7 +7,7 @@ use super::button::Tap;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
+use crate::widget::{Element, Event, EventCx, Focus, PaintCx, Widget};
 
 type OnChange = Box<dyn Fn(&mut EventCx, bool)>;
 
@@ -72,6 +72,13 @@ impl Styled for Toggle {
 }
 
 impl Widget for Toggle {
+    fn focus(&self) -> Option<Focus> {
+        let keyboard = None;
+        self.on_change.is_some().then_some(Focus {
+            radius: 999.0,
+            keyboard,
+        })
+    }
     fn style(&self) -> Style {
         self.style.clone()
     }

@@ -12,7 +12,7 @@ use super::Styled;
 use crate::render::Rect;
 use crate::text::{Font, Text};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, Key, Keyboard, PaintCx, Widget};
+use crate::widget::{Element, Event, EventCx, Focus, Key, Keyboard, PaintCx, Widget};
 
 use super::button::Handler;
 
@@ -201,6 +201,13 @@ impl Styled for TextInput {
 }
 
 impl Widget for TextInput {
+    fn focus(&self) -> Option<Focus> {
+        let keyboard = Some(self.keyboard);
+        self.on_change.is_some().then_some(Focus {
+            radius: 8.0,
+            keyboard,
+        })
+    }
     fn style(&self) -> Style {
         self.style.clone()
     }
@@ -275,8 +282,14 @@ impl Widget for TextInput {
         });
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
-        if matches!(ev, Event::Key(_)) && !cx.focused {
-            return;
+        if let Event::Key(k) = ev {
+            if !cx.focused {
+                return;
+            }
+            // Up and Down go on to the screen, e.g. to move between fields.
+            if !matches!(k, Key::Up | Key::Down) {
+                cx.stop();
+            }
         }
         let (caret, anchor) = self.caret(cx.state.get::<Caret>());
         let sel = caret.min(anchor)..caret.max(anchor);

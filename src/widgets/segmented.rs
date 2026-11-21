@@ -10,7 +10,7 @@ use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::text::{Font, Text};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
+use crate::widget::{Element, Event, EventCx, Focus, Key, PaintCx, Widget};
 
 type OnChange = Box<dyn Fn(&mut EventCx, usize)>;
 
@@ -179,6 +179,16 @@ impl Styled for Segmented {
 }
 
 impl Widget for Segmented {
+    fn focus(&self) -> Option<Focus> {
+        let radius = match self.look {
+            Look::Segmented => 999.0,
+            Look::Tabs => 6.0,
+        };
+        self.on_change.is_some().then_some(Focus {
+            radius,
+            keyboard: None,
+        })
+    }
     fn style(&self) -> Style {
         self.style.clone()
     }
@@ -259,6 +269,23 @@ impl Widget for Segmented {
         });
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
+        if let Event::Key(k) = ev
+            && cx.focused
+        {
+            let last = self.labels.len().saturating_sub(1);
+            let i = match k {
+                Key::Left => self.selected.saturating_sub(1),
+                Key::Right => (self.selected + 1).min(last),
+                _ => return,
+            };
+            cx.stop();
+            if i != self.selected
+                && let Some(f) = &self.on_change
+            {
+                f(cx, i);
+            }
+            return;
+        }
         let r = cx.rect;
         match *ev {
             Event::PointerDown { x, y } if cx.hit(x, y) => {

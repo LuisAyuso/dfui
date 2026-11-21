@@ -8,7 +8,7 @@ use crate::anim::{Animated, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::text::Text;
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
+use crate::widget::{Element, Event, EventCx, Focus, Key, PaintCx, Widget};
 
 type OnChange = Box<dyn Fn(&mut EventCx, f32)>;
 
@@ -85,6 +85,13 @@ impl Styled for Slider {
 }
 
 impl Widget for Slider {
+    fn focus(&self) -> Option<Focus> {
+        let keyboard = None;
+        self.on_change.is_some().then_some(Focus {
+            radius: 999.0,
+            keyboard,
+        })
+    }
     fn style(&self) -> Style {
         self.style.clone()
     }
@@ -122,6 +129,25 @@ impl Widget for Slider {
         cx.fill_bordered(thumb, d / 2.0, cx.theme.surface, 1.0, cx.theme.track);
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
+        let (lo, hi) = (*self.range.start(), *self.range.end());
+        if let Event::Key(k) = ev
+            && cx.focused
+        {
+            // A twentieth of the range per press.
+            let step = match k {
+                Key::Left | Key::Down => -(hi - lo) / 20.0,
+                Key::Right | Key::Up => (hi - lo) / 20.0,
+                _ => return,
+            };
+            cx.stop();
+            let v = (self.value + step).clamp(lo.min(hi), hi.max(lo));
+            if v != self.value
+                && let Some(f) = &self.on_change
+            {
+                f(cx, v);
+            }
+            return;
+        }
         let dragging = cx.state.get::<SliderState>().dragging;
         let x = match *ev {
             Event::PointerDown { x, y } if cx.hit(x, y) => {
@@ -146,7 +172,6 @@ impl Widget for Slider {
         } else {
             0.0
         };
-        let (lo, hi) = (*self.range.start(), *self.range.end());
         let v = lo + t * (hi - lo);
         if v != self.value
             && let Some(f) = &self.on_change

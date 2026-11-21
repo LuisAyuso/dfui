@@ -7,7 +7,7 @@ use super::button::{Handler, Tap};
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
+use crate::widget::{Element, Event, EventCx, Focus, PaintCx, Widget};
 
 const GROW: Duration = Duration::from_millis(140);
 const DOT: f32 = 20.0;
@@ -81,6 +81,13 @@ impl Styled for Radio {
 }
 
 impl Widget for Radio {
+    fn focus(&self) -> Option<Focus> {
+        let keyboard = None;
+        self.on_select.is_some().then_some(Focus {
+            radius: 8.0,
+            keyboard,
+        })
+    }
     fn style(&self) -> Style {
         self.style.clone()
     }

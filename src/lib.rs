@@ -26,8 +26,8 @@ pub use text::{Font, Text, TextLayout};
 pub use theme::{Ink, Role, Theme};
 pub use web_time::Instant;
 pub use widget::{
-    BuildCx, Element, Event, EventCx, Handle, Key, Keyboard, Layer, PaintCx, Placement, Scope,
-    State, Widget,
+    BuildCx, Element, Event, EventCx, Focus, Handle, Key, Keyboard, Layer, PaintCx, Placement,
+    Scope, State, Widget,
 };
 
 // Compiles the README's examples as doc tests without publishing it as docs.

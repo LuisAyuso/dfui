@@ -10,7 +10,7 @@ use crate::path::Shape;
 use crate::render::Rect;
 use crate::text::Text;
 use crate::theme::Ink;
-use crate::widget::{BuildCx, Element, Event, EventCx, PaintCx, Widget};
+use crate::widget::{BuildCx, Element, Event, EventCx, Focus, PaintCx, Widget};
 
 /// Icon scale while pressed.
 const PRESSED: f32 = 0.8;
@@ -98,6 +98,13 @@ impl Styled for Icon {
 }
 
 impl Widget for Icon {
+    fn focus(&self) -> Option<Focus> {
+        let tappable = self.enabled && self.on_click.is_some();
+        tappable.then_some(Focus {
+            radius: 999.0,
+            keyboard: None,
+        })
+    }
     fn style(&self) -> Style {
         self.style.clone()
     }

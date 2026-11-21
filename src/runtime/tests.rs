@@ -286,13 +286,59 @@ fn keys_reach_on_key_unless_a_field_is_focused() {
     let (x, y) = (field.x + 5.0, field.y + 5.0);
     rt.dispatch(Event::PointerDown { x, y });
     rt.dispatch(Event::PointerUp { x, y });
-    rt.dispatch(Event::Key(Key::Up));
+    rt.dispatch(Event::Key(Key::Left));
     rt.key_pressed(&WKey::Character("q".into()), Some("q"));
     assert_eq!(
         root::<Vec<Key>, _>(&mut rt).len(),
         3,
         "the focused field took them"
     );
+    rt.dispatch(Event::Key(Key::Up));
+    assert_eq!(
+        root::<Vec<Key>, _>(&mut rt)[3],
+        Key::Up,
+        "but lets Up through"
+    );
+}
+
+struct TwoButtons;
+
+impl App for TwoButtons {
+    fn view(&self) -> Element {
+        stateful(|_: &Vec<u8>, h| {
+            let press =
+                move |n: u8| move |cx: &mut EventCx| cx.update(h, move |v: &mut Vec<u8>| v.push(n));
+            column([
+                button(text("a")).on_click(press(1)).into(),
+                text("not focusable").into(),
+                button(text("b")).on_click(press(2)).into(),
+            ])
+        })
+        .into()
+    }
+}
+
+#[test]
+fn tab_walks_focusable_widgets_and_enter_or_space_presses_them() {
+    let mut rt = Runtime::new(TwoButtons);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    let tab = |rt: &mut Runtime<TwoButtons>| rt.key_pressed(&WKey::Named(NamedKey::Tab), None);
+    let enter = WKey::Named(NamedKey::Enter);
+    tab(&mut rt);
+    rt.key_pressed(&enter, None);
+    tab(&mut rt);
+    rt.key_pressed(&WKey::Character(" ".into()), Some(" "));
+    // Past the last one it wraps; Shift+Tab goes back.
+    tab(&mut rt);
+    rt.key_pressed(&enter, None);
+    rt.mods = ModifiersState::SHIFT;
+    tab(&mut rt);
+    rt.key_pressed(&enter, None);
+    assert_eq!(*root::<Vec<u8>, _>(&mut rt), [1, 2, 1, 2]);
+    assert!(rt.focus_visible, "the ring shows after Tab");
+    rt.dispatch(Event::PointerDown { x: 199.0, y: 199.0 });
+    assert_eq!(rt.focused, None, "a tap elsewhere drops focus");
 }
 
 struct Log;

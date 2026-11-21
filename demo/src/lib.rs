@@ -4,9 +4,10 @@ use dfui::anim::{Lerp, Morph, ease};
 use dfui::model::{Keyed, Row, Tree};
 use dfui::taffy::{AlignItems, Dimension, JustifyContent, Size, Style};
 use dfui::widgets::{
-    Column, Snapshot, Styled, button, column, container, future_builder, image, list, progress,
-    provide, radio, row, scroll, segmented, slider, spacer, spinner, stacked_progress, stateful,
-    stream_builder, table, tabs, text, text_input, toggle, tree_view, wait_bar,
+    Column, Snapshot, Styled, button, choice_chip, column, container, dropdown, future_builder,
+    icon_button, image, list, progress, provide, radio, row, scroll, segmented, slider, spacer,
+    spinner, stacked_progress, stateful, stream_builder, table, tabs, text, text_input, toggle,
+    tree_view, wait_bar,
 };
 use dfui::{
     Animated, App, Bitmap, Color, Element, EventCx, Font, Handle, PaintCx, Path, Rect, Scope,
@@ -65,7 +66,9 @@ fn on<S: Default + 'static>(
     move |cx| cx.update(h, f)
 }
 
-const PAGES: [&str; 6] = ["Basics", "Controls", "Motion", "Cards", "Async", "Images"];
+const PAGES: [&str; 7] = [
+    "Basics", "Controls", "Focus", "Motion", "Cards", "Async", "Images",
+];
 
 impl Screen {
     fn view(&self, h: Handle<Screen>) -> Element {
@@ -86,13 +89,14 @@ impl Screen {
         let page = match self.tab {
             0 => self.basics(h),
             1 => controls(),
-            2 => self.motion(h),
-            3 => self.cards(h),
-            4 => jobs(),
+            2 => focus(),
+            3 => self.motion(h),
+            4 => self.cards(h),
+            5 => jobs(),
             _ => gallery(),
         };
         // The Cards page scrolls itself, virtualized.
-        let body: Element = if self.tab == 3 {
+        let body: Element = if self.tab == 4 {
             container(page).padding(4.0).fill().into()
         } else {
             let mut body = scroll(container(page).padding(4.0)).grow(1.0);
@@ -920,6 +924,115 @@ fn controls() -> Element {
             section("Progress (follows the volume)", panel(bars.into())),
             section("Radio buttons", panel(sizes.into())),
             section("Segmented button", range.into()),
+        ])
+        .gap(16.0)
+    })
+    .into()
+}
+
+thread_local! {
+    // A `Shape` is stored for good each time one is made, so make it once.
+    static CLOSE: dfui::Shape =
+        dfui::Shape::from_bytes(include_bytes!("../../assets/icons/close.path")).unwrap();
+}
+
+#[derive(Default)]
+struct Focusable {
+    clicks: u32,
+    chip: usize,
+    on: bool,
+    level: f32,
+    size: usize,
+    range: usize,
+    fruit: usize,
+    name: String,
+}
+
+/// One of every widget that takes keyboard focus, to tune the focus ring and its glide.
+fn focus() -> Element {
+    stateful(|s: &Focusable, h| {
+        let set = move |f: fn(&mut Focusable)| move |cx: &mut EventCx| cx.update(h, f);
+        let label = |l: String| text(l).size(16.0).color(INK);
+        let buttons = row([
+            button(text("Primary").color(Color::WHITE))
+                .color(ACCENT)
+                .on_click(set(|s| s.clicks += 1))
+                .into(),
+            button(text("Flat").color(INK))
+                .flat()
+                .color(Color::hex(0xe8e9ef))
+                .on_click(set(|s| s.clicks += 1))
+                .into(),
+            button(text("Disabled").color(MUTED))
+                .enabled(false)
+                .on_click(set(|s| s.clicks += 1))
+                .into(),
+            CLOSE.with(|c| icon_button(c).color(INK).on_click(set(|s| s.clicks = 0)).into()),
+            label(format!("{} clicks", s.clicks)).into(),
+        ])
+        .gap(12.0)
+        .align(AlignItems::CENTER);
+        let chips = row(["All", "Unread", "Starred"].into_iter().enumerate().map(|(i, l)| {
+            choice_chip(l, s.chip == i)
+                .on_click(move |cx| cx.update(h, move |s: &mut Focusable| s.chip = i))
+                .into()
+        }))
+        .gap(8.0);
+        let switches = column([
+            row([
+                label("Toggle".into()).into(),
+                spacer().grow(1.0).into(),
+                toggle(s.on)
+                    .accent(ACCENT)
+                    .on_change(move |cx, on| cx.update(h, move |s: &mut Focusable| s.on = on))
+                    .into(),
+            ])
+            .align(AlignItems::CENTER)
+            .into(),
+            row([
+                label(format!("Slider {:.0}", s.level)).width(100.0).into(),
+                slider(s.level, 0.0..=100.0)
+                    .accent(ACCENT)
+                    .on_change(move |cx, v| cx.update(h, move |s: &mut Focusable| s.level = v))
+                    .grow(1.0)
+                    .into(),
+            ])
+            .align(AlignItems::CENTER)
+            .into(),
+        ])
+        .gap(12.0);
+        let radios = column(["Small", "Medium", "Large"].into_iter().enumerate().map(|(i, l)| {
+            radio(s.size == i, label(l.into()))
+                .accent(ACCENT)
+                .on_select(move |cx| cx.update(h, move |s: &mut Focusable| s.size = i))
+                .into()
+        }));
+        let pickers = row([
+            segmented(["Day", "Week", "Month"], s.range)
+                .on_change(move |cx, i| cx.update(h, move |s: &mut Focusable| s.range = i))
+                .into(),
+            dropdown(["Apple", "Pear", "Plum"], s.fruit)
+                .on_change(move |cx, i| cx.update(h, move |s: &mut Focusable| s.fruit = i))
+                .into(),
+        ])
+        .gap(12.0)
+        .align(AlignItems::CENTER);
+        let field = text_input(s.name.clone())
+            .placeholder("Name")
+            .color(INK)
+            .accent(ACCENT)
+            .on_change(move |cx, v| cx.update(h, move |s: &mut Focusable| s.name = v));
+        column([
+            text("Tab and Shift+Tab move the focus, Enter or Space presses, arrows change sliders and segments.")
+                .size(15.0)
+                .color(MUTED)
+                .into(),
+            section("Buttons", panel(buttons.into())),
+            section("Chips", panel(chips.into())),
+            section("Toggle and slider", panel(switches.into())),
+            section("Radio buttons", panel(radios.into())),
+            section("Segmented and dropdown", panel(pickers.into())),
+            section("Text input", field.into()),
         ])
         .gap(16.0)
     })

@@ -24,6 +24,7 @@ mod bench;
 mod clipboard;
 #[cfg(target_os = "android")]
 mod editor;
+mod focus;
 // TIMERS is already const; clippy misfires on Android's thread_local expansion.
 #[allow(clippy::missing_const_for_thread_local)]
 pub(crate) mod task;
@@ -97,6 +98,11 @@ pub(crate) struct Runtime<A: App> {
     /// Hidden windows don't animate; presents would be throttled anyway.
     occluded: bool,
     focused: Option<u64>,
+    /// The focused widget takes typing, so character keys arrive as text.
+    typing: bool,
+    /// Focus came from the keyboard, so the ring shows.
+    focus_visible: bool,
+    ring: focus::Ring,
     mods: ModifiersState,
     instance: Option<wgpu::Instance>,
     renderer: Option<Renderer>,
@@ -181,6 +187,9 @@ impl<A: App> Runtime<A> {
             rebuild_due: false,
             occluded: false,
             focused: None,
+            typing: false,
+            focus_visible: false,
+            ring: focus::Ring::default(),
             #[cfg(test)]
             ime_requests: Vec::new(),
             mods: ModifiersState::empty(),
@@ -349,8 +358,16 @@ impl<A: App> Runtime<A> {
         let captured = self.captured.filter(|_| !matches!(ev, Event::Back));
         let find = |id: u64| self.ids.iter().position(|&n| n == id);
         let targets: Vec<usize> = match (keyboard, captured) {
-            (true, _) if self.focused.is_none() && matches!(ev, Event::Key(_)) => {
-                self.order.iter().rev().copied().collect()
+            // Keys go to the focused widget, then to everyone topmost first until one stops them.
+            (true, _) if matches!(ev, Event::Key(_)) => {
+                let focused = self.focused.and_then(find);
+                let rest = self
+                    .order
+                    .iter()
+                    .rev()
+                    .copied()
+                    .filter(|&i| Some(i) != focused);
+                focused.into_iter().chain(rest).collect()
             }
             (true, _) => self.focused.and_then(find).into_iter().collect(),
             (false, Some(id)) => find(id).into_iter().collect(),
@@ -458,7 +475,8 @@ impl<A: App> Runtime<A> {
         }
         // A tap that no widget claims for focus blurs the focused one.
         if matches!(ev, Event::PointerDown { .. }) {
-            redraw |= self.set_focus(focus);
+            self.focus_visible = false;
+            redraw |= self.set_focus(focus.map(|(id, k)| (id, Some(k))));
         }
 
         let rebuild = !updates.is_empty();
@@ -485,6 +503,9 @@ impl<A: App> Runtime<A> {
         };
         let shortcut =
             |k: &str| command && matches!(key, WKey::Character(c) if c.eq_ignore_ascii_case(k));
+        if let WKey::Named(NamedKey::Tab) = key {
+            return self.tab(!self.mods.shift_key());
+        }
         let k = match key {
             WKey::Named(NamedKey::Backspace) => Some(Key::Backspace),
             WKey::Named(NamedKey::Delete) => Some(Key::Delete),
@@ -507,7 +528,7 @@ impl<A: App> Runtime<A> {
         let char_key = || {
             let mut cs = text?.chars();
             cs.next()
-                .filter(|c| !c.is_control() && cs.next().is_none() && self.focused.is_none())
+                .filter(|c| !c.is_control() && cs.next().is_none() && !self.typing)
         };
         if let Some(k) = k {
             self.dispatch(Event::Key(k));
@@ -529,6 +550,40 @@ impl<A: App> Runtime<A> {
                 self.dispatch(Event::Text(t));
             }
         }
+    }
+
+    /// Moves keyboard focus to the next (or previous) visible focusable widget, in tree order.
+    // ponytail: every visible widget, also under an open dialog; trap focus in the top layer if that matters.
+    fn tab(&mut self, forward: bool) {
+        if self.ids.len() != self.placed.len() {
+            return;
+        }
+        let nodes = walk(&self.root, &self.ids);
+        let stops: Vec<(u64, Option<Keyboard>)> = nodes
+            .iter()
+            .zip(&self.placed)
+            .filter_map(|(n, p)| {
+                let f = n.w.focus()?;
+                let seen = p.rect.intersect(&p.clip);
+                (seen.w > 0.0 && seen.h > 0.0).then_some((n.id, f.keyboard))
+            })
+            .collect();
+        let n = stops.len();
+        if n == 0 {
+            return;
+        }
+        let at = self
+            .focused
+            .and_then(|id| stops.iter().position(|s| s.0 == id));
+        let next = match (at, forward) {
+            (Some(i), true) => (i + 1) % n,
+            (Some(i), false) => (i + n - 1) % n,
+            (None, true) => 0,
+            (None, false) => n - 1,
+        };
+        self.focus_visible = true;
+        self.set_focus(Some(stops[next]));
+        self.reposition();
     }
 
     /// A finger's touch, logical px.
@@ -560,11 +615,12 @@ impl<A: App> Runtime<A> {
     }
 
     /// Returns whether focus changed.
-    fn set_focus(&mut self, to: Option<(u64, Keyboard)>) -> bool {
+    fn set_focus(&mut self, to: Option<(u64, Option<Keyboard>)>) -> bool {
         let id = to.map(|(id, _)| id);
-        let keyboard = to.map(|(_, k)| k);
+        let keyboard = to.and_then(|(_, k)| k);
         let changed = self.focused != id;
         self.focused = id;
+        self.typing = keyboard.is_some();
         // ponytail: IME only drives the Android soft keyboard; desktop composition (CJK) needs Ime::Preedit handling.
         // Tapping the focused input again brings back a keyboard the user dismissed.
         if changed || id.is_some() {
@@ -670,6 +726,26 @@ impl<A: App> Runtime<A> {
             });
             spans.push((n.id, start..scene.len()));
         }
+        let to = self.focused.filter(|_| self.focus_visible).and_then(|id| {
+            let i = self.ids.iter().position(|&n| n == id)?;
+            let f = nodes[i].w.focus()?;
+            let p = &self.placed[i];
+            Some((
+                focus::Outline {
+                    rect: p.rect,
+                    radius: f.radius,
+                },
+                p.clip,
+            ))
+        });
+        let start = scene.len();
+        let (outline, clip) = (to.map(|t| t.0), to.map_or(all, |t| t.1));
+        let accent = app_theme.accent;
+        *frame |= self
+            .ring
+            .paint(self.focused, outline, accent, clip, now, &mut scene);
+        // Its own id, so damage covers where the ring was and where it is.
+        spans.push((u64::MAX, start..scene.len()));
         self.text.end_frame();
         (scene, spans)
     }

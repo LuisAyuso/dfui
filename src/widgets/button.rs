@@ -8,7 +8,7 @@ use super::label::Emphasis;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Shadow};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, PaintCx, Widget};
+use crate::widget::{Element, Event, EventCx, Focus, Key, PaintCx, Widget};
 
 pub(crate) type Handler = Box<dyn Fn(&mut EventCx)>;
 
@@ -47,6 +47,11 @@ impl Tap {
         cx: &mut EventCx,
         field: fn(&mut S) -> &mut Tap,
     ) -> (bool, bool) {
+        // Enter or Space on the focused widget is a tap.
+        if cx.focused && matches!(ev, Event::Key(Key::Enter | Key::Char(' '))) {
+            cx.stop();
+            return (true, false);
+        }
         let mut tap = std::mem::take(field(cx.state.get::<S>()));
         let before = (tap.pressed, tap.hovered);
         let fire = tap.event(ev, cx);
@@ -148,6 +153,13 @@ impl Styled for Button {
 }
 
 impl Widget for Button {
+    fn focus(&self) -> Option<Focus> {
+        let radius = self.radius;
+        (self.enabled && self.on_click.is_some()).then_some(Focus {
+            radius,
+            keyboard: None,
+        })
+    }
     fn style(&self) -> Style {
         self.style.clone()
     }

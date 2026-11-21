@@ -46,6 +46,15 @@ pub enum Event {
     Back,
 }
 
+/// How a widget takes keyboard focus; see [`Widget::focus`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Focus {
+    /// Corner radius the focus ring follows; a large value makes a pill.
+    pub radius: f32,
+    /// The soft keyboard to show while focused, for text fields.
+    pub keyboard: Option<Keyboard>,
+}
+
 /// The soft keyboard a text field asks for.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -153,6 +162,12 @@ pub trait Widget {
     /// Whether this subtree is drawn but ignores the pointer.
     fn inert(&self) -> bool {
         false
+    }
+
+    /// Lets Tab move keyboard focus here. The focused widget gets keys first
+    /// and handles Enter, Space or arrows when [`EventCx::focused`].
+    fn focus(&self) -> Option<Focus> {
+        None
     }
 
     /// Value made available to descendants through [`Scope::get`].
