@@ -1,6 +1,6 @@
 [package]
 name = "dfui-map"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 license = "MIT"
 description = "Experimental pannable, zoomable vector map widget for dfui"
@@ -12,7 +12,7 @@ categories = ["gui", "rendering"]
 include = ["src/**", "README.md"]
 
 [dependencies]
-dfui = { path = "..", version = "0.1.2" }
+dfui.workspace = true
 
 # Downloading and parsing OpenStreetMap data is the app's job.
 [dev-dependencies]

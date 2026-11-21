@@ -1,6 +1,6 @@
 [package]
 name = "dfui"
-version = "0.1.2"
+version.workspace = true
 edition = "2024"
 rust-version = "1.90"
 license = "MIT"
@@ -39,6 +39,13 @@ harness = false
 
 [workspace]
 members = ["demo", "map", "site", "tools/svg2path"]
+
+# dfui and dfui-map release together from one `v*` tag; bump both lines.
+[workspace.package]
+version = "0.1.2"
+
+[workspace.dependencies]
+dfui = { path = ".", version = "0.1.2" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = "30"

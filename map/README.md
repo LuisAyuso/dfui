@@ -153,8 +153,7 @@ in view.
 
 ## Releasing
 
-Published to crates.io on its own: bump `version` in `map/Cargo.toml`,
-then push a `map-v<version>` tag (`.github/workflows/map-release.yml`). It
-depends on the published dfui, so release dfui first when it needs a new one.
+Released with dfui under the same version: a `v*` tag publishes both
+(`.github/workflows/release.yml`).
 
 Map data © OpenStreetMap contributors, under the ODbL.

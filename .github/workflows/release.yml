@@ -1,4 +1,4 @@
-# Publishes dfui to crates.io when a `v*` tag is pushed, after the tests pass.
+# Publishes dfui and dfui-map to crates.io when a `v*` tag is pushed, after the tests pass.
 # Needs a CARGO_REGISTRY_TOKEN repository secret.
 name: Release
 
@@ -21,6 +21,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Tag matches the crate version
         run: test "${GITHUB_REF_NAME#v}" = "$(cargo pkgid -p dfui | sed 's/.*[#@]//')"
-      - run: cargo publish -p dfui --locked
+      - run: cargo publish -p dfui -p dfui-map --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
