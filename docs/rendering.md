@@ -101,7 +101,7 @@ would cost about 4× fill for no visible change.
 ## Timing
 
 `Renderer` logs fps, CPU time (excluding vsync wait) and GPU time every two
-seconds. GPU time comes from timestamp queries around the render pass, with
+seconds, each with its slowest frame in the window to show hitches. GPU time comes from timestamp queries around the render pass, with
 one sample in flight. Baselines are in `TODO.md`.
 
 ## GPU benchmarks

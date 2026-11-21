@@ -127,11 +127,14 @@ pub(crate) struct Runtime<A: App> {
     ime_requests: Vec<Option<Keyboard>>,
 }
 
-/// Rolling frame timings, logged every couple of seconds.
+/// Rolling frame timings, logged every couple of seconds. The maxima show
+/// hitches that the averages hide.
 struct Stats {
     since: Instant,
     frames: u32,
     cpu: Duration,
+    cpu_max: Duration,
+    gpu_max: Option<f32>,
 }
 
 impl Default for Stats {
@@ -140,6 +143,8 @@ impl Default for Stats {
             since: Instant::now(),
             frames: 0,
             cpu: Duration::ZERO,
+            cpu_max: Duration::ZERO,
+            gpu_max: None,
         }
     }
 }
@@ -148,13 +153,19 @@ impl Stats {
     fn frame(&mut self, cpu: Duration, gpu_ms: Option<f32>, instances: usize) {
         self.frames += 1;
         self.cpu += cpu;
+        self.cpu_max = self.cpu_max.max(cpu);
+        if let Some(g) = gpu_ms {
+            self.gpu_max = Some(self.gpu_max.map_or(g, |m| m.max(g)));
+        }
         let window = self.since.elapsed();
         if window >= Duration::from_secs(2) {
             log::info!(
-                "fps {:.1}  cpu {:.2}ms  gpu {}  instances {instances}",
+                "fps {:.1}  cpu {:.2}ms (max {:.2}ms)  gpu {} (max {})  instances {instances}",
                 self.frames as f32 / window.as_secs_f32(),
                 self.cpu.as_secs_f32() * 1e3 / self.frames as f32,
+                self.cpu_max.as_secs_f32() * 1e3,
                 gpu_ms.map_or("n/a".into(), |g| format!("{g:.2}ms")),
+                self.gpu_max.map_or("n/a".into(), |g| format!("{g:.2}ms")),
             );
             *self = Stats::default();
         }
