@@ -3,7 +3,9 @@
 //! [`Shape`]s, and [`map`] pans and zooms them. Shapes are stored on the GPU
 //! once, so moving the map only moves the rects they're drawn into.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::rc::Rc;
 
 use dfui::path::Point;
@@ -232,7 +234,8 @@ impl MapBuilder {
         let l = &self.layers[layer.0];
         let pad = size / 4.0;
         self.labels.push(Tile {
-            shape: Shape::new(path, view),
+            shape: OnceCell::from(Shape::new(path, view)),
+            at: 0..0,
             view,
             cell: Rect::new(
                 view.x - pad,
@@ -270,6 +273,7 @@ impl MapBuilder {
         MapData {
             tiles,
             bounds: bounds.unwrap_or_default(),
+            bytes: &[],
         }
     }
 }
@@ -307,7 +311,8 @@ fn split(l: &LayerData, cell: Rect, rings: Vec<Vec<Point>>, tiles: &mut Vec<Tile
             .flat_map(|r| Path::polygon(r).contours)
             .collect();
         tiles.push(Tile {
-            shape: Shape::new(Path { contours }, view),
+            shape: OnceCell::from(Shape::new(Path { contours }, view)),
+            at: 0..0,
             view,
             cell,
             color: l.color,
@@ -369,7 +374,10 @@ fn clip(ring: &[Point], r: Rect) -> Option<Vec<Point>> {
 }
 
 struct Tile {
-    shape: Shape,
+    /// Built here, or decoded from `at` on first use.
+    shape: OnceCell<Shape>,
+    /// Where the shape lies in [`MapData::bytes`], for a map read from bytes.
+    at: Range<usize>,
     /// The shape's view box, metres.
     view: Rect,
     /// What the tile covers and is clipped to when drawn, metres.
@@ -383,9 +391,172 @@ struct Tile {
 pub struct MapData {
     tiles: Vec<Tile>,
     bounds: Rect,
+    /// What [`MapData::from_bytes`] read; the tiles' shapes lie in it.
+    bytes: &'static [u8],
 }
 
+/// Coordinates are stored on this grid, metres: fine enough at the deepest zoom.
+const GRID: f32 = 0.001;
+
+/// A shape's outline, compactly: a varint count of contours, then for each a
+/// count of quads and its start point, then each quad's end point and, for a
+/// curve, its control point. Points are millimetres from the view's corner,
+/// stored as zigzag varint deltas; a straight edge, whose control point is
+/// its middle, stores none and flags that in the low bit of its first delta.
+fn encode(path: &Path, view: Rect) -> Vec<u8> {
+    let q = |p: Point| {
+        let g = |v: f32, o: f32| ((v - o) / GRID).round() as i64;
+        [g(p[0], view.x), g(p[1], view.y)]
+    };
+    let mut out = Vec::new();
+    let put = |v: i64, out: &mut Vec<u8>| {
+        let mut u = ((v << 1) ^ (v >> 63)) as u64;
+        while u >= 0x80 {
+            out.push(u as u8 | 0x80);
+            u >>= 7;
+        }
+        out.push(u as u8);
+    };
+    put(path.contours.len() as i64, &mut out);
+    let mut at = [0, 0];
+    for c in &path.contours {
+        put(c.len() as i64, &mut out);
+        let start = q(c.first().map_or([0.0; 2], |s| s[0]));
+        put(start[0] - at[0], &mut out);
+        put(start[1] - at[1], &mut out);
+        at = start;
+        for &[a, ctl, b] in c {
+            let curve = ctl != [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+            let (e, k) = (q(b), q(ctl));
+            put((e[0] - at[0]) * 2 + i64::from(curve), &mut out);
+            put(e[1] - at[1], &mut out);
+            if curve {
+                put(k[0] - at[0], &mut out);
+                put(k[1] - at[1], &mut out);
+            }
+            at = e;
+        }
+    }
+    out
+}
+
+/// The outline [`encode`] wrote; `None` if `bytes` are truncated.
+fn decode(bytes: &[u8], view: Rect) -> Option<Path> {
+    let mut it = bytes.iter();
+    let mut get = || -> Option<i64> {
+        let (mut u, mut shift) = (0u64, 0);
+        loop {
+            let b = *it.next()?;
+            u |= u64::from(b & 0x7f) << shift;
+            if b < 0x80 {
+                return Some((u >> 1) as i64 ^ -((u & 1) as i64));
+            }
+            shift += 7;
+        }
+    };
+    let p = |q: [i64; 2]| [view.x + q[0] as f32 * GRID, view.y + q[1] as f32 * GRID];
+    let mut contours = Vec::new();
+    let mut at = [0, 0];
+    for _ in 0..get()? {
+        let n = get()?;
+        at = [at[0] + get()?, at[1] + get()?];
+        let mut quads = Vec::new();
+        for _ in 0..n {
+            let (dx, dy) = (get()?, get()?);
+            let (a, curve) = (p(at), dx & 1 == 1);
+            let e = [at[0] + (dx - i64::from(curve)) / 2, at[1] + dy];
+            let ctl = match curve {
+                true => p([at[0] + get()?, at[1] + get()?]),
+                false => [(a[0] + p(e)[0]) / 2.0, (a[1] + p(e)[1]) / 2.0],
+            };
+            quads.push([a, ctl, p(e)]);
+            at = e;
+        }
+        contours.push(quads);
+    }
+    Some(Path { contours })
+}
+
+/// Words per tile in the index: cell, view, color, min_scale, shape length.
+const INDEX_WORDS: usize = 14;
+
 impl MapData {
+    /// The map as [`MapData::from_bytes`] reads it, little-endian: `DFM1`,
+    /// the bounds as four f32, a u32 count of tiles, an index entry per
+    /// tile (cell, view and color as four f32 each, min_scale, the length
+    /// of its shape), then each shape as [`encode`] writes it.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let shapes: Vec<Vec<u8>> = self
+            .tiles
+            .iter()
+            .map(|t| encode(self.shape(t).path(), t.view))
+            .collect();
+        let b = self.bounds;
+        let mut words = vec![b.x, b.y, b.w, b.h, f32::from_bits(self.tiles.len() as u32)];
+        for (t, shape) in self.tiles.iter().zip(&shapes) {
+            let (c, v, k) = (t.cell, t.view, t.color);
+            words.extend([c.x, c.y, c.w, c.h, v.x, v.y, v.w, v.h, k.r, k.g, k.b, k.a]);
+            words.extend([t.min_scale, f32::from_bits(shape.len() as u32)]);
+        }
+        let mut out = b"DFM1".to_vec();
+        out.extend(words.iter().flat_map(|w| w.to_le_bytes()));
+        out.extend(shapes.concat());
+        out
+    }
+
+    /// A map written by [`MapData::to_bytes`], usually `include_bytes!`d.
+    /// Only the index is read here; each tile's shape is decoded the first
+    /// time it's drawn. `None` if `bytes` aren't one or are truncated.
+    pub fn from_bytes(bytes: &'static [u8]) -> Option<MapData> {
+        let body = bytes.strip_prefix(b"DFM1")?;
+        let word = |i: usize| {
+            let w = body.get(i * 4..i * 4 + 4)?;
+            Some(f32::from_le_bytes(w.try_into().ok()?))
+        };
+        let rect = |i: usize| {
+            Some(Rect::new(
+                word(i)?,
+                word(i + 1)?,
+                word(i + 2)?,
+                word(i + 3)?,
+            ))
+        };
+        let (bounds, n) = (rect(0)?, word(4)?.to_bits() as usize);
+        let mut at = 4 + (5 + n * INDEX_WORDS) * 4;
+        let mut tiles = Vec::with_capacity(n);
+        for i in (0..n).map(|i| 5 + i * INDEX_WORDS) {
+            let len = word(i + 13)?.to_bits() as usize;
+            let k = rect(i + 8)?;
+            tiles.push(Tile {
+                shape: OnceCell::new(),
+                at: at..at + len,
+                cell: rect(i)?,
+                view: rect(i + 4)?,
+                color: Color {
+                    r: k.x,
+                    g: k.y,
+                    b: k.w,
+                    a: k.h,
+                },
+                min_scale: word(i + 12)?,
+            });
+            at += len;
+        }
+        (at <= bytes.len()).then_some(MapData {
+            tiles,
+            bounds,
+            bytes,
+        })
+    }
+
+    /// The tile's shape, decoded on first use; empty if its bytes are corrupt.
+    fn shape<'a>(&self, t: &'a Tile) -> &'a Shape {
+        t.shape.get_or_init(|| {
+            let path = decode(&self.bytes[t.at.clone()], t.view).unwrap_or_default();
+            Shape::new(path, t.view)
+        })
+    }
+
     /// The shapes stored, for gauging how heavy a map is.
     pub fn tiles(&self) -> usize {
         self.tiles.len()
@@ -396,7 +567,7 @@ impl MapData {
         let quads = self
             .tiles
             .iter()
-            .map(|t| t.shape.path().contours.iter().map(Vec::len));
+            .map(|t| self.shape(t).path().contours.iter().map(Vec::len));
         quads.flatten().sum()
     }
 }
@@ -539,7 +710,7 @@ impl Widget for Map {
                     continue;
                 }
                 cx.with_clip(screen(t.cell), |cx| {
-                    cx.shape(&t.shape, screen(t.view), t.color);
+                    cx.shape(self.data.shape(t), screen(t.view), t.color);
                 });
             }
             if let Some(f) = &self.overlay {
@@ -660,7 +831,15 @@ mod tests {
         let data = b.build();
         assert!(data.tiles() > 1);
         for t in &data.tiles {
-            let n: usize = t.shape.path().contours.iter().map(Vec::len).sum();
+            let n: usize = t
+                .shape
+                .get()
+                .unwrap()
+                .path()
+                .contours
+                .iter()
+                .map(Vec::len)
+                .sum();
             assert!(n <= MAX_QUADS, "{n} segments");
         }
         assert_eq!(data.bounds, Rect::new(0.0, 0.0, 390.0, 390.0));
@@ -684,7 +863,7 @@ mod tests {
             (t.view.y + t.view.h / 2.0).abs() < 4.0,
             "centred on the line"
         );
-        let first = t.shape.path().contours[0][0][0][0];
+        let first = t.shape.get().unwrap().path().contours[0][0][0][0];
         assert!(first < 50.0);
         assert_eq!(t.min_scale, MIN_LABEL_PX / 10.0);
         // The same text 100 m on waits until they're far enough apart on screen.
@@ -693,10 +872,38 @@ mod tests {
     }
 
     #[test]
+    fn maps_round_trip_through_bytes() {
+        let mut b = MapBuilder::new(52.37, 4.89);
+        let roads = b.layer(Color::WHITE, 0.0);
+        let names = b.layer(Color::BLACK, 0.5);
+        b.line(roads, &[[0.0, 0.0], [300.0, 40.0], [600.0, 0.0]], 10.0);
+        b.label(
+            names,
+            &[[0.0, 0.0], [600.0, 0.0]],
+            &Text::default(),
+            Font::DEFAULT,
+            "Damrak",
+            8.0,
+        );
+        let built = b.build();
+        let bytes: &'static [u8] = Vec::leak(built.to_bytes());
+        let read = MapData::from_bytes(bytes).unwrap();
+        assert_eq!(read.to_bytes(), bytes);
+        assert_eq!(
+            (read.tiles(), read.segments()),
+            (built.tiles(), built.segments())
+        );
+        let (a, z) = (&built.tiles[1], &read.tiles[1]);
+        assert_eq!((a.cell, a.view, a.min_scale), (z.cell, z.view, z.min_scale));
+        assert!(MapData::from_bytes(&bytes[..bytes.len() - 1]).is_none());
+    }
+
+    #[test]
     fn zoom_keeps_the_point_under_the_pointer() {
         let data = Rc::new(MapData {
             tiles: Vec::new(),
             bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+            bytes: &[],
         });
         let r = Rect::new(0.0, 0.0, 100.0, 100.0);
         let mut v = View::default();
@@ -730,6 +937,7 @@ mod tests {
         let data = Rc::new(MapData {
             tiles: Vec::new(),
             bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+            bytes: &[],
         });
         let taps = Rc::new(RefCell::new(Vec::new()));
         let mut b = dfui::Bench::new(App(data, taps.clone()), (100.0, 100.0));
@@ -747,6 +955,7 @@ mod tests {
         let data = Rc::new(MapData {
             tiles: Vec::new(),
             bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+            bytes: &[],
         });
         let r = Rect::new(0.0, 0.0, 100.0, 100.0);
         let mut v = View::default();

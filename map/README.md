@@ -39,6 +39,13 @@ backoff and caches the response in the temp directory.
   show once the font reaches 7 px. The same name repeats only 300 px apart
   on screen: each repeat waits for the zoom where it's that far from the
   ones placed before it, so names of wide roads go first.
+- `MapData::to_bytes` saves a built map so an app can bundle it instead of
+  building at startup: an index of tiles, then each tile's outline with
+  points on a millimetre grid as varint deltas, straight edges without a
+  control point. `MapData::from_bytes` reads only the index; each tile is
+  decoded the first time it's drawn. Innsbruck (4×4 km, 1.4M edges) is
+  8.9 MB (6.8 MB gzipped) against 6.7 MB of stripped Overpass JSON (1 MB
+  gzipped), and loads in ~5 ms instead of ~530 ms of building.
 - Paint walks every tile, skips the ones off screen or below their layer's
   `min_scale`, and draws the rest with `PaintCx::shape`.
 
