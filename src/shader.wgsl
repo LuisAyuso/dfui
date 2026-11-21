@@ -75,6 +75,9 @@ fn vs(@builtin(vertex_index) vi: u32, inst: Instance) -> VsOut {
     } else if strip > 0u {
         hi = lo;
     }
+    // Fragments outside the clip are discarded anyway; don't rasterize them.
+    lo = max(lo, inst.clip.xy);
+    hi = max(min(hi, inst.clip.xy + inst.clip.zw), lo);
     let world = mix(lo, hi, c);
 
     var out: VsOut;
