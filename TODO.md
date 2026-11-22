@@ -460,6 +460,34 @@ repeated on the phone; lists and text input have no bench.
       redraw holds 120 fps; Bench screen ~3.2 ms GPU / ~1.8 ms CPU, main
       screen ~2.6 ms GPU / ~2.3 ms CPU, against an 8.3 ms budget.
 
+GPU optimization opportunities, from reading `shader.wgsl` (unmeasured;
+time each with `GpuBench` and `scripts/android-bench.sh` against the
+baseline above, and use `DFUI_SHOW_COST` to see what a screen is bound by):
+
+- [ ] 24 vertices per instance: `gpu.rs` draws every instance with
+      `draw(0..24, ..)` for the four strips of a shadow with a hole, so for
+      every other instance 18 vertices collapse into degenerate triangles
+      and the vertex shader runs 4× too often (on Mali the position pass
+      runs for all of them). Draw `0..6`, with holed shadows in their own
+      24-vertex draws; the batching around those calls already splits runs,
+      painter's order must hold.
+- [ ] Fewer varyings per vertex (~28 floats today, written to memory per
+      vertex on Mali): `color` and `border_color` as `pack4x8unorm` `u32`s
+      (the target is 8 bits a channel and coverage is applied after
+      unpacking), and `rect` as a `vec2`, since the fragment shader only
+      reads its size. About 28 → 18 floats. Shader-only.
+- [ ] Guard `cost += 1u` in `ray_coverage` with `if show_cost`, so no
+      driver keeps the counter in the curve loop when the override is off.
+      Shader-only.
+- [ ] Shape anti-aliasing without derivatives: `length(dpdx(d), dpdy(d))`
+      is about one physical pixel in logical units near an edge; pass the
+      scale in `Globals` instead. `fwidth(d)` would be shader-only but
+      softer on diagonals. Marginal.
+- [ ] Glyph/path coverage (`ray_coverage`, two rays per pixel) has no
+      shader-only win left: it already stops at curves behind the pixel.
+      Further gains need data changes (half-precision curves, more bands
+      for large paths such as map tiles, which are likely loop-bound).
+
 ## Tooling
 
 - [x] One file per widget example: `site/examples/<name>.rs` is the site's
