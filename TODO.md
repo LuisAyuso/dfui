@@ -193,7 +193,61 @@ Theming:
 ## Findings from a third app
 
 From building busapp (Innsbruck bus departures and a trip planner on
-Android: stop search, live departures, line badges in IVB colors).
+Android: stop search, live departures, line badges in IVB colors, a
+force-laid-out line network, per-line stop lists and an OSM map).
+
+Bugs found and fixed:
+
+- [x] Crash leaving a page whose dropdown had been open (taffy 0.15 hoisted
+      list, see Layout above). Not yet reported to taffy.
+
+Patterns the app hand-rolled that belong in dfui:
+
+- [ ] Page scaffold: a title row with a back arrow wired to `on_back`, or a
+      menu button opening a `drawer`, then the body. busapp (`page`,
+      `page_with`, three bars drawn with containers) and names (Lucide menu
+      and arrow-left icons) both build it; dfui ships only `close.path`.
+- [ ] Polled sources: a fetch repeated on a schedule (refresh, retry on
+      error), stopped when its builder goes away, with a "still wanted"
+      check a long fetch can poll; plus a `Latest<T>` collector so
+      `stream_builder` keeps only the newest item. Every networked screen
+      in busapp needed both.
+- [ ] Results that outlive their node: `future_builder` state goes with the
+      row, so a row scrolled away and back fetches again. busapp keeps a
+      `thread_local` map in front of each fetch (`stop_lines`); a keyed
+      cache builder would cover it.
+- [ ] `Path::stroke` for polylines in core: the network view builds a quad
+      per segment by hand, `dfui-map` has its own stroke with caps and
+      bevels, `progress.rs` a third.
+- [ ] Custom widget ergonomics: `cx.state.get()` holds a borrow of the
+      whole `EventCx`, so `cx.capture()` and `cx.request_redraw()` can't be
+      called while the state is in use; the network view returns flags from
+      a helper instead. Something like `cx.with_state(|s, cx| ..)`, and a
+      standard callback type for widgets that report a pick.
+- [ ] Public headless test driver: the dropdown crash was reproduced by
+      tapping through real screens with `Bench` (`event`, `advance`,
+      `shot`), but it is `#[doc(hidden)]`, has no system-bar insets (taps
+      needed a −24 px offset against the device) and takes raw pointer
+      events. A `tap(x, y)` with device-like insets, together with the
+      `snapshot` item under Testing.
+- [ ] Label placement: busiest first, right of the point or else left,
+      dropped if it would overlap a placed one, so more show when zoomed
+      in. The network view does it; `dfui-map`'s street labels face the
+      same problem.
+- [ ] Android location and permissions: busapp's `gps.rs` asks for the
+      permission and keeps the providers updating through a `PendingIntent`
+      nobody receives (no Java class), reading the newest fix once a
+      second. A `dfui::android` helper would save the JNI.
+- [ ] arm64 builds crash on x86_64 emulators when typing: the
+      `EditorView` natives are registered by raw pointer and, under
+      Berberis translation, ART calls the arm64 code as x86
+      (SIGSEGV in `commitText`). Investigate; at least tell apps in the
+      README's Android section to build `x86_64-linux-android` for the
+      emulator.
+- [ ] Release template: names and busapp share a workflow (tag → tests →
+      signed `cargo apk build --release` → GitHub release, keystore in
+      secrets). Document it in dfui's README or ship it as a template;
+      covers "Release signing config" under Tooling.
 
 Layout and widgets:
 
@@ -422,7 +476,8 @@ repeated on the phone; lists and text input have no bench.
 - [x] Integration tests of usual app patterns, driven by input events
       (`tests/patterns.rs`).
 - [ ] Fold the demo's `#[ignore]` snapshot tests into the goldens.
-- [ ] Release signing config for real distribution (debug keystore via
-      `CARGO_APK_RELEASE_KEYSTORE` today).
+- [ ] Release signing config for real distribution: apps sign in CI with
+      `CARGO_APK_RELEASE_KEYSTORE` from secrets (see "Release template"
+      under the third app's findings).
 - [ ] cargo-apk is deprecated and capped at NDK platform 35; evaluate
       xbuild or cargo-ndk + Gradle.
