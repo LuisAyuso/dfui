@@ -146,6 +146,9 @@ pub enum Layer {
     Parent,
     /// The window, inside the system bars, e.g. a dialog or drawer.
     Window,
+    /// The whole screen, under the system bars too, e.g. a map behind
+    /// translucent bars. Pad what must stay clear by [`crate::insets`].
+    Screen,
 }
 
 /// Primitive building block. Composite widgets are plain functions returning

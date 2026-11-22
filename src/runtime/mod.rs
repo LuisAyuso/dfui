@@ -28,6 +28,17 @@ mod focus;
 // TIMERS is already const; clippy misfires on Android's thread_local expansion.
 #[allow(clippy::missing_const_for_thread_local)]
 pub(crate) mod task;
+thread_local! {
+    static INSETS: std::cell::Cell<Insets> = const { std::cell::Cell::new([0.0; 4]) };
+}
+
+/// The system bars' insets over the window, logical px: top, right, bottom,
+/// left. For content in a [`Layer::Screen`](crate::Layer::Screen) layer to
+/// pad itself clear of them; views rebuild when they change.
+pub fn insets() -> [f32; 4] {
+    INSETS.get()
+}
+
 /// Tells the user why there's no UI, in the page on the web; elsewhere exits.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn startup_failed(reason: &str) -> ! {
@@ -324,8 +335,14 @@ impl<A: App> Runtime<A> {
             return;
         };
         let s = r.window().scale() * self.zoom;
-        self.insets = android::insets(a).map(|v| v as f32 / s);
-        log::info!("insets {:?}", self.insets);
+        let insets = android::insets(a).map(|v| v as f32 / s);
+        if insets != self.insets {
+            self.insets = insets;
+            INSETS.set(insets);
+            // Views may pad by them.
+            self.rebuild_due = true;
+            log::info!("insets {:?}", self.insets);
+        }
     }
 
     #[cfg(not(target_os = "android"))]

@@ -110,6 +110,23 @@ pub fn overlay(child: impl Into<Element>) -> Overlay {
     layer(Layer::Window, column_style(), column_style(), child.into())
 }
 
+/// Covers the whole screen, system bars included; place `child` in it with
+/// `align` and `justify`, and pad it by [`crate::insets`] to keep its
+/// content clear of the bars.
+pub fn screen(child: impl Into<Element>) -> Overlay {
+    layer(Layer::Screen, column_style(), column_style(), child.into())
+}
+
+/// Fills the whole screen with `child`, system bars included, under the
+/// layers that come after it, e.g. a map below translucent bars.
+pub fn backdrop(child: impl Into<Element>) -> Overlay {
+    let fill = Style {
+        flex_grow: 1.0,
+        ..column_style()
+    };
+    layer(Layer::Screen, column_style(), fill, child.into())
+}
+
 /// Floats `child` just below its parent, at least as wide.
 pub fn popup(child: impl Into<Element>) -> Overlay {
     let mut sink = beside(false);

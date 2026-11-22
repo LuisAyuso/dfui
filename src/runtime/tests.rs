@@ -728,6 +728,36 @@ impl App for LayersApp {
     }
 }
 
+struct ScreenApp;
+
+impl App for ScreenApp {
+    fn view(&self) -> Element {
+        column([
+            crate::widgets::screen(column([]).height(10.0)).into(),
+            crate::widgets::overlay(column([]).height(10.0)).into(),
+            crate::widgets::backdrop(column([]).grow(1.0)).into(),
+        ])
+        .into()
+    }
+}
+
+#[test]
+fn screen_layers_reach_under_the_bars() {
+    let mut rt = Runtime::new(ScreenApp);
+    rt.viewport = (200.0, 200.0);
+    rt.insets = [20.0, 0.0, 10.0, 0.0];
+    rt.relayout();
+    // Pre-order: column, screen, its sink, content, overlay, sink, content.
+    assert_eq!(rt.placed[1].rect, Rect::new(0.0, 0.0, 200.0, 200.0));
+    assert_eq!(rt.placed[4].rect, Rect::new(0.0, 20.0, 200.0, 170.0));
+    assert_eq!(rt.placed[3].rect.h, 10.0, "screen content hugs itself");
+    assert_eq!(
+        rt.placed[9].rect,
+        Rect::new(0.0, 0.0, 200.0, 200.0),
+        "backdrop fills"
+    );
+}
+
 #[test]
 fn layers_float_above_and_take_input_first() {
     let mut rt = Runtime::new(LayersApp);

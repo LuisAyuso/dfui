@@ -325,6 +325,9 @@ Testing:
       in under a per-frame budget, coarser levels standing in. 8–12 ms GPU
       frames on the Pixel. Next: golden tests, labels stored as text,
       fling after a pan.
+- [x] Full-screen layers: `screen` and `backdrop` cover the system bars
+      too, content padding itself by `insets()`; the bus app's map runs
+      under translucent bars.
 - [x] Kinetic scrolling: a released drag flings with exponential friction,
       stopping at the edges; re-placed per frame via `request_placement`.
 - [ ] Horizontal scroll; overscroll bounce/glow.

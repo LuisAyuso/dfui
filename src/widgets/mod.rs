@@ -52,8 +52,8 @@ pub use image::{Image, image};
 pub use label::{Label, text};
 pub use list::{List, list};
 pub use overlay::{
-    Dropdown, OnBack, OnKey, Overlay, Overlays, Shown, bottom_sheet, dialog, drawer, dropdown,
-    on_back, on_key, overlay, overlays, popup, snackbar, tooltip,
+    Dropdown, OnBack, OnKey, Overlay, Overlays, Shown, backdrop, bottom_sheet, dialog, drawer,
+    dropdown, on_back, on_key, overlay, overlays, popup, screen, snackbar, tooltip,
 };
 pub use progress::{Progress, Spinner, progress, spinner, stacked_progress, wait_bar};
 pub use provide::{Provide, provide};

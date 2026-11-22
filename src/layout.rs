@@ -241,12 +241,12 @@ impl Layout {
             }
             if let (Some(l), true) = (nodes[i].w.layer(), i > 0) {
                 let at = match l {
-                    Layer::Parent => [0.0; 4],
+                    Layer::Parent | Layer::Screen => [0.0; 4],
                     Layer::Window => insets,
                 };
                 style.position = match l {
                     Layer::Parent => Position::Absolute,
-                    Layer::Window => Position::Fixed,
+                    Layer::Window | Layer::Screen => Position::Fixed,
                 };
                 style.inset = taffy::Rect {
                     top: LengthPercentageAuto::length(at[0]),
@@ -390,7 +390,7 @@ pub(crate) fn place(
                 };
                 ((anchor.x, anchor.y), clip)
             }
-            (Some(_), Some(Layer::Window)) => {
+            (Some(_), Some(Layer::Window | Layer::Screen)) => {
                 let w = placed[0].rect;
                 ((w.x, w.y), w)
             }
