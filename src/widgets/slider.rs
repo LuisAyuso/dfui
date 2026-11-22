@@ -8,9 +8,7 @@ use crate::anim::{Animated, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::text::Text;
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, Focus, Key, PaintCx, Widget};
-
-type OnChange = Box<dyn Fn(&mut EventCx, f32)>;
+use crate::widget::{Element, Event, EventCx, Focus, Key, OnChange, PaintCx, Widget};
 
 const THUMB: f32 = 22.0;
 /// Thumb scale while dragged.
@@ -29,7 +27,7 @@ pub struct Slider {
     value: f32,
     range: RangeInclusive<f32>,
     accent: Ink,
-    on_change: Option<OnChange>,
+    on_change: Option<OnChange<f32>>,
     style: Style,
 }
 

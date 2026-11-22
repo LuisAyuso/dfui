@@ -203,27 +203,27 @@ Bugs found and fixed:
 
 Patterns the app hand-rolled that belong in dfui:
 
-- [ ] Page scaffold: a title row with a back arrow wired to `on_back`, or a
-      menu button opening a `drawer`, then the body. busapp (`page`,
-      `page_with`, three bars drawn with containers) and names (Lucide menu
-      and arrow-left icons) both build it; dfui ships only `close.path`.
-- [ ] Polled sources: a fetch repeated on a schedule (refresh, retry on
-      error), stopped when its builder goes away, with a "still wanted"
-      check a long fetch can poll; plus a `Latest<T>` collector so
-      `stream_builder` keeps only the newest item. Every networked screen
-      in busapp needed both.
-- [ ] Results that outlive their node: `future_builder` state goes with the
-      row, so a row scrolled away and back fetches again. busapp keeps a
-      `thread_local` map in front of each fetch (`stop_lines`); a keyed
-      cache builder would cover it.
-- [ ] `Path::stroke` for polylines in core: the network view builds a quad
-      per segment by hand, `dfui-map` has its own stroke with caps and
-      bevels, `progress.rs` a third.
-- [ ] Custom widget ergonomics: `cx.state.get()` holds a borrow of the
-      whole `EventCx`, so `cx.capture()` and `cx.request_redraw()` can't be
-      called while the state is in use; the network view returns flags from
-      a helper instead. Something like `cx.with_state(|s, cx| ..)`, and a
-      standard callback type for widgets that report a pick.
+- [x] Page scaffold: `page(title).back(f)` / `.menu(f)` puts an arrow
+      (also run by Escape and Android back) or a menu button before the
+      title, then the body; `heading` for the title text. `dfui::icons` has
+      `menu`, `back` and `close`, stroked in code. `on_back`/`on_key` take no
+      layout space, so they no longer add a gap where they're placed.
+- [x] Polled sources: `polled(fetch, again)` streams a fetch repeated after
+      the delay `again` picks per result; `blocking(work)` runs `work` on a
+      thread with a `Wanted` check it can poll once nobody waits (not on
+      the web); `Latest<T>` keeps a stream's newest item.
+- [x] Results that outlive their node: `cached(&cache, key, fetch, build)`
+      builds from a `Cache<K, V>` hit, or fetches once and stores the value
+      (failures aren't stored).
+- [x] Polyline strokes in core: `path::stroke(points, Stroke)` (polygons,
+      for callers that clip them) and `Path::stroke`; square or round caps,
+      bevelled bends. `dfui-map` uses it. The spinner keeps its own: a
+      curved spiral of varying width.
+- [x] Custom widget ergonomics: `EventCx::with_state` and
+      `PaintCx::with_state` lend the state and the context together; a
+      public `OnChange<T>` replaces the four private copies, for custom
+      widgets that report a value. A closure stored in a variable before
+      `future_builder`/`cached` still needs `|_: Scope|` spelled out.
 - [ ] Public headless test driver: the dropdown crash was reproduced by
       tapping through real screens with `Bench` (`event`, `advance`,
       `shot`), but it is `#[doc(hidden)]`, has no system-bar insets (taps

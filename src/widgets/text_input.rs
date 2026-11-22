@@ -12,11 +12,9 @@ use super::Styled;
 use crate::render::Rect;
 use crate::text::{Font, Text};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, Focus, Key, Keyboard, PaintCx, Widget};
+use crate::widget::{Element, Event, EventCx, Focus, Key, Keyboard, OnChange, PaintCx, Widget};
 
 use super::button::Handler;
-
-type OnChange = Box<dyn Fn(&mut EventCx, String)>;
 
 /// Caret and selection anchor in chars, always on grapheme boundaries; the
 /// selection is the range between them.
@@ -43,7 +41,7 @@ pub struct TextInput {
     color: Ink,
     accent: Ink,
     keyboard: Keyboard,
-    on_change: Option<OnChange>,
+    on_change: Option<OnChange<String>>,
     on_submit: Option<Handler>,
     style: Style,
 }

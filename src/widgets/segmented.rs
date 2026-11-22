@@ -10,9 +10,7 @@ use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::text::{Font, Text};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, Focus, Key, PaintCx, Widget};
-
-type OnChange = Box<dyn Fn(&mut EventCx, usize)>;
+use crate::widget::{Element, Event, EventCx, Focus, Key, OnChange, PaintCx, Widget};
 
 const SLIDE: Duration = Duration::from_millis(200);
 /// Regular to bold and back, for tab labels.
@@ -55,7 +53,7 @@ pub struct Segmented {
     selected: usize,
     look: Look,
     accent: Ink,
-    on_change: Option<OnChange>,
+    on_change: Option<OnChange<usize>>,
     style: Style,
 }
 

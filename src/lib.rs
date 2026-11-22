@@ -1,6 +1,7 @@
 //! Declarative UI framework that draws shapes, text and icons analytically in one wgpu shader.
 
 pub mod anim;
+pub mod icons;
 pub mod kinetic;
 mod layout;
 pub mod model;
@@ -8,6 +9,7 @@ mod outline;
 pub mod path;
 mod render;
 mod runtime;
+pub mod source;
 mod text;
 mod theme;
 mod widget;
@@ -17,6 +19,9 @@ pub use anim::Animated;
 pub use path::{Path, Shape};
 pub use render::{Bitmap, Color, Pixels, Rect, Shadow};
 pub use runtime::task::{Notifier, Sleep, sleep};
+pub use source::{Cache, Latest, cached, polled};
+#[cfg(not(target_arch = "wasm32"))]
+pub use source::{Wanted, blocking};
 // Hooks for the benches and golden tests, outside the semver guarantee.
 #[doc(hidden)]
 pub use runtime::{Bench, GpuBench, insets, snapshot};
@@ -26,8 +31,8 @@ pub use text::{Font, Text, TextLayout};
 pub use theme::{Ink, Role, Theme};
 pub use web_time::Instant;
 pub use widget::{
-    BuildCx, Element, Event, EventCx, Focus, Handle, Key, Keyboard, Layer, PaintCx, Placement,
-    Scope, State, Widget,
+    BuildCx, Element, Event, EventCx, Focus, Handle, Key, Keyboard, Layer, OnChange, PaintCx,
+    Placement, Scope, State, Widget,
 };
 
 // Compiles the README's examples as doc tests without publishing it as docs.

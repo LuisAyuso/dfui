@@ -267,6 +267,10 @@ impl<S> Copy for Handle<S> {}
 
 pub(crate) type Update = (u64, Box<dyn FnOnce(&mut State)>);
 
+/// A handler for the value a widget reports (a toggle's state, a slider's
+/// value, a picked index), as widgets with an `on_change` store it.
+pub type OnChange<T> = Box<dyn Fn(&mut EventCx, T)>;
+
 /// Values provided by ancestors (`provide`), innermost last.
 #[derive(Clone, Copy)]
 pub struct Scope<'a>(pub(crate) &'a [&'a dyn Any]);
@@ -302,6 +306,19 @@ pub struct PaintCx<'a> {
 }
 
 impl PaintCx<'_> {
+    /// `f` with this widget's state and the context together, which
+    /// `cx.state.get()` can't give: its borrow blocks every `cx` method.
+    /// `cx.state` reads as empty inside `f`.
+    pub fn with_state<T: Default + 'static, R>(
+        &mut self,
+        f: impl FnOnce(&mut T, &mut Self) -> R,
+    ) -> R {
+        let mut taken = std::mem::take(&mut *self.state);
+        let r = f(taken.get(), self);
+        *self.state = taken;
+        r
+    }
+
     /// `ink` in this widget's theme.
     pub fn color(&self, ink: impl Into<crate::Ink>) -> Color {
         match ink.into() {
@@ -492,6 +509,19 @@ pub struct EventCx<'a> {
 }
 
 impl EventCx<'_> {
+    /// `f` with this widget's state and the context together, e.g. to
+    /// update a drag and `capture` the pointer; `cx.state.get()` can't, as
+    /// its borrow blocks every `cx` method. `cx.state` reads as empty inside `f`.
+    pub fn with_state<T: Default + 'static, R>(
+        &mut self,
+        f: impl FnOnce(&mut T, &mut Self) -> R,
+    ) -> R {
+        let mut taken = std::mem::take(&mut *self.state);
+        let r = f(taken.get(), self);
+        *self.state = taken;
+        r
+    }
+
     pub fn hit(&self, x: f32, y: f32) -> bool {
         self.rect.contains(x, y) && self.clip.contains(x, y)
     }

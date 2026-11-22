@@ -19,7 +19,7 @@ use crate::widget::{
 };
 
 use super::button::Handler;
-type OnChange = Rc<dyn Fn(&mut EventCx, usize)>;
+type OnPick = Rc<dyn Fn(&mut EventCx, usize)>;
 type Build = Rc<dyn Fn(Shown) -> Overlay>;
 
 /// Slide and scrim fade, in and out.
@@ -612,7 +612,18 @@ impl From<OnBack> for Element {
     }
 }
 
+/// Takes no space and no gap: it only listens.
+fn listener() -> Style {
+    Style {
+        position: Position::Absolute,
+        ..Style::default()
+    }
+}
+
 impl Widget for OnBack {
+    fn style(&self) -> Style {
+        listener()
+    }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
         if let Event::Back = ev {
             (self.0)(cx);
@@ -641,6 +652,9 @@ impl From<OnKey> for Element {
 }
 
 impl Widget for OnKey {
+    fn style(&self) -> Style {
+        listener()
+    }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
         if let Event::Key(k) = ev {
             (self.0)(cx, *k);
@@ -664,7 +678,7 @@ pub fn tooltip(child: impl Into<Element>, tip: impl Into<String>) -> Container {
 pub struct Dropdown {
     labels: Vec<String>,
     selected: usize,
-    on_change: Option<OnChange>,
+    on_change: Option<OnPick>,
 }
 
 /// A dropdown over `labels` showing `labels[selected]`; the menu floats below it.
@@ -692,7 +706,7 @@ impl From<Dropdown> for Element {
             selected,
             on_change,
         } = d;
-        let on_change: OnChange = on_change.unwrap_or_else(|| Rc::new(|_, _| {}));
+        let on_change: OnPick = on_change.unwrap_or_else(|| Rc::new(|_, _| {}));
         stateful(move |&open: &bool, h| {
             let set =
                 move |v: bool| move |cx: &mut EventCx| cx.update(h, move |o: &mut bool| *o = v);

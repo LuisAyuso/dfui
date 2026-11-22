@@ -5,11 +5,16 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use dfui::model::Keyed;
+use dfui::taffy::{Dimension, Size, Style};
 use dfui::widgets::{
-    Overlays, Styled, button, column, dialog, dropdown, future_builder, list, on_back, overlays,
-    row, scroll, stateful, stateful_with, text, text_input, watch,
+    Overlays, Styled, button, column, dialog, dropdown, future_builder, heading, list, on_back,
+    overlays, page, row, scroll, stateful, stateful_with, text, text_input, watch,
 };
-use dfui::{App, Bench, Element, Event, EventCx, Handle, Notifier, sleep};
+use dfui::widgets::{Snapshot, stream_builder};
+use dfui::{
+    App, Bench, Cache, Element, Event, EventCx, Handle, Latest, Notifier, Widget, blocking, cached,
+    polled, sleep,
+};
 
 thread_local! {
     static LOG: RefCell<Vec<String>> = RefCell::default();
@@ -261,6 +266,158 @@ fn scroll_position_survives_a_rebuild() {
     tap(&mut b, 20.0, 20.0);
     tap(&mut b, 20.0, 20.0);
     assert_eq!(logged(), ["row 10", "row 10"]);
+}
+
+#[test]
+fn polled_source_refreshes_on_its_schedule_then_stops() {
+    let mut b = run(
+        || {
+            let mut n = 0;
+            let source = polled(
+                move || {
+                    n += 1;
+                    let v = n;
+                    async move { v }
+                },
+                |&v: &u32| (v < 3).then_some(Duration::from_secs(10)),
+            );
+            stream_builder(
+                (),
+                |_| source,
+                |s: &Snapshot<Latest<u32>>| {
+                    log(format!("{:?} {}", s.data.get(), s.done));
+                    text("x")
+                },
+            )
+            .into()
+        },
+        (200.0, 100.0),
+    );
+    b.advance(Duration::from_millis(1));
+    assert_eq!(logged().last().unwrap(), "Some(1) false");
+    b.advance(Duration::from_secs(9));
+    assert_eq!(logged(), Vec::<String>::new(), "waits between fetches");
+    b.advance(Duration::from_secs(2));
+    assert_eq!(logged().last().unwrap(), "Some(2) false");
+    b.advance(Duration::from_secs(11));
+    b.settle();
+    assert_eq!(logged().last().unwrap(), "Some(3) true");
+}
+
+#[test]
+fn blocking_work_resolves_on_the_ui_thread() {
+    let mut b = run(
+        || {
+            future_builder(
+                (),
+                |_| blocking(|_| 6 * 7),
+                |s| {
+                    log(format!("{:?}", s.data));
+                    text("x")
+                },
+            )
+            .into()
+        },
+        (200.0, 100.0),
+    );
+    for _ in 0..200 {
+        if logged().iter().any(|l| l == "Some(42)") {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+        b.advance(Duration::from_millis(5));
+    }
+    panic!("never resolved");
+}
+
+#[test]
+fn cached_results_survive_their_node() {
+    let fetches = Rc::new(RefCell::new(0));
+    let cache: Cache<u32, String> = Cache::new();
+    let shown = Rc::new(RefCell::new(true));
+    let (f, c, s) = (fetches.clone(), cache.clone(), shown.clone());
+    let mut b = run(
+        move || {
+            if !*s.borrow() {
+                return column([]).into();
+            }
+            let f = f.clone();
+            cached(
+                &c,
+                7,
+                move |_| {
+                    *f.borrow_mut() += 1;
+                    async { Some("seven".to_string()) }
+                },
+                |v| {
+                    log(format!("{v:?}"));
+                    text("x")
+                },
+            )
+        },
+        (200.0, 100.0),
+    );
+    b.advance(Duration::from_millis(1));
+    assert_eq!(logged().last().unwrap(), "Some(\"seven\")");
+    *shown.borrow_mut() = false;
+    b.frame();
+    *shown.borrow_mut() = true;
+    b.frame();
+    assert_eq!(logged().last().unwrap(), "Some(\"seven\")");
+    assert_eq!(*fetches.borrow(), 1, "built from the cache the second time");
+}
+
+/// Counts presses in its own state and follows the pointer it captured.
+struct Presses;
+
+impl Widget for Presses {
+    fn style(&self) -> Style {
+        Style {
+            size: Size {
+                width: Dimension::length(50.0),
+                height: Dimension::length(50.0),
+            },
+            ..Style::default()
+        }
+    }
+
+    fn event(&self, ev: &Event, cx: &mut EventCx) {
+        match ev {
+            Event::PointerDown { .. } => cx.with_state(|n: &mut u32, cx| {
+                *n += 1;
+                cx.capture();
+                log(format!("down {n}"));
+            }),
+            Event::PointerMove { x, .. } if !cx.hit(*x, 10.0) => log("moved outside"),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn custom_widget_keeps_state_and_captures_in_one_handler() {
+    let mut b = run(|| column([Element::new(Presses)]).into(), (200.0, 100.0));
+    for _ in 0..2 {
+        b.event(Event::PointerDown { x: 10.0, y: 10.0 });
+        b.event(Event::PointerMove { x: 150.0, y: 10.0 });
+        b.event(Event::PointerUp { x: 150.0, y: 10.0 });
+    }
+    assert_eq!(
+        logged(),
+        ["down 1", "moved outside", "down 2", "moved outside"]
+    );
+}
+
+#[test]
+fn page_back_arrow_and_back_key_run_the_same_handler() {
+    let mut b = run(
+        || page(heading("Linie 3")).back(|_| log("back")).into(),
+        (200.0, 100.0),
+    );
+    b.event(Event::Back);
+    // The arrow: 16 px page padding plus half the 44 px icon button.
+    tap(&mut b, 38.0, 38.0);
+    assert_eq!(logged(), ["back", "back"]);
 }
 
 #[test]

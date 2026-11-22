@@ -9,8 +9,8 @@ use dfui::anim::Morph;
 use dfui::taffy::{AvailableSpace, Size};
 use dfui::widgets::{
     Overlay, Shown, Styled, badge, bottom_sheet, button, chip, choice_chip, column, container,
-    dialog, drawer, dropdown, icon, icon_button, image, overlays, progress, provide, radio, row,
-    scroll, segmented, slider, snackbar, spacer, spinner, stacked_progress, stateful,
+    dialog, drawer, dropdown, heading, icon, icon_button, image, overlays, page, progress, provide,
+    radio, row, scroll, segmented, slider, snackbar, spacer, spinner, stacked_progress, stateful,
     stateful_with, tabs, text, text_input, toggle, tooltip, wait_bar,
 };
 use dfui::{
@@ -399,6 +399,26 @@ fn snackbar_shows_then_leaves() {
     b.settle();
     frames.push(b.image(SCALE));
     check("snackbar", &strip(&frames));
+}
+
+#[test]
+fn page_headers() {
+    let back = bench(
+        || {
+            page(heading("Linie 3"))
+                .back(|_| {})
+                .child(text("Stops"))
+                .into()
+        },
+        (300.0, 110.0),
+    )
+    .image(SCALE);
+    let menu = bench(
+        || page(heading("Innsbruck Bus")).menu(|_| {}).into(),
+        (300.0, 110.0),
+    )
+    .image(SCALE);
+    check("page_headers", &strip(&[back, menu]));
 }
 
 #[test]

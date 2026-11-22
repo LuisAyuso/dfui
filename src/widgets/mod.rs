@@ -26,6 +26,7 @@ mod image;
 mod label;
 mod list;
 mod overlay;
+mod page;
 mod progress;
 mod provide;
 mod radio;
@@ -55,6 +56,7 @@ pub use overlay::{
     Dropdown, OnBack, OnKey, Overlay, Overlays, Shown, backdrop, bottom_sheet, dialog, drawer,
     dropdown, on_back, on_key, overlay, overlays, popup, screen, snackbar, tooltip,
 };
+pub use page::{Page, heading, page};
 pub use progress::{Progress, Spinner, progress, spinner, stacked_progress, wait_bar};
 pub use provide::{Provide, provide};
 pub use radio::{Radio, radio};

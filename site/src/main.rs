@@ -40,6 +40,7 @@ const WIDGETS: &[&str] = &[
     "drawer",
     "bottom_sheet",
     "snackbar",
+    "page",
     "on_back",
     "on_key",
 ];

@@ -7,9 +7,7 @@ use super::button::Tap;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect, Shadow};
 use crate::theme::{Ink, Role};
-use crate::widget::{Element, Event, EventCx, Focus, PaintCx, Widget};
-
-type OnChange = Box<dyn Fn(&mut EventCx, bool)>;
+use crate::widget::{Element, Event, EventCx, Focus, OnChange, PaintCx, Widget};
 
 const SLIDE: Duration = Duration::from_millis(160);
 
@@ -24,7 +22,7 @@ struct ToggleState {
 pub struct Toggle {
     on: bool,
     accent: Ink,
-    on_change: Option<OnChange>,
+    on_change: Option<OnChange<bool>>,
     style: Style,
 }
 

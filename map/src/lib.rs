@@ -10,7 +10,7 @@ use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
 
-use dfui::path::{Point, Quad};
+use dfui::path::{CAP_STEPS, Point, Quad, Stroke, stroke};
 use dfui::taffy::{Dimension, Size, Style};
 use dfui::widgets::Styled;
 use dfui::{
@@ -26,8 +26,6 @@ const MIN_CELL: f32 = 16.0;
 /// while it is half a px or more: from 0.25 px per metre.
 const MARGIN: f32 = 2.0;
 const EARTH_RADIUS: f64 = 6_371_000.0;
-/// Edges of a half-disk line cap; flattening stays under 2% of the width.
-const CAP_STEPS: usize = 8;
 /// Font size, logical px, at which a label starts to show.
 const MIN_LABEL_PX: f32 = 7.0;
 /// Least screen distance between labels with the same text, logical px.
@@ -86,6 +84,18 @@ struct Run {
     caps: [bool; 2],
     /// Fill the outside of each bend.
     bevels: bool,
+}
+
+impl Run {
+    /// The line as outlines, see [`stroke`].
+    fn stroke(&self) -> Vec<Vec<Point>> {
+        let style = Stroke {
+            width: self.width,
+            caps: self.caps,
+            bevels: self.bevels,
+        };
+        stroke(&self.points, style)
+    }
 }
 
 /// One of a [`MapBuilder`]'s layers.
@@ -380,61 +390,6 @@ fn orient(mut ring: Vec<Point>, outer: bool) -> Option<Vec<Point>> {
     Some(ring)
 }
 
-/// The run as outlines: a rectangle per segment, a triangle filling the
-/// outside of each bend and half-disk caps. They're all wound positive, so
-/// overlaps fill as one.
-fn stroke(run: &Run, out: &mut Vec<Vec<Point>>) {
-    let h = run.width / 2.0;
-    let normal = |a: Point, b: Point| {
-        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
-        let len = dx.hypot(dy);
-        (len > 0.0).then(|| [-dy / len * h, dx / len * h])
-    };
-    let add = |p: Point, n: Point, s: f32| [p[0] + n[0] * s, p[1] + n[1] * s];
-    let pts = &run.points;
-    let n = pts.len();
-    if n < 2 {
-        return;
-    }
-    // Round caps: OSM splits roads into ways that meet at any angle.
-    let ends = [(pts[0], pts[1]), (pts[n - 1], pts[n - 2])];
-    for ((a, b), _) in ends.into_iter().zip(run.caps).filter(|(_, c)| *c) {
-        let (dx, dy) = (a[0] - b[0], a[1] - b[1]);
-        let k = h / dx.hypot(dy);
-        let (ux, uy) = (dx * k, dy * k);
-        let cap = (0..=CAP_STEPS)
-            .map(|i| {
-                let t = std::f32::consts::PI * (i as f32 / CAP_STEPS as f32 - 0.5);
-                let (s, c) = t.sin_cos();
-                [a[0] + ux * c - uy * s, a[1] + uy * c + ux * s]
-            })
-            .collect();
-        out.extend(orient(cap, true));
-    }
-    let mut last: Option<Point> = None;
-    for w in pts.windows(2) {
-        let Some(n) = normal(w[0], w[1]) else {
-            continue;
-        };
-        let quad = vec![
-            add(w[0], n, 1.0),
-            add(w[1], n, 1.0),
-            add(w[1], n, -1.0),
-            add(w[0], n, -1.0),
-        ];
-        out.extend(orient(quad, true));
-        // Only the outside of a bend has a notch; the inside is covered.
-        if let Some(m) = last.filter(|_| run.bevels) {
-            let turn = m[0] * n[1] - m[1] * n[0];
-            if turn != 0.0 {
-                let s = -turn.signum();
-                out.extend(orient(vec![w[0], add(w[0], m, s), add(w[0], n, s)], true));
-            }
-        }
-        last = Some(n);
-    }
-}
-
 /// Twice the ring's area, positive when it winds clockwise on screen (y down).
 fn signed_area(ring: &[Point]) -> f32 {
     let n = ring.len();
@@ -625,7 +580,7 @@ impl Geometry {
     fn path(&self, margin: Rect) -> Path {
         let mut stroked = Vec::new();
         for r in &self.runs {
-            stroke(r, &mut stroked);
+            stroked.extend(r.stroke());
         }
         let cut = stroked.iter().filter_map(|r| clip(r, margin));
         let rings = self.rings.iter().cloned().chain(cut);
@@ -1388,7 +1343,7 @@ mod tests {
             .collect();
         assert_eq!(signs, [true, false]);
         let mut stroked = Vec::new();
-        stroke(&b.layers[0].lines[0], &mut stroked);
+        stroked.extend(b.layers[0].lines[0].stroke());
         // Two caps, two segments and a bevel outside the bend.
         assert_eq!(stroked.len(), 5);
         assert!(stroked.iter().all(|r| signed_area(r) > 0.0));
@@ -1426,9 +1381,9 @@ mod tests {
             "every end is a cut"
         );
         let (mut whole, mut cut) = (Vec::new(), Vec::new());
-        stroke(&run, &mut whole);
+        whole.extend(run.stroke());
         for p in &pieces {
-            stroke(p, &mut cut);
+            cut.extend(p.stroke());
         }
         let cut: Vec<_> = cut.iter().filter_map(|r| clip(r, margin)).collect();
         for i in 0..60 {
