@@ -38,6 +38,8 @@ pub(crate) struct Gpu {
     /// uploads to whichever device came before, e.g. across an Android resume.
     empty: bool,
     timer: Option<GpuTimer>,
+    /// What scenes are drawn into before [`Present`] puts them on screen.
+    canvas_format: wgpu::TextureFormat,
 }
 
 /// Measures GPU time of the render pass with timestamp queries, one sample in flight.
@@ -46,6 +48,8 @@ struct GpuTimer {
     resolve: wgpu::Buffer,
     read: wgpu::Buffer,
     busy: bool,
+    /// A draw wrote the start time; the next present writes the end.
+    began: bool,
     mapped: Arc<AtomicBool>,
     last_ns: f32,
 }
@@ -75,6 +79,7 @@ impl GpuTimer {
                 wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             ),
             busy: false,
+            began: false,
             mapped: Arc::new(AtomicBool::new(false)),
             last_ns: 0.0,
         }
@@ -121,6 +126,139 @@ static SHARED: std::sync::Mutex<Option<(wgpu::Device, wgpu::Queue)>> = std::sync
 #[cfg(not(target_arch = "wasm32"))]
 pub fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
     SHARED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+static HDR: AtomicBool = AtomicBool::new(false);
+
+/// Whether the window shows HDR now: the app asked ([`App::hdr`](crate::App::hdr))
+/// and the screen takes HDR10. Bitmap values above 1.0 are brighter than SDR
+/// white only then; otherwise they clip, so video should be tone-mapped.
+pub fn hdr() -> bool {
+    HDR.load(Ordering::Relaxed)
+}
+
+/// Half floats, so HDR content can go past SDR white and wide-gamut colors
+/// below 0, where the GPU can render and blend them; 8-bit otherwise.
+fn canvas_format(adapter: &wgpu::Adapter) -> wgpu::TextureFormat {
+    let f = adapter.get_texture_format_features(wgpu::TextureFormat::Rgba16Float);
+    let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+    match f.allowed_usages.contains(usage)
+        && f.flags.contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
+    {
+        true => wgpu::TextureFormat::Rgba16Float,
+        false => wgpu::TextureFormat::Rgba8Unorm,
+    }
+}
+
+fn canvas(gpu: &Gpu, (width, height): (u32, u32)) -> wgpu::Texture {
+    gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("canvas"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: gpu.canvas_format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
+/// Puts the canvas on screen, encoded for SDR or HDR10 (`present.wgsl`).
+struct Present {
+    pipeline: wgpu::RenderPipeline,
+    tint: wgpu::Buffer,
+    group: wgpu::BindGroup,
+}
+
+impl Present {
+    fn new(gpu: &Gpu, canvas: &wgpu::Texture, target: wgpu::TextureFormat, pq: bool) -> Present {
+        let device = &gpu.device;
+        let shader = device.create_shader_module(wgpu::include_wgsl!("../present.wgsl"));
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("present"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("present"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[("pq", f64::from(u8::from(pq)))],
+                    ..Default::default()
+                },
+                targets: &[Some(target.into())],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let tint = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tint"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let view = canvas.create_view(&Default::default());
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("present"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: tint.as_entire_binding(),
+                },
+            ],
+        });
+        Present {
+            pipeline,
+            tint,
+            group,
+        }
+    }
 }
 
 /// Uploads `rgba` (premultiplied) as a texture and binds it with `sampler`.
@@ -183,7 +321,8 @@ fn view_group(
 }
 
 impl Gpu {
-    async fn new(adapter: &wgpu::Adapter, format: wgpu::TextureFormat) -> Result<Gpu, String> {
+    async fn new(adapter: &wgpu::Adapter) -> Result<Gpu, String> {
+        let format = canvas_format(adapter);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 // Outline text needs fragment-stage storage buffers (GLES 3.1+/Vulkan/WebGPU).
@@ -356,6 +495,7 @@ impl Gpu {
             textures: HashMap::new(),
             empty: true,
             timer,
+            canvas_format: format,
         })
     }
 
@@ -491,7 +631,7 @@ impl Gpu {
                 timestamp_writes: timing.map(|t| wgpu::RenderPassTimestampWrites {
                     query_set: &t.set,
                     beginning_of_pass_write_index: Some(0),
-                    end_of_pass_write_index: Some(1),
+                    end_of_pass_write_index: None,
                 }),
                 ..Default::default()
             });
@@ -521,15 +661,62 @@ impl Gpu {
                 pass.draw(0..24, next..n);
             }
         }
+        self.queue.submit([enc.finish()]);
+        if let Some(t) = &mut self.timer
+            && !t.busy
+        {
+            t.began = true;
+        }
+    }
+
+    /// Puts the canvas into `target` through `p`, with the damage flash `tint`
+    /// (physical px) over it; ends the GPU timing a draw began.
+    fn present(
+        &mut self,
+        p: &Present,
+        target: &wgpu::TextureView,
+        tint: Option<([u32; 4], Color)>,
+    ) {
+        let (rect, color) = match tint {
+            Some((r, c)) => (r.map(|v| v as f32), c.rgba()),
+            None => ([0.0; 4], [0.0; 4]),
+        };
+        let bytes: [[f32; 4]; 2] = [rect, color];
+        self.queue
+            .write_buffer(&p.tint, 0, bytemuck::cast_slice(&bytes));
+        let timing = self.timer.as_ref().filter(|t| !t.busy && t.began);
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                timestamp_writes: timing.map(|t| wgpu::RenderPassTimestampWrites {
+                    query_set: &t.set,
+                    beginning_of_pass_write_index: None,
+                    end_of_pass_write_index: Some(1),
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&p.pipeline);
+            pass.set_bind_group(0, &p.group, &[]);
+            pass.draw(0..3, 0..1);
+        }
         if let Some(t) = timing {
             enc.resolve_query_set(&t.set, 0..2, &t.resolve, 0);
             enc.copy_buffer_to_buffer(&t.resolve, 0, &t.read, 0, 16);
         }
         self.queue.submit([enc.finish()]);
         if let Some(t) = &mut self.timer
-            && !t.busy
+            && t.began
         {
-            t.busy = true;
+            (t.busy, t.began) = (true, false);
             let mapped = t.mapped.clone();
             t.read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
                 mapped.store(r.is_ok(), Ordering::Release);
@@ -562,9 +749,14 @@ pub(crate) struct Renderer {
     config: wgpu::SurfaceConfiguration,
     gpu: Gpu,
     /// Retained frame for partial redraws; swapchain images don't keep their
-    /// contents, so we redraw damage here and copy the whole canvas out.
-    /// `None` when the surface can't be a copy destination: always full redraws.
-    canvas: Option<wgpu::Texture>,
+    /// contents, so damage is redrawn here and the whole canvas presented.
+    canvas: wgpu::Texture,
+    present: Present,
+    /// The surface's SDR format, and its HDR10 format if it has one.
+    sdr_format: wgpu::TextureFormat,
+    hdr_format: Option<wgpu::TextureFormat>,
+    /// Output is HDR10.
+    hdr: bool,
     /// Canvas contents are invalid (new or resized); next frame must be full.
     fresh: bool,
     /// `DFUI_SHOW_DAMAGE` debug overlay: frame counter cycling the tint color.
@@ -575,23 +767,6 @@ pub(crate) struct Renderer {
     zoom: f32,
     /// Last, so it's dropped after the surface drawing into it.
     window: Box<dyn Host>,
-}
-
-fn canvas(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> wgpu::Texture {
-    device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("canvas"),
-        size: wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: config.format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &config.view_formats,
-    })
 }
 
 /// `d` (logical px) rounded out to physical pixels with a 2px margin for AA
@@ -610,7 +785,12 @@ pub(super) fn scissor(d: Rect, scale: f32, (w, h): (u32, u32)) -> [u32; 4] {
 impl Renderer {
     /// Async because adapter and device requests are; on native they resolve
     /// on first poll, on the web they wait for the browser.
-    pub async fn new(instance: wgpu::Instance, window: Box<dyn Host>) -> Result<Renderer, String> {
+    /// `hdr` is the app's wish, so the first swapchain is already the right one.
+    pub async fn new(
+        instance: wgpu::Instance,
+        window: Box<dyn Host>,
+        hdr: bool,
+    ) -> Result<Renderer, String> {
         let surface = window
             .surface(&instance)
             .map_err(|e| format!("can't draw to this window: {e}"))?;
@@ -622,48 +802,60 @@ impl Renderer {
             .await
             .map_err(|e| format!("no usable GPU: {e}"))?;
         let caps = surface.get_capabilities(&adapter);
-        let format = caps
+        // The canvas holds sRGB-encoded values already, so the screen format mustn't encode again.
+        let sdr_format = caps
             .formats
             .iter()
             .copied()
             .find(|f| !f.is_srgb())
             .unwrap_or(caps.formats[0]);
-        // Blend in sRGB space like browsers do; linear blending makes AA edges look thin and stepped.
-        let view_format = format.remove_srgb_suffix();
-        let gpu = Gpu::new(&adapter, view_format).await?;
+        // 10-bit first: PQ needs the precision, and it's what TVs take.
+        let hdr_format = caps
+            .format_capabilities
+            .iter()
+            .filter(|f| f.color_spaces.contains(wgpu::SurfaceColorSpaces::BT2100_PQ))
+            .map(|f| f.format)
+            .max_by_key(|f| *f == wgpu::TextureFormat::Rgb10a2Unorm);
+        let gpu = Gpu::new(&adapter).await?;
+        log::info!(
+            "canvas {:?}, screen {sdr_format:?}, HDR10 {hdr_format:?}",
+            gpu.canvas_format
+        );
         #[cfg(not(target_arch = "wasm32"))]
         {
             *SHARED.lock().unwrap_or_else(|e| e.into_inner()) =
                 Some((gpu.device.clone(), gpu.queue.clone()));
         }
+        let hdr = hdr && hdr_format.is_some();
+        HDR.store(hdr, Ordering::Relaxed);
         let (width, height) = window.size();
-        let copyable = caps.usages.contains(wgpu::TextureUsages::COPY_DST);
+        let (format, color_space) = match hdr_format.filter(|_| hdr) {
+            Some(f) => (f, wgpu::SurfaceColorSpace::Bt2100Pq),
+            None => (sdr_format, wgpu::SurfaceColorSpace::Auto),
+        };
         let config = wgpu::SurfaceConfiguration {
-            usage: if copyable {
-                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST
-            } else {
-                wgpu::TextureUsages::RENDER_ATTACHMENT
-            },
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             width: width.max(1),
             height: height.max(1),
             present_mode: wgpu::PresentMode::AutoVsync,
             desired_maximum_frame_latency: 2,
             alpha_mode: caps.alpha_modes[0],
-            view_formats: if view_format == format {
-                vec![]
-            } else {
-                vec![view_format]
-            },
-            color_space: wgpu::SurfaceColorSpace::Auto,
+            view_formats: vec![],
+            color_space,
         };
         surface.configure(&gpu.device, &config);
-        let canvas = copyable.then(|| canvas(&gpu.device, &config));
+        let canvas = canvas(&gpu, (config.width, config.height));
+        let present = Present::new(&gpu, &canvas, format, hdr);
         Ok(Renderer {
             surface,
             config,
             gpu,
             canvas,
+            present,
+            sdr_format,
+            hdr_format,
+            hdr,
             fresh: true,
             show_damage: std::env::var_os("DFUI_SHOW_DAMAGE").map(|_| 0),
             tinted: false,
@@ -679,11 +871,38 @@ impl Renderer {
     pub fn resize(&mut self, w: u32, h: u32) {
         self.config.width = w.max(1);
         self.config.height = h.max(1);
+        self.reconfigure();
+    }
+
+    /// Applies `config` and starts over with a new canvas.
+    fn reconfigure(&mut self) {
         self.surface.configure(&self.gpu.device, &self.config);
-        if self.canvas.is_some() {
-            self.canvas = Some(canvas(&self.gpu.device, &self.config));
-            self.fresh = true;
+        self.canvas = canvas(&self.gpu, (self.config.width, self.config.height));
+        self.present = Present::new(&self.gpu, &self.canvas, self.config.format, self.hdr);
+        self.fresh = true;
+    }
+
+    /// Switches the output to HDR10 when `on` and the screen takes it, else to SDR.
+    pub fn set_hdr(&mut self, on: bool) {
+        let hdr = on && self.hdr_format.is_some();
+        if hdr == self.hdr {
+            return;
         }
+        self.hdr = hdr;
+        (self.config.format, self.config.color_space) = match hdr {
+            true => (
+                self.hdr_format.unwrap_or(self.sdr_format),
+                wgpu::SurfaceColorSpace::Bt2100Pq,
+            ),
+            false => (self.sdr_format, wgpu::SurfaceColorSpace::Auto),
+        };
+        HDR.store(hdr, Ordering::Relaxed);
+        log::info!(
+            "output: {} in {:?}",
+            if hdr { "HDR10" } else { "SDR" },
+            self.config.format
+        );
+        self.reconfigure();
     }
 
     /// GPU time of the most recently measured frame, if timestamp queries are supported.
@@ -705,9 +924,9 @@ impl Renderer {
         ];
         // Content can lie past the window edge; only what's on screen counts.
         let damage = damage.map(|d| d.intersect(&Rect::new(0.0, 0.0, viewport[0], viewport[1])));
-        // The window already shows the canvas: nothing to acquire, copy or present.
+        // The window already shows the canvas: nothing to acquire, draw or present.
         let empty = damage.is_some_and(|d| d.w <= 0.0 || d.h <= 0.0);
-        if empty && self.canvas.is_some() && !self.fresh && !self.tinted {
+        if empty && !self.fresh && !self.tinted {
             return Outcome::Idle;
         }
         let acquire = web_time::Instant::now();
@@ -726,80 +945,47 @@ impl Renderer {
             _ => return Outcome::Failed,
         };
         let waited = acquire.elapsed();
-        let view_desc = wgpu::TextureViewDescriptor {
-            format: Some(self.config.format.remove_srgb_suffix()),
-            ..Default::default()
-        };
         let (w, h) = (self.config.width, self.config.height);
         // Area actually redrawn, physical px; `None` is the whole frame.
-        let drawn = match &self.canvas {
-            None => {
-                let view = frame.texture.create_view(&view_desc);
-                self.gpu.draw(&view, viewport, scene, text, None);
-                None
-            }
-            Some(canvas) => {
-                let scissor = damage
-                    .filter(|_| !self.fresh)
-                    .map(|d| scissor(d, scale, (w, h)));
-                if scissor.is_none_or(|[_, _, sw, sh]| sw > 0 && sh > 0) {
-                    let view = canvas.create_view(&view_desc);
-                    self.gpu.draw(&view, viewport, scene, text, scissor);
-                }
-                let mut enc = self.gpu.device.create_command_encoder(&Default::default());
-                enc.copy_texture_to_texture(
-                    canvas.as_image_copy(),
-                    frame.texture.as_image_copy(),
-                    canvas.size(),
-                );
-                self.gpu.queue.submit([enc.finish()]);
-                self.fresh = false;
-                scissor
-            }
-        };
-        // Tints the swapchain image only, so the canvas stays clean and each
-        // frame shows just its own damage.
+        let drawn = damage
+            .filter(|_| !self.fresh)
+            .map(|d| scissor(d, scale, (w, h)));
+        if drawn.is_none_or(|[_, _, sw, sh]| sw > 0 && sh > 0) {
+            let view = self.canvas.create_view(&Default::default());
+            self.gpu.draw(&view, viewport, scene, text, drawn);
+        }
+        self.fresh = false;
+        // The flash goes on the screen only, so the canvas stays clean and
+        // each frame shows just its own damage.
         self.tinted = false;
+        let mut tint = None;
         if let Some(n) = &mut self.show_damage
             && drawn.is_none_or(|[_, _, dw, dh]| dw > 0 && dh > 0)
         {
             const TINTS: [u32; 4] = [0xff3b30, 0x34c759, 0x007aff, 0xffcc00];
             *n += 1;
-            let r = drawn.map_or(
-                Rect::new(0.0, 0.0, viewport[0], viewport[1]),
-                |[x, y, dw, dh]| {
-                    Rect::new(
-                        x as f32 / scale,
-                        y as f32 / scale,
-                        dw as f32 / scale,
-                        dh as f32 / scale,
-                    )
-                },
-            );
-            let mut overlay = Scene::default();
-            let tint = Color::hex(TINTS[*n % TINTS.len()]).alpha(0.3);
-            overlay.shape(r, 0.0, tint, 0.0, Color::TRANSPARENT, r);
-            let view = frame.texture.create_view(&view_desc);
-            self.gpu
-                .draw(&view, viewport, &overlay, text, Some([0, 0, w, h]));
+            let color = Color::hex(TINTS[*n % TINTS.len()]).alpha(0.3);
+            tint = Some((drawn.unwrap_or([0, 0, w, h]), color));
             // One clean follow-up frame (empty damage) so the tint only flashes.
-            // Without a canvas every frame is full, so that would loop.
-            if self.canvas.is_some() {
-                self.tinted = true;
-                self.window.request_redraw();
-            }
+            self.tinted = true;
+            self.window.request_redraw();
         }
+        let view = frame.texture.create_view(&Default::default());
+        self.gpu.present(&self.present, &view, tint);
         self.window.pre_present();
         self.gpu.queue.present(frame);
         Outcome::Presented(waited)
     }
 }
 
-/// Offscreen render target with its own device, for snapshots and benches.
+/// Offscreen render target with its own device, for snapshots and benches:
+/// scenes draw into a canvas and reach the 8-bit target through the same
+/// present pass as the screen.
 pub(crate) struct Offscreen {
     gpu: Gpu,
+    canvas: wgpu::Texture,
+    present: Present,
     target: wgpu::Texture,
-    view: wgpu::TextureView,
 }
 
 impl Offscreen {
@@ -815,7 +1001,7 @@ impl Offscreen {
             );
             let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
                 .expect("no GPU adapter");
-            pollster::block_on(Gpu::new(&adapter, format)).expect("request device")
+            pollster::block_on(Gpu::new(&adapter)).expect("request device")
         };
         let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("offscreen"),
@@ -831,8 +1017,14 @@ impl Offscreen {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let view = target.create_view(&Default::default());
-        Offscreen { gpu, target, view }
+        let canvas = canvas(&gpu, size);
+        let present = Present::new(&gpu, &canvas, format, false);
+        Offscreen {
+            gpu,
+            canvas,
+            present,
+            target,
+        }
     }
 
     #[cfg(test)]
@@ -840,6 +1032,18 @@ impl Offscreen {
         (&self.gpu.device, &self.gpu.queue)
     }
 
+    /// Presents as an HDR10 screen would get it, PQ codes in the 8-bit target.
+    #[cfg(test)]
+    pub(crate) fn hdr10(&mut self) {
+        self.present = Present::new(
+            &self.gpu,
+            &self.canvas,
+            wgpu::TextureFormat::Rgba8Unorm,
+            true,
+        );
+    }
+
+    /// Draws into the canvas; [`read`](Self::read) presents it.
     pub(crate) fn draw(
         &mut self,
         scene: &Scene,
@@ -847,13 +1051,19 @@ impl Offscreen {
         scale: f32,
         scissor: Option<[u32; 4]>,
     ) {
-        let s = self.target.size();
+        let s = self.canvas.size();
         let viewport = [s.width as f32 / scale, s.height as f32 / scale];
-        self.gpu.draw(&self.view, viewport, scene, text, scissor);
+        let view = self.canvas.create_view(&Default::default());
+        self.gpu.draw(&view, viewport, scene, text, scissor);
     }
 
-    /// Draws and waits for the GPU; returns the render pass's GPU time from
-    /// timestamp queries, or wall time when the adapter lacks them.
+    fn present(&mut self) {
+        let view = self.target.create_view(&Default::default());
+        self.gpu.present(&self.present, &view, None);
+    }
+
+    /// Draws, presents and waits for the GPU; returns the GPU time of both
+    /// passes from timestamp queries, or wall time when the adapter lacks them.
     pub(crate) fn timed_draw(
         &mut self,
         scene: &Scene,
@@ -863,6 +1073,7 @@ impl Offscreen {
     ) -> std::time::Duration {
         let start = web_time::Instant::now();
         self.draw(scene, text, scale, scissor);
+        self.present();
         self.gpu
             .device
             .poll(wgpu::PollType::wait_indefinitely())
@@ -875,8 +1086,9 @@ impl Offscreen {
         }
     }
 
-    /// Reads the target back as sRGB RGBA8.
-    pub(crate) fn read(&self) -> Pixels {
+    /// Presents the canvas and reads it back as sRGB RGBA8.
+    pub(crate) fn read(&mut self) -> Pixels {
+        self.present();
         let gpu = &self.gpu;
         let s = self.target.size();
         let (w, h) = (s.width, s.height);

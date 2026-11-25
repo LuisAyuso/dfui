@@ -97,7 +97,7 @@ pub(crate) fn run<A: App>(mut rt: Runtime<A>, app: AndroidApp) {
                         native,
                         redraw: redraw.clone(),
                     };
-                    let r = Renderer::new(instance.clone(), Box::new(window));
+                    let r = Renderer::new(instance.clone(), Box::new(window), rt.app.hdr());
                     rt.pending_renderer = Some(Box::pin(r));
                     rt.poll_renderer();
                 }

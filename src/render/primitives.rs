@@ -186,15 +186,21 @@ impl Bitmap {
         }))
     }
 
-    /// Draws `texture`, which the app keeps drawing into: an `Rgba8Unorm` texture
-    /// with `TEXTURE_BINDING` usage on [`gpu()`](crate::gpu)'s device, holding
-    /// premultiplied sRGB. Each call is a new bitmap, so a frame that shows new
+    /// Draws `texture`, which the app keeps drawing into: an `Rgba8Unorm` or
+    /// `Rgba16Float` texture with `TEXTURE_BINDING` usage on
+    /// [`gpu()`](crate::gpu)'s device, holding premultiplied sRGB. In
+    /// `Rgba16Float`, values above 1.0 are brighter than SDR white and show so
+    /// when [`hdr()`](crate::hdr) is on, and values below 0 are colors outside
+    /// sRGB's gamut. Each call is a new bitmap, so a frame that shows new
     /// contents needs a new one.
     pub fn from_texture(texture: &wgpu::Texture) -> Bitmap {
-        assert_eq!(
-            texture.format(),
-            wgpu::TextureFormat::Rgba8Unorm,
-            "texture format"
+        assert!(
+            matches!(
+                texture.format(),
+                wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba16Float
+            ),
+            "texture format {:?}",
+            texture.format()
         );
         Bitmap(Arc::new(BitmapData {
             id: NEXT_BITMAP.fetch_add(1, Ordering::Relaxed),

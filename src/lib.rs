@@ -22,7 +22,7 @@ pub use anim::Animated;
 pub use path::{Path, Shape};
 #[cfg(not(target_arch = "wasm32"))]
 pub use render::gpu;
-pub use render::{Bitmap, Color, Pixels, Rect, Shadow};
+pub use render::{Bitmap, Color, Pixels, Rect, Shadow, hdr};
 pub use runtime::task::{Notifier, Sleep, sleep};
 pub use source::{Cache, Latest, cached, polled};
 #[cfg(not(target_arch = "wasm32"))]
@@ -72,6 +72,12 @@ pub trait App: 'static {
     /// e.g. for a user's size setting. Read every frame.
     fn zoom(&self) -> f32 {
         1.0
+    }
+    /// Shows bitmaps' values above 1.0 (from [`Bitmap::from_texture`] with
+    /// `Rgba16Float`) brighter than SDR white, on screens that take HDR10.
+    /// [`hdr()`] tells whether that's on. Read every frame.
+    fn hdr(&self) -> bool {
+        false
     }
 }
 

@@ -89,7 +89,12 @@ impl<A: App> ApplicationHandler for Runtime<A> {
         });
         let size = window.inner_size().to_logical::<f32>(window.scale_factor());
         self.viewport = (size.width, size.height);
-        self.pending_renderer = Some(Box::pin(Renderer::new(instance.clone(), Box::new(window))));
+        let hdr = self.app.hdr();
+        self.pending_renderer = Some(Box::pin(Renderer::new(
+            instance.clone(),
+            Box::new(window),
+            hdr,
+        )));
         self.poll_renderer();
     }
 

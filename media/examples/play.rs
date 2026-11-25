@@ -29,7 +29,19 @@ fn view() -> Element {
     .into()
 }
 
+/// Shows HDR as HDR where the screen takes it.
+struct Play;
+
+impl dfui::App for Play {
+    fn view(&self) -> Element {
+        view()
+    }
+    fn hdr(&self) -> bool {
+        true
+    }
+}
+
 fn main() {
     env_logger::init();
-    dfui::run(view);
+    dfui::run(Play);
 }

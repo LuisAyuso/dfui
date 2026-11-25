@@ -726,6 +726,9 @@ impl<A: App> Runtime<A> {
     }
 
     fn paint(&mut self) {
+        if let Some(r) = &mut self.renderer {
+            r.set_hdr(self.app.hdr());
+        }
         let zoom = self.app.zoom();
         if zoom != self.zoom
             && let Some(r) = &mut self.renderer

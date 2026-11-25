@@ -6,6 +6,7 @@ mod scene;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use gpu::gpu;
+pub use gpu::hdr;
 pub(crate) use gpu::*;
 pub use primitives::*;
 pub use scene::*;
@@ -92,6 +93,51 @@ mod tests {
         s.image(all, &Bitmap::from_texture(&texture), 0.0, Color::WHITE, all);
         off.draw(&s, &mut text, 1.0, None);
         assert_eq!(off.read().pixel(2, 20), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    #[ignore = "needs a GPU"]
+    fn hdr10_output_is_pq_with_sdr_white_at_203_nits() {
+        let mut off = Offscreen::new((40, 40));
+        let (device, queue) = off.device();
+        let (device, queue) = (device.clone(), queue.clone());
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 2,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        // Half floats: SDR white (1.0), and 1.9951, which decodes to 1000/203 of it.
+        let (white, bright, one) = (0x3c00u16, 0x3ffbu16, 0x3c00u16);
+        let texels = [white, white, white, one, bright, bright, bright, one];
+        queue.write_texture(
+            texture.as_image_copy(),
+            bytemuck::cast_slice(&texels),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(16),
+                rows_per_image: None,
+            },
+            texture.size(),
+        );
+        let all = Rect::new(0.0, 0.0, 40.0, 40.0);
+        let mut s = Scene::default();
+        s.image(all, &Bitmap::from_texture(&texture), 0.0, Color::WHITE, all);
+        off.draw(&s, &mut Text::default(), 1.0, None);
+        off.hdr10();
+        let img = off.read();
+        let near = |p: [u8; 4], v: u8| p[..3].iter().all(|c| c.abs_diff(v) <= 1);
+        // ST 2084: 203 nits is code 0.5802, 1000 nits 0.7526.
+        assert!(near(img.pixel(2, 20), 148), "{:?}", img.pixel(2, 20));
+        assert!(near(img.pixel(37, 20), 192), "{:?}", img.pixel(37, 20));
     }
 
     #[test]

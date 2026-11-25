@@ -39,8 +39,9 @@ anti-aliased edges look thin). HDR shouldn't change how the UI looks, so the
 UI keeps that, and HDR video joins it in an extended version of the same
 encoding:
 
-- The canvas, which dfui already keeps for partial redraws, becomes
-  `Rgba16Float` when the output is HDR. It holds sign-preserving
+- The canvas, which dfui already keeps for partial redraws, is
+  `Rgba16Float` for SDR and HDR alike (8-bit only where the GPU can't render
+  and blend half floats), so both take the same path. It holds sign-preserving
   sRGB-encoded BT.709, where 1.0 is SDR reference white (203 nits, ITU-R
   BT.2408). UI colours land in 0..1 exactly as now. Video highlights go above
   1, and BT.2020 colours outside BT.709 go negative.
@@ -48,13 +49,17 @@ encoding:
   or HLG decoded to linear nits, divided by 203, BT.2020 → BT.709 matrix,
   then extended sRGB encoding. `Bitmap::from_texture` accepts that format
   too.
-- The copy from canvas to swapchain becomes a pass: decode the canvas to
-  linear, × 203 nits, BT.709 → BT.2020, PQ encode, write `Rgb10a2Unorm` in
-  `Bt2100Pq`. It is one full-screen pass per presented frame.
+- The copy from canvas to swapchain is a pass (`present.wgsl`) for both. With
+  its `pq` constant off it writes the canvas as is (clamped); on, it decodes to
+  linear, × 203 nits, BT.709 → BT.2020, PQ-encodes and writes `Rgb10a2Unorm`
+  in `Bt2100Pq`. The main shader doesn't change at all, and `DFUI_SHOW_DAMAGE`
+  draws its flash in this pass. On this desktop, at 1080×2400, the pass costs
+  about 47 µs and the float canvas a few percent more than an 8-bit one.
 
-Apps opt in (`App::hdr() -> bool`). dfui uses HDR only when the surface lists
-`Bt2100Pq` for a 10-bit format, and otherwise keeps today's path, so nothing
-changes for apps that don't ask.
+Apps opt in (`App::hdr() -> bool`), and the whole window, UI and video, then
+goes out as HDR10 when the surface lists `Bt2100Pq` for a format; otherwise
+it's SDR. `dfui::hdr()` says which, for video that should tone-map when it
+isn't.
 
 ### Tone mapping in the player
 
@@ -82,11 +87,13 @@ The player checks its decoder for HEVC Main 10 before asking for `hevc`.
    BT.2390 tone-map in the convert pass, the player asking for `hevc` without
    `tonemap`. Checks: a GPU test against ffmpeg's own tone map of a short
    HDR10 clip; The Creator on this desktop.
-2. **HDR output in dfui.** `App::hdr()`, surface choice, the float canvas,
-   the PQ encode pass, float bitmaps. Checks: snapshot tests of the encode
-   (known nits to known PQ codes); on this desktop GNOME takes the HDR10
-   surface and maps it to the SDR monitor, which proves the plumbing but not
-   the picture.
+2. **HDR output in dfui.** Done: `App::hdr()`, surface choice, the float
+   canvas, the present pass, `Rgba16Float` bitmaps. A GPU test checks the PQ
+   codes for 203 and 1000 nits. On this desktop GNOME 51 takes the HDR10
+   surface (and maps it to the SDR monitor), and nested gamescope
+   (`gamescope --hdr-enabled --hdr-debug-force-output -- env
+   ENABLE_GAMESCOPE_WSI=1 app`) gets an HDR10 swapchain as on the TV. The
+   picture itself still needs an HDR screen.
 3. **Metadata.** Mastering display and MaxCLL through `vkSetHdrMetadataEXT`,
    from the film while it plays.
 4. **The TV.** Run under gamescope's WSI layer (`ENABLE_GAMESCOPE_WSI=1`,
