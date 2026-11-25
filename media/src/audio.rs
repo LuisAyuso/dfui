@@ -96,7 +96,10 @@ impl Audio {
         self.ring.lock().unwrap().is_empty()
     }
 
-    /// Queues `samples` (already in the output's layout), waiting while a second is queued.
+    /// Queues `samples` (already in the output's layout), waiting while a second
+    /// is queued once playback has started. Before that it never waits: the
+    /// first video frame can lie further into the stream than a second of sound,
+    /// and sound starts only with it.
     pub fn push(&self, pts: f64, samples: &[f32], stop: &AtomicBool) {
         let _ = self.first.compare_exchange(
             f64::NAN.to_bits(),
@@ -106,7 +109,8 @@ impl Audio {
         );
         let cap = self.rate as usize * self.channels;
         let mut ring = self.ring.lock().unwrap();
-        while ring.len() >= cap && !stop.load(Ordering::Relaxed) {
+        while ring.len() >= cap && self.go.load(Ordering::Relaxed) && !stop.load(Ordering::Relaxed)
+        {
             ring = self
                 .space
                 .wait_timeout(ring, std::time::Duration::from_millis(100))
@@ -248,5 +252,37 @@ mod tests {
         // 48 AAC frames of 1024 samples; the 440 Hz sine is loud.
         assert_eq!(frames, 48 * 1024);
         assert!(peak > 0.1, "{peak}");
+    }
+
+    fn silent_output() -> Audio {
+        Audio {
+            ring: Mutex::new(VecDeque::new()),
+            space: Condvar::new(),
+            channels: 2,
+            rate: 48000,
+            played: AtomicU64::new(0),
+            first: AtomicU64::new(f64::NAN.to_bits()),
+            go: AtomicBool::new(false),
+            paused: Arc::new(AtomicBool::new(false)),
+            volume: Arc::new(AtomicU32::new(1f32.to_bits())),
+        }
+    }
+
+    #[test]
+    fn sound_queues_freely_until_playback_starts() {
+        let audio = Arc::new(silent_output());
+        let a = audio.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let stop = AtomicBool::new(false);
+            // Three seconds of sound before the first video frame: more than the ring holds.
+            for i in 0..3 {
+                a.push(i as f64, &vec![0.0; 48000 * 2], &stop);
+            }
+            tx.send(()).unwrap();
+        });
+        let done = rx.recv_timeout(std::time::Duration::from_secs(2));
+        assert!(done.is_ok(), "push blocked before playback started");
+        assert_eq!(audio.ring.lock().unwrap().len(), 3 * 48000 * 2);
     }
 }
