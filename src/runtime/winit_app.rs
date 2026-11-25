@@ -153,16 +153,19 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                 });
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let dy = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => -y * 40.0,
-                    MouseScrollDelta::PixelDelta(p) => -p.y as f32 / scale,
+                let (mut dx, mut dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (-x * 40.0, -y * 40.0),
+                    MouseScrollDelta::PixelDelta(p) => (-p.x as f32 / scale, -p.y as f32 / scale),
                 };
+                if self.mods.shift_key() && dx == 0.0 {
+                    (dx, dy) = (dy, 0.0);
+                }
                 let (x, y) = self.cursor;
                 if self.mods.control_key() {
                     let scale = (-dy / 200.0).exp();
                     self.dispatch(Event::Pinch { x, y, scale });
                 } else {
-                    self.dispatch(Event::Wheel { x, y, dy });
+                    self.dispatch(Event::Wheel { x, y, dx, dy });
                 }
             }
             WindowEvent::PinchGesture { delta, .. } => {

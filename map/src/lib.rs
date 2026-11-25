@@ -1270,7 +1270,7 @@ impl Widget for Map {
                 }
             }
             Event::Cancel => v.press = None,
-            Event::Wheel { x, y, dy } if inside(x, y) => {
+            Event::Wheel { x, y, dy, .. } if inside(x, y) => {
                 v.zoom(data, r, x, y, (-dy / 200.0).exp());
                 stop = true;
             }

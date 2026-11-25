@@ -26,10 +26,12 @@ pub enum Event {
         x: f32,
         y: f32,
     },
-    /// Mouse wheel, logical pixels, positive scrolls content up.
+    /// Mouse wheel or touchpad, logical pixels: positive `dy` scrolls content
+    /// up, positive `dx` scrolls it left. Shift turns a plain wheel sideways.
     Wheel {
         x: f32,
         y: f32,
+        dx: f32,
         dy: f32,
     },
     /// Two fingers spread (`scale` > 1) or closed by this factor since the

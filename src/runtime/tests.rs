@@ -403,6 +403,7 @@ fn stick_to_end_follows_until_scrolled_away() {
         rt.dispatch(Event::Wheel {
             x: 10.0,
             y: 10.0,
+            dx: 0.0,
             dy,
         });
     };
@@ -926,6 +927,7 @@ fn popups_flip_into_the_window_and_hide_with_their_anchor() {
     rt.dispatch(Event::Wheel {
         x: 10.0,
         y: 10.0,
+        dx: 0.0,
         dy: 50.0,
     });
     let clip = rt.placed[top].clip;
@@ -1143,6 +1145,7 @@ fn rows_outside_the_scroll_clip_are_not_painted() {
     rt.dispatch(Event::Wheel {
         x: 10.0,
         y: 10.0,
+        dx: 0.0,
         dy: 2000.0,
     });
     let (scene, _) = rt.scene(&mut false);
@@ -1159,6 +1162,7 @@ fn wheel_scroll_moves_content_without_relayout() {
     rt.dispatch(Event::Wheel {
         x: 10.0,
         y: 10.0,
+        dx: 0.0,
         dy: 30.0,
     });
     // A cleared taffy result forces a full relayout, which must agree.
@@ -1166,6 +1170,7 @@ fn wheel_scroll_moves_content_without_relayout() {
     rt.dispatch(Event::Wheel {
         x: 10.0,
         y: 10.0,
+        dx: 0.0,
         dy: 30.0,
     });
     assert_eq!(rt.placed[3].rect.y, row.y - 60.0);
@@ -1814,4 +1819,117 @@ fn two_fingers_pinch_and_keep_the_pointer_steady() {
             Event::Leave,
         ]
     );
+}
+
+thread_local! {
+    /// The item `Shelves` keeps in view, by index; none when negative.
+    static REVEAL: Cell<i32> = const { Cell::new(-1) };
+}
+
+/// A page that scrolls down, with a row of ten 80 px items that scrolls sideways.
+struct Shelves;
+
+impl App for Shelves {
+    fn view(&self) -> Element {
+        let items = (0..10).map(|_| {
+            column([])
+                .width(80.0)
+                .height(50.0)
+                .shrink(0.0)
+                .bg(Color::BLACK)
+                .into()
+        });
+        let mut shelf = scroll(row(items)).horizontal();
+        if let Ok(i) = u32::try_from(REVEAL.get()) {
+            let x = i as f32 * 80.0;
+            shelf = shelf.reveal((x, x + 80.0));
+        }
+        let rows = (0..20).map(|_| column([]).height(50.0).into());
+        let page = column(std::iter::once(shelf.height(50.0).into()).chain(rows));
+        column([scroll(page).grow(1.0).into()]).into()
+    }
+}
+
+/// The first shelf item's top-left corner.
+fn first_item(rt: &Runtime<Shelves>) -> (f32, f32) {
+    let r = rt
+        .placed
+        .iter()
+        .map(|p| p.rect)
+        .find(|r| (r.w, r.h) == (80.0, 50.0))
+        .unwrap();
+    (r.x, r.y)
+}
+
+fn wheel(dx: f32, dy: f32) -> Event {
+    Event::Wheel {
+        x: 10.0,
+        y: 10.0,
+        dx,
+        dy,
+    }
+}
+
+#[test]
+fn a_horizontal_scroll_takes_sideways_wheels_and_passes_vertical_ones_on() {
+    REVEAL.set(-1);
+    let mut rt = Runtime::new(Shelves);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    assert_eq!(first_item(&rt), (0.0, 0.0));
+    rt.dispatch(wheel(100.0, 0.0));
+    assert_eq!(
+        first_item(&rt),
+        (-100.0, 0.0),
+        "the row moved, not the page"
+    );
+    rt.dispatch(wheel(0.0, 30.0));
+    assert_eq!(
+        first_item(&rt),
+        (-100.0, -30.0),
+        "the page moved, not the row"
+    );
+    // Past the end stops at the last item: 800 px of items in a 200 px box.
+    rt.dispatch(wheel(5000.0, 0.0));
+    assert_eq!(first_item(&rt).0, -600.0);
+}
+
+#[test]
+fn dragging_a_horizontal_scroll_moves_only_the_row() {
+    REVEAL.set(-1);
+    let mut rt = Runtime::new(Shelves);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.dispatch(Event::PointerDown { x: 150.0, y: 25.0 });
+    for x in [140.0, 120.0, 100.0, 80.0] {
+        rt.dispatch(Event::PointerMove { x, y: 25.0 });
+    }
+    rt.dispatch(Event::PointerUp { x: 80.0, y: 25.0 });
+    let (x, y) = first_item(&rt);
+    assert!(x < -40.0, "followed the finger: {x}");
+    assert_eq!(y, 0.0);
+}
+
+#[test]
+fn reveal_glides_to_the_focused_item_and_then_lets_go() {
+    let t = Instant::now();
+    task::set_clock(Some(t));
+    REVEAL.set(0);
+    let mut rt = Runtime::new(Shelves);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    assert_eq!(first_item(&rt).0, 0.0);
+    // Item 5 spans 400..480: the least move that shows it puts its end at 200.
+    REVEAL.set(5);
+    rt.rebuild();
+    rt.relayout();
+    task::set_clock(Some(t + Duration::from_millis(500)));
+    rt.reposition();
+    assert_eq!(first_item(&rt).0, -280.0);
+    // The user's own scrolling stays while the focus doesn't move.
+    rt.dispatch(wheel(-100.0, 0.0));
+    rt.rebuild();
+    rt.relayout();
+    assert_eq!(first_item(&rt).0, -180.0);
+    task::set_clock(None);
 }

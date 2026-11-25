@@ -550,6 +550,7 @@ fn scroll_wheel_and_fling() {
     b.event(Event::Wheel {
         x: 80.0,
         y: 100.0,
+        dx: 0.0,
         dy: 100.0,
     });
     b.settle();
@@ -569,6 +570,7 @@ fn scroll_wheel_and_fling() {
     b.event(Event::Wheel {
         x: 80.0,
         y: 100.0,
+        dx: 0.0,
         dy: 5000.0,
     });
     b.settle();

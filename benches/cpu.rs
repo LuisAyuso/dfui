@@ -70,6 +70,7 @@ fn frame(c: &mut Criterion) {
                 bench.event(Event::Wheel {
                     x: 200.0,
                     y: 400.0,
+                    dx: 0.0,
                     dy,
                 });
                 bench.paint()

@@ -226,6 +226,7 @@ fn a_tap_after_scrolling_hits_the_row_on_screen_not_a_drag() {
     b.event(Event::Wheel {
         x: 20.0,
         y: 20.0,
+        dx: 0.0,
         dy: 400.0,
     });
     b.settle();
@@ -260,6 +261,7 @@ fn scroll_position_survives_a_rebuild() {
     b.event(Event::Wheel {
         x: 20.0,
         y: 20.0,
+        dx: 0.0,
         dy: 400.0,
     });
     b.settle();

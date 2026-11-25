@@ -468,7 +468,7 @@ impl Widget for List {
         }
     }
     fn event(&self, ev: &Event, cx: &mut EventCx) {
-        drag_scroll(ev, cx, |st| &mut st.get::<ListState>().scroll);
+        drag_scroll(ev, cx, false, |st| &mut st.get::<ListState>().scroll);
     }
 }
 
@@ -594,6 +594,7 @@ mod tests {
         b.event(Event::Wheel {
             x: 10.0,
             y: 10.0,
+            dx: 0.0,
             dy: 5000.0,
         });
         b.settle();
