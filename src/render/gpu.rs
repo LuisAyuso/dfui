@@ -112,6 +112,17 @@ fn outline_group(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+static SHARED: std::sync::Mutex<Option<(wgpu::Device, wgpu::Queue)>> = std::sync::Mutex::new(None);
+
+/// The device and queue the window draws with, once it has them: textures for
+/// [`Bitmap::from_texture`] come from this device. It changes when the GPU is
+/// set up again, as on an Android resume.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
+    SHARED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 /// Uploads `rgba` (premultiplied) as a texture and binds it with `sampler`.
 fn image_group(
     device: &wgpu::Device,
@@ -141,14 +152,27 @@ fn image_group(
         wgpu::util::TextureDataOrder::LayerMajor,
         rgba,
     );
-    let view = texture.create_view(&Default::default());
+    view_group(
+        device,
+        layout,
+        sampler,
+        &texture.create_view(&Default::default()),
+    )
+}
+
+fn view_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bitmap"),
         layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
+                resource: wgpu::BindingResource::TextureView(view),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -165,7 +189,10 @@ impl Gpu {
                 // Outline text needs fragment-stage storage buffers (GLES 3.1+/Vulkan/WebGPU).
                 required_limits: wgpu::Limits::downlevel_defaults()
                     .using_resolution(adapter.limits()),
-                required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
+                // Dmabuf import lets video decoders hand frames over without a copy.
+                required_features: adapter.features()
+                    & (wgpu::Features::TIMESTAMP_QUERY
+                        | wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF),
                 ..Default::default()
             })
             .await
@@ -425,7 +452,9 @@ impl Gpu {
         for (_, b) in &scene.bitmaps {
             let d = &b.0;
             self.textures.entry(d.id).or_insert_with(|| {
-                let group = if d.width.max(d.height) > max || d.width == 0 || d.height == 0 {
+                let group = if let Some(view) = &d.texture {
+                    view_group(&self.device, &self.image_layout, &self.sampler, &view.0)
+                } else if d.width.max(d.height) > max || d.width == 0 || d.height == 0 {
                     log::warn!("bitmap {}x{} exceeds {max}px, not drawn", d.width, d.height);
                     self.no_image.clone()
                 } else {
@@ -602,6 +631,11 @@ impl Renderer {
         // Blend in sRGB space like browsers do; linear blending makes AA edges look thin and stepped.
         let view_format = format.remove_srgb_suffix();
         let gpu = Gpu::new(&adapter, view_format).await?;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            *SHARED.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some((gpu.device.clone(), gpu.queue.clone()));
+        }
         let (width, height) = window.size();
         let copyable = caps.usages.contains(wgpu::TextureUsages::COPY_DST);
         let config = wgpu::SurfaceConfiguration {
@@ -799,6 +833,11 @@ impl Offscreen {
         });
         let view = target.create_view(&Default::default());
         Offscreen { gpu, target, view }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn device(&self) -> (&wgpu::Device, &wgpu::Queue) {
+        (&self.gpu.device, &self.gpu.queue)
     }
 
     pub(crate) fn draw(

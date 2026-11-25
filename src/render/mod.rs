@@ -4,6 +4,8 @@ mod gpu;
 mod primitives;
 mod scene;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use gpu::gpu;
 pub(crate) use gpu::*;
 pub use primitives::*;
 pub use scene::*;
@@ -40,6 +42,56 @@ mod tests {
         assert_eq!(img.pixel(5, 5), [255, 0, 0, 255]);
         assert_eq!(img.pixel(15, 15), [0, 0, 255, 255]);
         assert_eq!(img.pixel(35, 35), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    #[ignore = "needs a GPU"]
+    fn texture_bitmap_shows_what_the_app_drew() {
+        let mut off = Offscreen::new((40, 40));
+        let (device, queue) = off.device();
+        let (device, queue) = (device.clone(), queue.clone());
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 2,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let write = |rgba: [u8; 8]| {
+            queue.write_texture(
+                texture.as_image_copy(),
+                &rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(8),
+                    rows_per_image: None,
+                },
+                texture.size(),
+            )
+        };
+        write([255, 0, 0, 255, 0, 0, 255, 255]);
+        let all = Rect::new(0.0, 0.0, 40.0, 40.0);
+        let mut s = Scene::default();
+        s.image(all, &Bitmap::from_texture(&texture), 0.0, Color::WHITE, all);
+        let mut text = Text::default();
+        off.draw(&s, &mut text, 1.0, None);
+        let img = off.read();
+        assert_eq!(img.pixel(2, 20), [255, 0, 0, 255]);
+        assert_eq!(img.pixel(37, 20), [0, 0, 255, 255]);
+
+        // New contents in the same texture show on the next draw.
+        write([0, 255, 0, 255, 0, 255, 0, 255]);
+        let mut s = Scene::default();
+        s.image(all, &Bitmap::from_texture(&texture), 0.0, Color::WHITE, all);
+        off.draw(&s, &mut text, 1.0, None);
+        assert_eq!(off.read().pixel(2, 20), [0, 255, 0, 255]);
     }
 
     #[test]

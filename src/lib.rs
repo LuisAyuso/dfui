@@ -1,5 +1,8 @@
 //! Declarative UI framework that draws shapes, text and icons analytically in one wgpu shader.
 
+// Proving wgpu's `Device` and `Queue` are `Sync` for `gpu()` recurses past the default.
+#![recursion_limit = "256"]
+
 pub mod anim;
 pub mod icons;
 pub mod kinetic;
@@ -17,11 +20,14 @@ pub mod widgets;
 
 pub use anim::Animated;
 pub use path::{Path, Shape};
+#[cfg(not(target_arch = "wasm32"))]
+pub use render::gpu;
 pub use render::{Bitmap, Color, Pixels, Rect, Shadow};
 pub use runtime::task::{Notifier, Sleep, sleep};
 pub use source::{Cache, Latest, cached, polled};
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::{Wanted, blocking};
+pub use wgpu;
 // Hooks for the benches and golden tests, outside the semver guarantee.
 #[doc(hidden)]
 pub use runtime::{Bench, GpuBench, insets, snapshot};

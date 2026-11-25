@@ -146,14 +146,26 @@ pub(super) struct BitmapData {
     pub(super) id: u32,
     pub(super) width: u32,
     pub(super) height: u32,
-    /// Premultiplied sRGB.
+    /// Premultiplied sRGB; empty for a `texture`.
     pub(super) rgba: Box<[u8]>,
+    pub(super) texture: Option<View>,
 }
+
+/// Keeps the compiler from re-deriving `Send`/`Sync` through wgpu's internals,
+/// which overflows its recursion limit in every crate that checks a `Bitmap`.
+pub(super) struct View(pub(super) wgpu::TextureView);
+
+// SAFETY: wgpu's handles are Send + Sync except on wasm with atomics.
+#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+unsafe impl Send for View {}
+#[cfg(not(all(target_arch = "wasm32", target_feature = "atomics")))]
+unsafe impl Sync for View {}
+
+static NEXT_BITMAP: AtomicU32 = AtomicU32::new(1);
 
 impl Bitmap {
     /// Straight-alpha sRGB RGBA8, row-major, as image decoders produce it.
     pub fn from_rgba8(width: u32, height: u32, mut rgba: Vec<u8>) -> Bitmap {
-        static NEXT: AtomicU32 = AtomicU32::new(1);
         assert_eq!(
             rgba.len() as u64,
             width as u64 * height as u64 * 4,
@@ -166,10 +178,30 @@ impl Bitmap {
             }
         }
         Bitmap(Arc::new(BitmapData {
-            id: NEXT.fetch_add(1, Ordering::Relaxed),
+            id: NEXT_BITMAP.fetch_add(1, Ordering::Relaxed),
             width,
             height,
             rgba: rgba.into(),
+            texture: None,
+        }))
+    }
+
+    /// Draws `texture`, which the app keeps drawing into: an `Rgba8Unorm` texture
+    /// with `TEXTURE_BINDING` usage on [`gpu()`](crate::gpu)'s device, holding
+    /// premultiplied sRGB. Each call is a new bitmap, so a frame that shows new
+    /// contents needs a new one.
+    pub fn from_texture(texture: &wgpu::Texture) -> Bitmap {
+        assert_eq!(
+            texture.format(),
+            wgpu::TextureFormat::Rgba8Unorm,
+            "texture format"
+        );
+        Bitmap(Arc::new(BitmapData {
+            id: NEXT_BITMAP.fetch_add(1, Ordering::Relaxed),
+            width: texture.width(),
+            height: texture.height(),
+            rgba: Box::default(),
+            texture: Some(View(texture.create_view(&Default::default()))),
         }))
     }
 
