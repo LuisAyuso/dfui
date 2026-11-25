@@ -1,6 +1,11 @@
 # dfui-map (experiment)
 
-A pannable, zoomable vector map widget built only on dfui's public API. dfui
+[![crates.io](https://img.shields.io/crates/v/dfui-map.svg)](https://crates.io/crates/dfui-map)
+[![docs.rs](https://img.shields.io/docsrs/dfui-map)](https://docs.rs/dfui-map)
+[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
+[![tests](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml)
+
+A pannable, zoomable vector map widget built only on [dfui](https://github.com/LuisAyuso/dfui)'s public API. dfui
 itself doesn't depend on it; an app opts in by depending on `dfui-map`.
 
 The app downloads and parses the data (the example uses OpenStreetMap through
@@ -118,7 +123,7 @@ geometry into the margins, so 128 segments per tile is the balance.
 
 - **Cost per pixel, not per feature.** Every covered pixel evaluates the
   curves of each layer's tile under it; that loop is ~90% of the GPU time
-  (see `DFUI_SHOW_COST` in `docs/rendering.md`). Partial repaint doesn't help, since
+  (see `DFUI_SHOW_COST` in [rendering.md](https://github.com/LuisAyuso/dfui/blob/main/docs/rendering.md)). Partial repaint doesn't help, since
   a pan changes every pixel of the map.
 - **Pop-in.** A layer with no coarser level (its levels didn't simplify
   enough to keep) has nothing to stand in while its tiles stream, so it
@@ -144,36 +149,12 @@ geometry into the margins, so 128 segments per tile is the balance.
 - **Gestures.** No fling after a pan. A two-finger touch held still and
   lifted taps whatever is under it unless a widget captured the pointer.
 
-## Web demo
+## Web and Android
 
-The wasm build embeds a stripped copy of the Overpass JSON (tags and
-geometry only, 5.7 MB) through `DFUI_MAP_OSM`. The wasm-bindgen CLI must
-match the version in `Cargo.lock`:
+The [web](https://luisayuso.github.io/dfui/) and Android builds of the
+example embed the OSM data at build time; see [web.md](https://github.com/LuisAyuso/dfui/blob/main/docs/web.md) and
+[android.md](https://github.com/LuisAyuso/dfui/blob/main/docs/android.md).
 
-```sh
-DFUI_MAP_OSM=/path/to/amsterdam.json cargo build -p dfui-map --example osm \
-    --profile web --target wasm32-unknown-unknown
-wasm-bindgen --target web --no-typescript --out-dir out \
-    target/wasm32-unknown-unknown/web/examples/osm.wasm
-```
-
-Then load `out/osm.js` from a page as `site/dist/run.html` does.
-
-## Android
-
-`osm_android` is the same example as an APK, with the data embedded the same
-way (set up `cargo-apk` as in the top-level README):
-
-```sh
-DFUI_MAP_OSM=/path/to/amsterdam.json cargo apk run -p dfui-map \
-    --example osm_android --release
-```
-
-Tiles stream in over the first frames rather than all in the first one.
-
-## Releasing
-
-Released with dfui under the same version: a `v*` tag publishes both
-(`.github/workflows/release.yml`).
+Released with dfui under the same version.
 
 Map data © OpenStreetMap contributors, under the ODbL.

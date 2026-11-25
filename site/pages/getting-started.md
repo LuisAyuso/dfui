@@ -2,11 +2,9 @@
 
 ## Add the dependency
 
-dfui isn't on crates.io yet; depend on the repository:
-
 ```toml
 [dependencies]
-dfui = { git = "https://github.com/LuisAyuso/dfui" }
+dfui = "0.2"
 ```
 
 ## A first app

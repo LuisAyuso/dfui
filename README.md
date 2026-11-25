@@ -1,10 +1,18 @@
 # dfui
 
+[![crates.io](https://img.shields.io/crates/v/dfui.svg)](https://crates.io/crates/dfui)
+[![docs.rs](https://img.shields.io/docsrs/dfui)](https://docs.rs/dfui)
+[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
+[![tests](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml)
+[![license](https://img.shields.io/crates/l/dfui.svg)](LICENSE)
+
 A small declarative UI framework in Rust that renders everything —
 shapes, shadows, text and icons — analytically in a single wgpu shader, with
 no glyph atlas. Text and icons are drawn straight from their Bézier outlines
-with the [Slug algorithm](docs/glyphs.md). Primary target is Android (NativeActivity, Vulkan); desktop runs
-through the same winit event loop.
+with the [Slug algorithm](docs/glyphs.md). Primary target is Android
+(NativeActivity, Vulkan); desktop runs through the same winit event loop, and
+the [examples page](https://luisayuso.github.io/dfui/) runs every widget live
+in the browser.
 
 ```rust,no_run
 use dfui::widgets::{button, stateful, text};
@@ -23,6 +31,29 @@ impl App for Counter {
 
 fn main() { dfui::run(Counter); }
 ```
+
+## Crates
+
+| Crate | |
+|---|---|
+| [dfui](https://crates.io/crates/dfui) | The framework. |
+| [dfui-map](map/) | Pannable, zoomable vector maps, built on dfui's public API. |
+| [dfui-media](media/) | Hardware-decoded video (VA-API, MediaCodec), HDR. |
+
+All three release together under one version.
+
+## Documentation
+
+- [Examples and guides](https://luisayuso.github.io/dfui/): getting started,
+  concepts, and a live page per widget.
+- [API reference](https://docs.rs/dfui).
+- Design: [architecture](docs/architecture.md), [rendering](docs/rendering.md),
+  [glyphs](docs/glyphs.md), [state management](docs/state-management.md),
+  [theming](docs/theming.md), [HDR](docs/hdr.md).
+- [Icons](docs/icons.md): converting SVGs with `svg2path`.
+- [Development](docs/development.md): the demo, tests, benches, releasing.
+- [Performance](docs/performance.md): measured numbers, desktop and phone.
+- [Android](docs/android.md) and [Web](docs/web.md) builds.
 
 ## Motivation
 
@@ -49,160 +80,6 @@ At work I usually try to prioritize tasks and model development after the follow
   - Networking, data sources, databases, multimedia... blah blah blah. None of this has anything to do with a UI, and it belongs in the app. I see no value in forcing these into downstream developments.
 
 I do not expect you to use this framework (after all, I am making it for myself), but I thought that maybe you would come across this site and wonder why I did it (I would).
-
-## Running
-
-```sh
-cargo run -p dfui-demo --release   # desktop
-cargo test                         # GPU tests: cargo test -- --include-ignored
-cargo test --test patterns         # usual app patterns, driven by input events
-cargo bench --bench cpu            # criterion CPU frame benches
-cargo bench --bench gpu            # criterion GPU benches (timestamp-measured)
-scripts/android-bench.sh gpu       # same benches on the connected phone (or cpu)
-```
-
-`DFUI_SHOW_DAMAGE=1` tints the area redrawn each frame (desktop debugging).
-
-## Performance
-
-Measured at commit `8f187ba` with the commands above, release builds. Desktop
-is a Ryzen 5 3600 with an RTX 4060 Ti; the phone has a Mali-G715 GPU.
-Phone numbers drift between sessions with GPU clock scaling, so compare builds
-back to back.
-
-CPU per frame, without the GPU's work (400×800 logical px):
-
-| Bench | Desktop, 100 cards | Phone, 100 cards | Desktop, 1000 cards | Phone, 1000 cards |
-|---|---|---|---|---|
-| Full frame (`frame/cards`) | 503 µs | 582 µs | 8.77 ms | 11.6 ms |
-| One label changes (`frame/edit`) | 562 µs | 643 µs | 9.78 ms | 12.6 ms |
-| Scroll (`frame/scroll`) | 131 µs | 133 µs | 1.29 ms | 1.71 ms |
-| Pointer move (`frame/pointer_move`) | 0.64 µs | 0.87 µs | 4.8 µs | 6.4 µs |
-
-GPU per frame, render pass only (1080×2400, scale 2.625):
-
-| Bench | RTX 4060 Ti | Mali-G715 |
-|---|---|---|
-| 10 cards (`gpu/cards_10`) | 133 µs | 3.01 ms |
-| Screen of text (`gpu/text_wall`) | 113 µs | 3.65 ms |
-| Same, redrawing the FPS meter area (`gpu/text_wall_partial`) | 10.9 µs | 65.8 µs |
-
-Boot:
-
-| | Desktop | Phone |
-|---|---|---|
-| Runtime and first layout, no window or GPU (`startup/cards_10`) | 644 µs | 578 µs |
-| Cold start of the demo (median of 10, 103–121 ms) | not measured | 112 ms |
-
-Cold start is `TotalTime` from `adb shell am start -W`, so it ends when Android
-reports the activity displayed, which may be before dfui presents its first frame.
-
-## Icons
-
-dfui has no SVG parser. `svg2path` converts icons ahead of time into `.path`
-files that the app bundles; commit them, and rerun it when an SVG changes.
-
-```sh
-cargo run -p svg2path -- icons/ assets/icons/   # a file or a directory
-cargo install --path tools/svg2path             # for use outside this repo
-```
-
-Build each `Shape` once and keep it, for example in the `App`, to avoid parsing
-it again in `view`:
-
-```rust,no_run
-use dfui::widgets::icon_button;
-use dfui::{App, Element, Shape};
-
-struct MyApp { close: Shape }
-
-impl App for MyApp {
-    fn view(&self) -> Element {
-        icon_button(&self.close).on_click(|_| {}).into()
-    }
-}
-
-fn main() {
-    let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icons/close.path"));
-    let close = Shape::from_bytes(bytes).unwrap();
-    dfui::run(MyApp { close });
-}
-```
-
-An icon is one shape in one color, set with `.color()`; the SVG's colors are
-dropped. Fills and strokes convert. `<text>` and embedded images are skipped
-without a warning (an SVG of only text gives an empty shape), and a directory
-is read without its subdirectories.
-
-## Web
-
-Note: this framework is not intended for web development, but I like the idea of providing a page with functional examples of the snippets, therefore the web build exist.
-
-The framework builds for `wasm32-unknown-unknown` and draws with WebGPU
-(WebGL2 lacks the fragment-stage storage buffers the text shader reads).
-
-The docs site in `site/` is static HTML, deployed to GitHub Pages by
-`.github/workflows/pages.yml` on every push to `main`:
-
-- `site/pages/*.md`: hand-written pages (introduction, getting started,
-  concepts); `docs/architecture.md` is published as is.
-- `examples/<name>.rs` (linked as `site/examples`): one standalone program per
-  widget, `cargo run --example <name>` on desktop, built to its
-  own wasm and shown below the live frame, under the text of `<name>.md`. The
-  widget's API docs include the same file (`#[doc = example!("<name>")]`), so
-  `cargo test --doc` compiles it. New examples are added to `WIDGETS` in
-  `site/src/main.rs`.
-
-```sh
-rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.129   # must match Cargo.lock
-scripts/site.sh                                    # writes site/dist
-python3 -m http.server -d site/dist                # open http://localhost:8000
-cargo run -p dfui-site --example slider           # one example, natively
-```
-
-## Android
-
-The demo is a NativeActivity app built with `cargo-apk`, aarch64 only,
-min SDK 26, target SDK 35.
-
-One-time setup:
-
-```sh
-rustup target add aarch64-linux-android
-cargo install cargo-apk
-# Android SDK with platform-tools, build-tools, platform android-35 and an NDK
-export ANDROID_HOME=/opt/android-sdk
-export NDK_HOME=$ANDROID_HOME/ndk/<version>
-# Release builds need a keystore; the debug one is fine for development.
-export CARGO_APK_RELEASE_KEYSTORE=$HOME/.android/debug.keystore
-export CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android
-```
-
-`cargo-apk` is capped at platform 35, so `android-35` must be installed even
-if newer platforms are present.
-
-Run on a device (USB debugging on, visible in `adb devices`):
-
-```sh
-cargo apk run -p dfui-demo --lib --release
-adb logcat | grep -E 'dfui|fps'   # logs; frame stats every 2 s
-```
-
-`--lib` is needed because the demo crate also has a desktop binary, which
-makes `cargo-apk` panic ("Bin is not compatible with Cdylib") after building.
-The APK lands in `target/release/apk/dfui-demo.apk`; `cargo apk build`
-instead of `run` only builds it. For real distribution, point the keystore
-variables at a release keystore. Frame stats (`fps … cpu … gpu …`) are how the
-baselines in `TODO.md` are measured; use the demo's Bench screen.
-
-In an app, `android_main` calls `dfui::run_android`, which returns when the
-activity is destroyed. If the process lives on (a service, a download),
-Android calls `android_main` again for the next activity, and it can run
-again. `eprintln!` output is lost on Android, so log with `log` and
-`android_logger` (see `android_main` in `demo/src/lib.rs`) and read the logs
-with `adb logcat`. `dfui::android::with_activity` runs JNI calls with the
-activity from any thread.
 
 ## License
 

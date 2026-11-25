@@ -46,6 +46,10 @@ pub use widget::{
 #[doc = include_str!("../README.md")]
 struct ReadmeDoctests;
 
+#[cfg(doctest)]
+#[doc = include_str!("../docs/icons.md")]
+struct IconsDoctests;
+
 /// Root of the UI. State lives in `stateful` widgets and in external sources
 /// that builders read; `view` runs again whenever any of it changes.
 pub trait App: 'static {

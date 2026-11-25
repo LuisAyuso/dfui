@@ -1,5 +1,10 @@
 # dfui-media
 
+[![crates.io](https://img.shields.io/crates/v/dfui-media.svg)](https://crates.io/crates/dfui-media)
+[![docs.rs](https://img.shields.io/docsrs/dfui-media)](https://docs.rs/dfui-media)
+[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
+[![tests](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml)
+
 Experimental hardware-decoded video for [dfui](https://github.com/LuisAyuso/dfui).
 It plays fragmented MP4 (H.264 or HEVC, 8- or 10-bit, with AAC sound) and
 draws the frames as dfui bitmaps: VA-API through libavcodec on Linux, with
@@ -33,11 +38,11 @@ Debian or Ubuntu:
 sudo apt install libasound2-dev libavcodec-dev libavutil-dev libclang-dev
 ```
 
-Examples, from the dfui repository:
+The example, from the dfui repository (the Android one is in
+[android.md](https://github.com/LuisAyuso/dfui/blob/main/docs/android.md)):
 
 ```sh
 cargo run -p dfui-media --example play -- movie.mp4   # Space pauses
-DFUI_MEDIA_CLIP=movie.mp4 cargo apk run -p dfui-media --example play_android
 ```
 
 Files must be fragmented, as ffmpeg writes with
