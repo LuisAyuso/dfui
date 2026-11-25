@@ -50,6 +50,8 @@ struct GpuTimer {
     busy: bool,
     /// A draw wrote the start time; the next present writes the end.
     began: bool,
+    /// Both times are recorded; the submit reads them back.
+    ended: bool,
     mapped: Arc<AtomicBool>,
     last_ns: f32,
 }
@@ -80,6 +82,7 @@ impl GpuTimer {
             ),
             busy: false,
             began: false,
+            ended: false,
             mapped: Arc::new(AtomicBool::new(false)),
             last_ns: 0.0,
         }
@@ -521,6 +524,7 @@ impl Gpu {
     /// existing contents, so the scene must paint its own background.
     fn draw(
         &mut self,
+        enc: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         viewport: [f32; 2],
         scene: &Scene,
@@ -615,7 +619,6 @@ impl Gpu {
 
         self.collect_timer();
         let timing = self.timer.as_ref().filter(|t| !t.busy);
-        let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -663,7 +666,6 @@ impl Gpu {
                 pass.draw(0..24, next..n);
             }
         }
-        self.queue.submit([enc.finish()]);
         if let Some(t) = &mut self.timer
             && !t.busy
         {
@@ -672,9 +674,10 @@ impl Gpu {
     }
 
     /// Puts the canvas into `target` through `p`, with the damage flash `tint`
-    /// (physical px) over it; ends the GPU timing a draw began.
+    /// (physical px) over it; ends the GPU timing a draw in the same encoder began.
     fn present(
         &mut self,
+        enc: &mut wgpu::CommandEncoder,
         p: &Present,
         target: &wgpu::TextureView,
         tint: Option<([u32; 4], Color)>,
@@ -687,7 +690,6 @@ impl Gpu {
         self.queue
             .write_buffer(&p.tint, 0, bytemuck::cast_slice(&bytes));
         let timing = self.timer.as_ref().filter(|t| !t.busy && t.began);
-        let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -714,11 +716,21 @@ impl Gpu {
             enc.resolve_query_set(&t.set, 0..2, &t.resolve, 0);
             enc.copy_buffer_to_buffer(&t.resolve, 0, &t.read, 0, 16);
         }
-        self.queue.submit([enc.finish()]);
         if let Some(t) = &mut self.timer
             && t.began
         {
-            (t.busy, t.began) = (true, false);
+            t.ended = true;
+        }
+    }
+
+    /// Sends `enc` to the GPU, one submit per frame, and reads back the timing
+    /// it carries.
+    fn submit(&mut self, enc: wgpu::CommandEncoder) {
+        self.queue.submit([enc.finish()]);
+        if let Some(t) = &mut self.timer
+            && t.ended
+        {
+            (t.busy, t.began, t.ended) = (true, false, false);
             let mapped = t.mapped.clone();
             t.read.slice(..).map_async(wgpu::MapMode::Read, move |r| {
                 mapped.store(r.is_ok(), Ordering::Release);
@@ -952,9 +964,10 @@ impl Renderer {
         let drawn = damage
             .filter(|_| !self.fresh)
             .map(|d| scissor(d, scale, (w, h)));
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         if drawn.is_none_or(|[_, _, sw, sh]| sw > 0 && sh > 0) {
             let view = self.canvas.create_view(&Default::default());
-            self.gpu.draw(&view, viewport, scene, text, drawn);
+            self.gpu.draw(&mut enc, &view, viewport, scene, text, drawn);
         }
         self.fresh = false;
         // The flash goes on the screen only, so the canvas stays clean and
@@ -973,7 +986,8 @@ impl Renderer {
             self.window.request_redraw();
         }
         let view = frame.texture.create_view(&Default::default());
-        self.gpu.present(&self.present, &view, tint);
+        self.gpu.present(&mut enc, &self.present, &view, tint);
+        self.gpu.submit(enc);
         self.window.pre_present();
         self.gpu.queue.present(frame);
         Outcome::Presented(waited)
@@ -1053,15 +1067,28 @@ impl Offscreen {
         scale: f32,
         scissor: Option<[u32; 4]>,
     ) {
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        self.record(&mut enc, scene, text, scale, scissor);
+        self.gpu.submit(enc);
+    }
+
+    fn record(
+        &mut self,
+        enc: &mut wgpu::CommandEncoder,
+        scene: &Scene,
+        text: &mut Text,
+        scale: f32,
+        scissor: Option<[u32; 4]>,
+    ) {
         let s = self.canvas.size();
         let viewport = [s.width as f32 / scale, s.height as f32 / scale];
         let view = self.canvas.create_view(&Default::default());
-        self.gpu.draw(&view, viewport, scene, text, scissor);
+        self.gpu.draw(enc, &view, viewport, scene, text, scissor);
     }
 
-    fn present(&mut self) {
+    fn present(&mut self, enc: &mut wgpu::CommandEncoder) {
         let view = self.target.create_view(&Default::default());
-        self.gpu.present(&self.present, &view, None);
+        self.gpu.present(enc, &self.present, &view, None);
     }
 
     /// Draws, presents and waits for the GPU; returns the GPU time of both
@@ -1074,8 +1101,10 @@ impl Offscreen {
         scissor: Option<[u32; 4]>,
     ) -> std::time::Duration {
         let start = web_time::Instant::now();
-        self.draw(scene, text, scale, scissor);
-        self.present();
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        self.record(&mut enc, scene, text, scale, scissor);
+        self.present(&mut enc);
+        self.gpu.submit(enc);
         self.gpu
             .device
             .poll(wgpu::PollType::wait_indefinitely())
@@ -1090,7 +1119,9 @@ impl Offscreen {
 
     /// Presents the canvas and reads it back as sRGB RGBA8.
     pub(crate) fn read(&mut self) -> Pixels {
-        self.present();
+        let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+        self.present(&mut enc);
+        self.gpu.submit(enc);
         let gpu = &self.gpu;
         let s = self.target.size();
         let (w, h) = (s.width, s.height);

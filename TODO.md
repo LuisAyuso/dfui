@@ -460,15 +460,15 @@ repeated on the phone; lists and text input have no bench.
       redraw holds 120 fps; Bench screen ~3.2 ms GPU / ~1.8 ms CPU, main
       screen ~2.6 ms GPU / ~2.3 ms CPU, against an 8.3 ms budget.
 
-The present pass (canvas → screen, since the HDR work) costs ~0.55 ms a frame
-on the Pixel 10a at 1080×2400, partial frames included: `gpu/text_wall_partial`
-65–73 µs before it (which didn't time the old canvas copy either) and
-550–590 µs with it. An 8-bit canvas measures the same, so it's the full-screen
-pass's bandwidth, not the half floats. Full frames: unchanged within noise.
-
-- [ ] Measure the old `copy_texture_to_texture` the same way: if it was as
-      slow, the pass costs nothing new; if not, SDR could copy from an 8-bit
-      canvas again (same shaders, a different canvas format).
+- [x] The present pass (canvas → screen, since the HDR work) against the old
+      canvas copy, Pixel 10a at 1080×2400, GPU timestamps around each: copy
+      148–165 µs, present pass 187 µs from the half-float canvas and the same
+      from an 8-bit one. So ~30 µs more a frame, and the half floats are free.
+- [x] One submit per frame: draw and present go in one encoder. The timer
+      had spanned two submits and the idle gap between them, which on Android
+      is large: `gpu/text_wall_partial` read 550–590 µs, now 237 µs, the same
+      as before the HDR work once its untimed copy is counted (65–73 µs +
+      ~155 µs). Full frames unchanged: `cards_10` ~2.3 ms, `text_wall` ~3.7 ms.
 
 GPU optimization opportunities, from reading `shader.wgsl` (unmeasured;
 time each with `GpuBench` and `scripts/android-bench.sh` against the
