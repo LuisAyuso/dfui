@@ -7,7 +7,26 @@ use std::ptr;
 
 use ffmpeg_sys_the_third as ff;
 
-use crate::{DmaPlane, Dmabuf, Frame, Planes};
+use crate::mp4::{Codec, Kind, Reader};
+use crate::{Color, DmaPlane, Dmabuf, Frame, Matrix, Planes, Transfer};
+
+/// libavutil's `AVMasteringDisplayMetadata`, which the bindings leave out.
+#[repr(C)]
+struct Mastering {
+    primaries: [[ff::AVRational; 2]; 3],
+    white: [ff::AVRational; 2],
+    min_luminance: ff::AVRational,
+    max_luminance: ff::AVRational,
+    has_primaries: c_int,
+    has_luminance: c_int,
+}
+
+/// libavutil's `AVContentLightMetadata`.
+#[repr(C)]
+struct LightLevel {
+    max_cll: std::ffi::c_uint,
+    max_fall: std::ffi::c_uint,
+}
 
 pub(crate) struct Decoder {
     ctx: *mut ff::AVCodecContext,
@@ -16,6 +35,10 @@ pub(crate) struct Decoder {
     out: VecDeque<Frame>,
     /// Hand frames over as dmabufs; cleared when mapping or importing fails.
     zero_copy: bool,
+    /// The film's peak from its HDR metadata, which only some frames carry.
+    peak: f32,
+    /// A frame came out of VA-API, not the software decoder.
+    hardware: bool,
 }
 
 // SAFETY: the codec context and frames are only used by the thread owning the decoder.
@@ -51,20 +74,24 @@ fn err(what: &str, code: c_int) -> String {
 }
 
 impl Decoder {
-    /// `avcc` is the `avcC` box payload; samples are then length-prefixed NALs.
-    /// The size comes from the stream itself.
-    pub fn new(avcc: &[u8], _width: u32, _height: u32) -> Result<Decoder, String> {
+    /// `config` is the `avcC` or `hvcC` box payload; samples are then
+    /// length-prefixed NALs. The size comes from the stream itself.
+    pub fn new(kind: Codec, config: &[u8], _width: u32, _height: u32) -> Result<Decoder, String> {
+        let (id, name) = match kind {
+            Codec::H264 => (ff::AVCodecID::H264, "H.264"),
+            Codec::Hevc => (ff::AVCodecID::HEVC, "HEVC"),
+        };
         unsafe {
-            let codec = ff::avcodec_find_decoder(ff::AVCodecID::H264);
+            let codec = ff::avcodec_find_decoder(id);
             if codec.is_null() {
-                return Err("libavcodec has no H.264 decoder".into());
+                return Err(format!("libavcodec has no {name} decoder"));
             }
             let ctx = ff::avcodec_alloc_context3(codec);
             let pad = ff::AV_INPUT_BUFFER_PADDING_SIZE as usize;
-            let extra = ff::av_mallocz(avcc.len() + pad) as *mut u8;
-            ptr::copy_nonoverlapping(avcc.as_ptr(), extra, avcc.len());
+            let extra = ff::av_mallocz(config.len() + pad) as *mut u8;
+            ptr::copy_nonoverlapping(config.as_ptr(), extra, config.len());
             (*ctx).extradata = extra;
-            (*ctx).extradata_size = avcc.len() as c_int;
+            (*ctx).extradata_size = config.len() as c_int;
             (*ctx).pkt_timebase = US;
             let mut device = ptr::null_mut();
             let r = ff::av_hwdevice_ctx_create(
@@ -88,9 +115,11 @@ impl Decoder {
                 frame: ff::av_frame_alloc(),
                 out: VecDeque::new(),
                 zero_copy: true,
+                peak: 0.0,
+                hardware: false,
             };
             if r < 0 {
-                return Err(err("opening the H.264 decoder", r));
+                return Err(err(&format!("opening the {name} decoder"), r));
             }
             Ok(me)
         }
@@ -155,13 +184,35 @@ impl Decoder {
                 ff::AVRational { num, den } if num > 0 && den > 0 => num as f32 / den as f32,
                 _ => 1.0,
             };
-            let bt709 = match f.colorspace {
-                ff::AVColorSpace::BT470BG | ff::AVColorSpace::SMPTE170M => false,
-                ff::AVColorSpace::UNSPECIFIED => h >= 720,
-                _ => true,
+            let matrix = match f.colorspace {
+                ff::AVColorSpace::BT2020_NCL | ff::AVColorSpace::BT2020_CL => Matrix::Bt2020,
+                ff::AVColorSpace::BT470BG | ff::AVColorSpace::SMPTE170M => Matrix::Bt601,
+                ff::AVColorSpace::UNSPECIFIED if h < 720 => Matrix::Bt601,
+                _ => Matrix::Bt709,
             };
-            let full_range = f.color_range == ff::AVColorRange::JPEG
-                || f.format == ff::AVPixelFormat::YUVJ420P.0;
+            let transfer = match f.color_trc {
+                ff::AVColorTransferCharacteristic::SMPTE2084 => Transfer::Pq,
+                ff::AVColorTransferCharacteristic::ARIB_STD_B67 => Transfer::Hlg,
+                _ => Transfer::Sdr,
+            };
+            self.peak = peak(self.frame).unwrap_or(self.peak);
+            // A VA-API frame's own format says VAAPI; its surfaces' tells the depth.
+            let format = match f.format == ff::AVPixelFormat::VAAPI.0 && !f.hw_frames_ctx.is_null()
+            {
+                true => (*((*f.hw_frames_ctx).data as *const ff::AVHWFramesContext)).sw_format,
+                false => ff::AVPixelFormat(f.format),
+            };
+            let ten =
+                format == ff::AVPixelFormat::P010LE || format == ff::AVPixelFormat::YUV420P10LE;
+            let color = Color {
+                matrix,
+                transfer,
+                full_range: f.color_range == ff::AVColorRange::JPEG
+                    || f.format == ff::AVPixelFormat::YUVJ420P.0,
+                bits: if ten { 10 } else { 8 },
+                peak: self.peak,
+            };
+            self.hardware |= f.format == ff::AVPixelFormat::VAAPI.0;
             let planes = if f.format == ff::AVPixelFormat::VAAPI.0 {
                 match self.zero_copy.then(|| map(self.frame)).flatten() {
                     Some(d) => Planes::Dmabuf(d),
@@ -191,8 +242,7 @@ impl Decoder {
                 width: w,
                 height: h,
                 sar,
-                bt709,
-                full_range,
+                color,
                 planes,
             }))
         }
@@ -200,6 +250,26 @@ impl Decoder {
 
     pub fn frame(&mut self) -> Option<Frame> {
         self.out.pop_front()
+    }
+
+    /// Whether VA-API decodes 10-bit HEVC here: the first frame of a tiny HDR10
+    /// clip comes out of it rather than the software decoder.
+    pub fn hevc10() -> bool {
+        let probe = || -> Option<bool> {
+            let mut r = Reader::new(&include_bytes!("../tests/hdr10.mp4")[..]).ok()?;
+            let Kind::Video { config, .. } = &r.tracks.first()?.kind else {
+                return None;
+            };
+            let mut dec = Decoder::new(Codec::Hevc, config, 256, 144).ok()?;
+            while let Some(s) = r.sample().ok()? {
+                dec.decode(&s.data, s.pts).ok()?;
+                if dec.frame().is_some() {
+                    return Some(dec.hardware);
+                }
+            }
+            None
+        };
+        probe().unwrap_or(false)
     }
 
     /// Hands over frames in memory from now on, for GPUs that can't import dmabufs.
@@ -218,8 +288,33 @@ impl Drop for Decoder {
     }
 }
 
-/// An NV12 or I420 frame in memory, as NV12.
+/// The film's peak brightness, nits, if `frame` carries HDR metadata:
+/// MaxCLL when known, else the mastering display's peak.
+unsafe fn peak(frame: *const ff::AVFrame) -> Option<f32> {
+    unsafe {
+        let side = |t| {
+            ff::av_frame_get_side_data(frame, t)
+                .as_ref()
+                .map(|d| d.data)
+        };
+        if let Some(d) = side(ff::AVFrameSideDataType::CONTENT_LIGHT_LEVEL) {
+            let l = &*(d as *const LightLevel);
+            if l.max_cll > 0 {
+                return Some(l.max_cll as f32);
+            }
+        }
+        let m = &*(side(ff::AVFrameSideDataType::MASTERING_DISPLAY_METADATA)? as *const Mastering);
+        let ff::AVRational { num, den } = m.max_luminance;
+        (m.has_luminance != 0 && num > 0 && den > 0).then(|| num as f32 / den as f32)
+    }
+}
+
+/// An NV12, I420, P010 or 10-bit I420 frame in memory, as NV12 or P010.
 unsafe fn copy(f: &ff::AVFrame) -> Option<Planes> {
+    let fmt = ff::AVPixelFormat(f.format);
+    if fmt == ff::AVPixelFormat::P010LE || fmt == ff::AVPixelFormat::YUV420P10LE {
+        return unsafe { copy10(f) };
+    }
     let (w, h) = (f.width as usize, f.height as usize);
     let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
     let rows = |p: usize, n: usize, len: usize| -> Vec<&[u8]> {
@@ -256,6 +351,42 @@ unsafe fn copy(f: &ff::AVFrame) -> Option<Planes> {
     })
 }
 
+/// A 10-bit frame as P010: samples in the high bits of little-endian u16s.
+unsafe fn copy10(f: &ff::AVFrame) -> Option<Planes> {
+    let (w, h) = (f.width as usize, f.height as usize);
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let row = |p: usize, r: usize, n: usize| -> &[u16] {
+        unsafe {
+            std::slice::from_raw_parts(
+                f.data[p].offset(r as isize * f.linesize[p] as isize) as *const u16,
+                n,
+            )
+        }
+    };
+    let bytes = |v: &mut Vec<u8>, s: u16| v.extend(s.to_le_bytes());
+    let mut y = Vec::with_capacity(w * h * 2);
+    let mut uv = Vec::with_capacity(cw * ch * 4);
+    if ff::AVPixelFormat(f.format) == ff::AVPixelFormat::P010LE {
+        (0..h).for_each(|r| row(0, r, w).iter().for_each(|&s| bytes(&mut y, s)));
+        (0..ch).for_each(|r| row(1, r, cw * 2).iter().for_each(|&s| bytes(&mut uv, s)));
+    } else {
+        // Planar, in the low bits.
+        (0..h).for_each(|r| row(0, r, w).iter().for_each(|&s| bytes(&mut y, s << 6)));
+        for r in 0..ch {
+            for (u, v) in row(1, r, cw).iter().zip(row(2, r, cw)) {
+                bytes(&mut uv, u << 6);
+                bytes(&mut uv, v << 6);
+            }
+        }
+    }
+    Some(Planes::Cpu {
+        y,
+        y_stride: w * 2,
+        uv,
+        uv_stride: cw * 4,
+    })
+}
+
 /// Owns a DRM PRIME mapping of a VA-API frame; the surface stays out of the
 /// decoder's pool until this drops.
 struct Mapped(*mut ff::AVFrame);
@@ -269,7 +400,7 @@ impl Drop for Mapped {
     }
 }
 
-/// A VA-API frame's NV12 planes as dmabufs, in order Y then UV.
+/// A VA-API frame's NV12 or P010 planes as dmabufs, in order Y then UV.
 unsafe fn map(frame: *mut ff::AVFrame) -> Option<Dmabuf> {
     unsafe {
         let drm = ff::av_frame_alloc();
@@ -307,7 +438,6 @@ unsafe fn map(frame: *mut ff::AVFrame) -> Option<Dmabuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mp4::{Kind, Reader};
 
     #[test]
     fn decodes_the_clips_video() {
@@ -316,11 +446,11 @@ mod tests {
             .tracks
             .iter()
             .find_map(|t| match &t.kind {
-                Kind::Video { avcc, .. } => Some((t.id, avcc.clone())),
+                Kind::Video { config, .. } => Some((t.id, config.clone())),
                 _ => None,
             })
             .unwrap();
-        let mut dec = Decoder::new(&avcc, 64, 48).unwrap();
+        let mut dec = Decoder::new(Codec::H264, &avcc, 64, 48).unwrap();
         let mut frames = Vec::new();
         while let Some(s) = r.sample().unwrap() {
             if s.track == id {
@@ -348,5 +478,57 @@ mod tests {
             }
         };
         eprintln!("frames came as {kind}");
+    }
+
+    /// The HDR10 fixture: 256x144 HEVC Main 10, BT.2020 and PQ, mastered for
+    /// 1000 nits, half a second at 24 fps.
+    fn hdr10(copy: bool) -> Vec<Frame> {
+        let mut r = Reader::new(&include_bytes!("../tests/hdr10.mp4")[..]).unwrap();
+        let (id, config) = r
+            .tracks
+            .iter()
+            .find_map(|t| match &t.kind {
+                Kind::Video { config, .. } => Some((t.id, config.clone())),
+                _ => None,
+            })
+            .unwrap();
+        let mut dec = Decoder::new(Codec::Hevc, &config, 256, 144).unwrap();
+        if copy {
+            dec.copy_frames();
+        }
+        let mut frames = Vec::new();
+        while let Some(s) = r.sample().unwrap() {
+            if s.track == id {
+                dec.decode(&s.data, s.pts).unwrap();
+                frames.extend(std::iter::from_fn(|| dec.frame()));
+            }
+        }
+        dec.finish().unwrap();
+        frames.extend(std::iter::from_fn(|| dec.frame()));
+        frames
+    }
+
+    #[test]
+    fn decodes_hdr10_hevc_with_its_colors() {
+        for copy in [false, true] {
+            let frames = hdr10(copy);
+            assert_eq!(frames.len(), 12);
+            let c = frames[0].color;
+            assert_eq!(
+                (c.matrix, c.transfer, c.bits),
+                (Matrix::Bt2020, Transfer::Pq, 10)
+            );
+            assert!(!c.full_range);
+            assert_eq!(c.peak, 1000.0, "MaxCLL");
+            if let Planes::Cpu { y, y_stride, .. } = &frames[0].planes {
+                assert_eq!((*y_stride, y.len()), (512, 256 * 144 * 2), "P010");
+            }
+        }
+    }
+
+    #[test]
+    fn this_machine_decodes_hevc10_in_hardware() {
+        // The NVIDIA dev box does; elsewhere the answer is just printed.
+        eprintln!("hevc10 in hardware: {}", Decoder::hevc10());
     }
 }

@@ -82,11 +82,16 @@ The player checks its decoder for HEVC Main 10 before asking for `hevc`.
 
 ## Phases
 
-1. **HEVC Main 10 with client tone mapping.** `hvcC` demux, P010 frames
-   (dmabuf and copy), the decoder's colour info and HDR side data, the
-   BT.2390 tone-map in the convert pass, the player asking for `hevc` without
-   `tonemap`. Checks: a GPU test against ffmpeg's own tone map of a short
-   HDR10 clip; The Creator on this desktop.
+1. **HEVC Main 10 with client tone mapping.** Done in dfui-media: `hvcC`
+   demux, P010 frames (zero-copy into `R16Unorm`/`Rg16Unorm`, or copied),
+   colour info and MaxCLL / mastering peak from libavcodec, and the convert
+   pass, which either keeps HDR (`Rgba16Float`, 203 nits = 1.0) or tone-maps
+   with the BT.2390 EETF on the brightest channel from the film's peak to SDR
+   white. `dfui_media::codecs()` adds `hevc` where VA-API decodes 10-bit HEVC
+   (probed with a 9 KB HDR10 clip). Checks: grey ramps at known PQ codes, the
+   HDR10 clip through dmabuf and copy, and libplacebo's own BT.2390 on the
+   same clip (same brightness within 5%; ours is closer to the clip's SDR
+   source). Android stays on H.264 until it has a P010 ImageReader.
 2. **HDR output in dfui.** Done: `App::hdr()`, surface choice, the float
    canvas, the present pass, `Rgba16Float` bitmaps. A GPU test checks the PQ
    codes for 203 and 1000 nits. On this desktop GNOME 51 takes the HDR10

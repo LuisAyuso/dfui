@@ -328,10 +328,12 @@ impl Gpu {
                 // Outline text needs fragment-stage storage buffers (GLES 3.1+/Vulkan/WebGPU).
                 required_limits: wgpu::Limits::downlevel_defaults()
                     .using_resolution(adapter.limits()),
-                // Dmabuf import lets video decoders hand frames over without a copy.
+                // Dmabuf import lets video decoders hand frames over without a
+                // copy, and 16-bit planes carry 10-bit video.
                 required_features: adapter.features()
                     & (wgpu::Features::TIMESTAMP_QUERY
-                        | wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF),
+                        | wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF
+                        | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM),
                 ..Default::default()
             })
             .await

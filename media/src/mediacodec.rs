@@ -11,7 +11,8 @@ use ndk::media::media_codec::{
 };
 use ndk::media::media_format::MediaFormat;
 
-use crate::{Frame, Planes};
+use crate::mp4::Codec;
+use crate::{Color, Frame, Matrix, Planes, Transfer};
 
 const END_OF_STREAM: u32 = 4;
 
@@ -68,7 +69,11 @@ fn err(what: &str, e: impl std::fmt::Display) -> String {
 }
 
 impl Decoder {
-    pub fn new(avcc: &[u8], width: u32, height: u32) -> Result<Decoder, String> {
+    pub fn new(codec: Codec, avcc: &[u8], width: u32, height: u32) -> Result<Decoder, String> {
+        // ponytail: 10-bit output needs a P010 ImageReader (API 33); H.264 only until then.
+        if codec != Codec::H264 {
+            return Err("HEVC isn't supported on Android yet".into());
+        }
         let (nal_len, sps, pps) = parse_avcc(avcc).ok_or("broken avcC")?;
         let mut format = MediaFormat::new();
         format.set_str("mime", "video/avc");
@@ -234,8 +239,17 @@ impl Decoder {
             width: w as u32,
             height: h as u32,
             sar: 1.0,
-            bt709: self.bt709,
-            full_range: self.full_range,
+            color: Color {
+                matrix: if self.bt709 {
+                    Matrix::Bt709
+                } else {
+                    Matrix::Bt601
+                },
+                transfer: Transfer::Sdr,
+                full_range: self.full_range,
+                bits: 8,
+                peak: 0.0,
+            },
             planes: Planes::Cpu {
                 y,
                 y_stride: w,

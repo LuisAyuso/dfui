@@ -8,7 +8,7 @@ repository = "https://github.com/LuisAyuso/dfui"
 readme = "README.md"
 keywords = ["video", "player", "gui", "dfui"]
 categories = ["gui", "multimedia::video"]
-include = ["src/**", "README.md"]
+include = ["src/**", "tests/hdr10.mp4", "README.md"]
 
 [dependencies]
 bytemuck = "1.25.2"

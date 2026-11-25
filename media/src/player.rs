@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::audio::{self, Audio};
 use crate::convert::{Converter, Shown};
-use crate::mp4::{Kind, Reader};
+use crate::mp4::{Codec, Kind, Reader};
 
 #[cfg(target_os = "android")]
 use crate::mediacodec::Decoder as Hw;
@@ -256,10 +256,11 @@ fn demux(s: &Arc<Shared>, source: impl Read) -> Result<(), String> {
     let mut r = Reader::new(source).map_err(|e| format!("reading the stream: {e}"))?;
     let video = r.tracks.iter().find_map(|t| match &t.kind {
         Kind::Video {
-            avcc,
+            codec,
+            config,
             width,
             height,
-        } => Some((t.id, avcc.clone(), (*width, *height))),
+        } => Some((t.id, *codec, config.clone(), (*width, *height))),
         _ => None,
     });
     let sound = r.tracks.iter().find_map(|t| match &t.kind {
@@ -289,13 +290,13 @@ fn demux(s: &Arc<Shared>, source: impl Read) -> Result<(), String> {
     };
     let _ = s.audio.set(audio.clone());
     let tx = match &video {
-        Some((_, avcc, size)) => {
+        Some((_, codec, config, size)) => {
             let (tx, rx) = sync_channel(256);
-            let (s2, avcc, size) = (s.clone(), avcc.clone(), *size);
+            let (s2, codec, config, size) = (s.clone(), *codec, config.clone(), *size);
             std::thread::Builder::new()
                 .name("video decode".into())
                 .spawn(move || {
-                    if let Err(e) = decode(&s2, &avcc, size, rx) {
+                    if let Err(e) = decode(&s2, codec, &config, size, rx) {
                         s2.fail(e);
                     }
                     s2.frames.lock().unwrap().decoded = true;
@@ -340,7 +341,8 @@ fn demux(s: &Arc<Shared>, source: impl Read) -> Result<(), String> {
 
 fn decode(
     s: &Arc<Shared>,
-    avcc: &[u8],
+    codec: Codec,
+    config: &[u8],
     (width, height): (u32, u32),
     rx: Receiver<Msg>,
 ) -> Result<(), String> {
@@ -355,7 +357,7 @@ fn decode(
         std::thread::sleep(Duration::from_millis(20));
     };
     let mut conv = Converter::new(device, queue);
-    let mut dec = Hw::new(avcc, width, height)?;
+    let mut dec = Hw::new(codec, config, width, height)?;
     for msg in rx {
         if s.stopped() {
             break;
@@ -371,7 +373,7 @@ fn decode(
                 conv = Converter::new(d, q);
                 s.frames.lock().unwrap().clear();
             }
-            let Some(shown) = conv.convert(&frame) else {
+            let Some(shown) = conv.convert(&frame, dfui::hdr()) else {
                 if conv.import_failed {
                     dec.copy_frames();
                 }

@@ -12,13 +12,21 @@ pub struct Track {
     pub kind: Kind,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Codec {
+    H264,
+    Hevc,
+}
+
 #[derive(Clone, Debug)]
 pub enum Kind {
-    /// H.264; `avcc` is the `avcC` box's payload (SPS, PPS, NAL length size).
+    /// `config` is the `avcC` or `hvcC` box's payload: parameter sets and the
+    /// size of each NAL's length prefix.
     Video {
+        codec: Codec,
         width: u32,
         height: u32,
-        avcc: Vec<u8>,
+        config: Vec<u8>,
     },
     /// AAC; `config` is the AudioSpecificConfig.
     Audio {
@@ -214,15 +222,19 @@ fn track(trak: &[u8]) -> Option<(Track, i64)> {
     let stsd = child(child(child(mdia, b"minf")?, b"stbl")?, b"stsd")?;
     let (entry_kind, entry) = boxes(stsd.get(8..)?).next()?;
     let kind = match &entry_kind {
-        b"avc1" | b"avc3" => {
+        b"avc1" | b"avc3" | b"hvc1" | b"hev1" => {
             let mut b = Buf(entry);
             b.skip(24);
             let (width, height) = (b.u16() as u32, b.u16() as u32);
-            let avcc = child(entry.get(78..)?, b"avcC")?.to_vec();
+            let (codec, config) = match &entry_kind {
+                b"avc1" | b"avc3" => (Codec::H264, b"avcC"),
+                _ => (Codec::Hevc, b"hvcC"),
+            };
             Kind::Video {
+                codec,
                 width,
                 height,
-                avcc,
+                config: child(entry.get(78..)?, config)?.to_vec(),
             }
         }
         b"mp4a" => {
@@ -474,14 +486,15 @@ mod tests {
             .iter()
             .find_map(|t| match &t.kind {
                 Kind::Video {
+                    codec,
                     width,
                     height,
-                    avcc,
-                } => Some((t.id, *width, *height, avcc.clone())),
+                    config,
+                } => Some((t.id, *width, *height, config.clone(), *codec)),
                 _ => None,
             })
             .unwrap();
-        assert_eq!((video.1, video.2), (64, 48));
+        assert_eq!((video.1, video.2, video.4), (64, 48, Codec::H264));
         assert_eq!(video.3[0], 1, "avcC version");
         let audio = r
             .tracks
@@ -525,5 +538,22 @@ mod tests {
         let mut r = Reader::new(&CLIP[..CLIP.len() - 100]).unwrap();
         let res = std::iter::from_fn(|| r.sample().transpose()).find(|s| s.is_err());
         assert!(res.is_some());
+    }
+
+    #[test]
+    fn reads_hevc_tracks() {
+        let r = Reader::new(&include_bytes!("../tests/hdr10.mp4")[..]).unwrap();
+        let Some(Kind::Video {
+            codec,
+            width,
+            height,
+            config,
+        }) = r.tracks.first().map(|t| &t.kind)
+        else {
+            panic!("no video track");
+        };
+        assert_eq!((*codec, *width, *height), (Codec::Hevc, 256, 144));
+        // hvcC version 1; profile 2 is Main 10.
+        assert_eq!((config[0], config[1] & 0x1f), (1, 2));
     }
 }
