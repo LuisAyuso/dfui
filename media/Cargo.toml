@@ -1,0 +1,47 @@
+[package]
+name = "dfui-media"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+description = "Experimental hardware-decoded video widget for dfui"
+repository = "https://github.com/LuisAyuso/dfui"
+readme = "README.md"
+keywords = ["video", "player", "gui", "dfui"]
+categories = ["gui", "multimedia::video"]
+include = ["src/**", "README.md"]
+
+[dependencies]
+bytemuck = "1.25.2"
+cpal = "0.18"
+dfui.workspace = true
+log = "0.4"
+symphonia = { version = "0.5", default-features = false, features = ["aac"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ffmpeg-sys-the-third = { version = "6", default-features = false, features = ["avcodec"] }
+libc = "0.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+ndk = { version = "0.9", features = ["media", "api-level-26"] }
+
+[dev-dependencies]
+pollster = "1.0.1"
+env_logger = { version = "0.11", default-features = false }
+
+[target.'cfg(target_os = "android")'.dev-dependencies]
+android_logger = "0.15"
+
+[[example]]
+name = "play_android"
+crate-type = ["cdylib"]
+
+[package.metadata.android]
+package = "dev.dfui.media"
+build_targets = ["aarch64-linux-android"]
+
+[package.metadata.android.sdk]
+min_sdk_version = 26
+target_sdk_version = 35
+
+[package.metadata.android.application]
+label = "dfui media"

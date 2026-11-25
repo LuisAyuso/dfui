@@ -38,7 +38,7 @@ name = "gpu"
 harness = false
 
 [workspace]
-members = ["demo", "map", "site", "tools/svg2path"]
+members = ["demo", "map", "media", "site", "tools/svg2path"]
 
 # dfui and dfui-map release together from one `v*` tag; bump both lines.
 [workspace.package]
