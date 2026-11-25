@@ -1,6 +1,7 @@
-//! Hardware-decoded video for dfui: plays the fragmented MP4 (H.264 + AAC)
-//! that the movies-thing server streams, drawing frames as dfui bitmaps.
-//! VA-API through libavcodec on Linux, MediaCodec on Android.
+//! Hardware-decoded video for dfui: plays fragmented MP4 (H.264 or HEVC, with
+//! AAC sound), as the movies-thing server streams it, drawing frames as dfui
+//! bitmaps. VA-API through libavcodec on Linux, MediaCodec on Android. HDR
+//! films go out as HDR when [`dfui::hdr`] is on and are tone-mapped otherwise.
 
 mod audio;
 mod convert;

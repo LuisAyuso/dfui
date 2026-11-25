@@ -16,6 +16,29 @@ allow = [
     "Zlib",
 ]
 
+# Copyleft or unusual licenses, each accepted for one dependency only.
+# MPL-2.0 is copyleft per file: symphonia's own files stay MPL, nothing of ours.
+[[licenses.exceptions]]
+crate = "symphonia"
+allow = ["MPL-2.0"]
+[[licenses.exceptions]]
+crate = "symphonia-core"
+allow = ["MPL-2.0"]
+[[licenses.exceptions]]
+crate = "symphonia-codec-aac"
+allow = ["MPL-2.0"]
+[[licenses.exceptions]]
+crate = "symphonia-metadata"
+allow = ["MPL-2.0"]
+# Generated FFmpeg bindings; FFmpeg itself is the system's (LGPL or GPL).
+[[licenses.exceptions]]
+crate = "ffmpeg-sys-the-third"
+allow = ["WTFPL"]
+# Root certificates, through ureq in the demo and the map's examples only.
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "allow"
 

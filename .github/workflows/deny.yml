@@ -20,4 +20,5 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
-      - run: cargo deny --locked check
+      # The whole workspace: the published crates and the tools around them.
+      - run: cargo deny --workspace --locked check

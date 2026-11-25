@@ -671,7 +671,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "dfui"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -707,7 +707,7 @@ dependencies = [
 
 [[package]]
 name = "dfui-map"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "android_logger",
  "dfui",
@@ -718,7 +718,7 @@ dependencies = [
 
 [[package]]
 name = "dfui-media"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "android_logger",
  "bytemuck",

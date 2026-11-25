@@ -38,9 +38,12 @@ impl Aac {
         };
         let spec = *decoded.spec();
         let frames = decoded.capacity() as u64;
-        let buf = match &mut self.buf {
-            Some(b) if b.capacity() >= frames as usize * spec.channels.count() => b,
-            b => b.insert(SampleBuffer::new(frames, spec)),
+        let need = frames as usize * spec.channels.count();
+        if self.buf.as_ref().is_none_or(|b| b.capacity() < need) {
+            self.buf = Some(SampleBuffer::new(frames, spec));
+        }
+        let Some(buf) = &mut self.buf else {
+            unreachable!("just filled");
         };
         buf.copy_interleaved_ref(decoded);
         (buf.samples(), spec.channels.count())

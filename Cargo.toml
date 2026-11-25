@@ -40,12 +40,12 @@ harness = false
 [workspace]
 members = ["demo", "map", "media", "site", "tools/svg2path"]
 
-# dfui and dfui-map release together from one `v*` tag; bump both lines.
+# dfui, dfui-map and dfui-media release together from one `v*` tag; bump both lines.
 [workspace.package]
-version = "0.1.2"
+version = "0.2.0"
 
 [workspace.dependencies]
-dfui = { path = ".", version = "0.1.2" }
+dfui = { path = ".", version = "0.2.0" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = "30"

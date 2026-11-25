@@ -19,6 +19,8 @@ jobs:
           components: clippy, rustfmt
           targets: aarch64-linux-android, wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      # dfui-media links ALSA (sound) and FFmpeg (video); bindgen needs libclang.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libavcodec-dev libavutil-dev libclang-dev
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete
@@ -28,6 +30,10 @@ jobs:
       # The Android and web runtimes are behind cfg, so the host pass never sees them.
       - run: cargo clippy -p dfui --target aarch64-linux-android --locked -- -D warnings
       - run: cargo clippy -p dfui --target wasm32-unknown-unknown --locked -- -D warnings
+      # MediaCodec instead of VA-API; the Android example embeds a clip named at build time.
+      - run: cargo clippy -p dfui-media --no-deps --target aarch64-linux-android --all-targets --locked -- -D warnings
+        env:
+          DFUI_MEDIA_CLIP: ${{ github.workspace }}/media/tests/clip.mp4
 
   docs:
     runs-on: ubuntu-latest
@@ -37,11 +43,19 @@ jobs:
         with:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
+      # dfui-media links ALSA (sound) and FFmpeg (video); bindgen needs libclang.
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libavcodec-dev libavutil-dev libclang-dev
       # Broken intra-doc links and malformed docs fail here before docs.rs sees them.
       - run: cargo doc --no-deps -p dfui --locked
         env:
           RUSTDOCFLAGS: -D warnings
       # The Android runtime is behind cfg, so the host pass never checks its links.
       - run: cargo doc --no-deps -p dfui --locked --target aarch64-linux-android
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo doc --no-deps -p dfui-media --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - run: cargo doc --no-deps -p dfui-media --locked --target aarch64-linux-android
         env:
           RUSTDOCFLAGS: -D warnings

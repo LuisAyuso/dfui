@@ -10,6 +10,9 @@ keywords = ["video", "player", "gui", "dfui"]
 categories = ["gui", "multimedia::video"]
 include = ["src/**", "tests/hdr10.mp4", "README.md"]
 
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-linux-android"]
+
 [dependencies]
 bytemuck = "1.25.2"
 cpal = "0.18"

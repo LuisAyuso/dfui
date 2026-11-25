@@ -28,9 +28,15 @@ mod focus;
 // TIMERS is already const; clippy misfires on Android's thread_local expansion.
 #[allow(clippy::missing_const_for_thread_local)]
 pub(crate) mod task;
-thread_local! {
-    static INSETS: std::cell::Cell<Insets> = const { std::cell::Cell::new([0.0; 4]) };
+// Already const; clippy misfires on Android's thread_local expansion.
+#[allow(clippy::missing_const_for_thread_local)]
+mod insets_cell {
+    use super::Insets;
+    thread_local! {
+        pub(super) static INSETS: std::cell::Cell<Insets> = const { std::cell::Cell::new([0.0; 4]) };
+    }
 }
+use insets_cell::INSETS;
 
 /// The system bars' insets over the window, logical px: top, right, bottom,
 /// left. For content in a [`Layer::Screen`](crate::Layer::Screen) layer to
