@@ -460,25 +460,33 @@ repeated on the phone; lists and text input have no bench.
       redraw holds 120 fps; Bench screen ~3.2 ms GPU / ~1.8 ms CPU, main
       screen ~2.6 ms GPU / ~2.3 ms CPU, against an 8.3 ms budget.
 
+The present pass (canvas → screen, since the HDR work) costs ~0.55 ms a frame
+on the Pixel 10a at 1080×2400, partial frames included: `gpu/text_wall_partial`
+65–73 µs before it (which didn't time the old canvas copy either) and
+550–590 µs with it. An 8-bit canvas measures the same, so it's the full-screen
+pass's bandwidth, not the half floats. Full frames: unchanged within noise.
+
+- [ ] Measure the old `copy_texture_to_texture` the same way: if it was as
+      slow, the pass costs nothing new; if not, SDR could copy from an 8-bit
+      canvas again (same shaders, a different canvas format).
+
 GPU optimization opportunities, from reading `shader.wgsl` (unmeasured;
 time each with `GpuBench` and `scripts/android-bench.sh` against the
 baseline above, and use `DFUI_SHOW_COST` to see what a screen is bound by):
 
-- [ ] 24 vertices per instance: `gpu.rs` draws every instance with
-      `draw(0..24, ..)` for the four strips of a shadow with a hole, so for
-      every other instance 18 vertices collapse into degenerate triangles
-      and the vertex shader runs 4× too often (on Mali the position pass
-      runs for all of them). Draw `0..6`, with holed shadows in their own
-      24-vertex draws; the batching around those calls already splits runs,
-      painter's order must hold.
+- [x] Rejected after measuring: 24 vertices per instance. Cutting holed
+      shadows into up to four strip instances on the CPU (`clip` per strip)
+      let every instance draw 6 vertices, a 4× smaller vertex load. Pixel 10a
+      A/B, alternating binaries: no difference outside the ±10% run-to-run
+      noise; these screens are fragment- and bandwidth-bound.
 - [ ] Fewer varyings per vertex (~28 floats today, written to memory per
-      vertex on Mali): `color` and `border_color` as `pack4x8unorm` `u32`s
-      (the target is 8 bits a channel and coverage is applied after
-      unpacking), and `rect` as a `vec2`, since the fragment shader only
-      reads its size. About 28 → 18 floats. Shader-only.
-- [ ] Guard `cost += 1u` in `ray_coverage` with `if show_cost`, so no
-      driver keeps the counter in the curve loop when the override is off.
-      Shader-only.
+      vertex on Mali). Less than it looked: `border_color` carries a glyph
+      mask's band header (integers) and the canvas is now half float, so
+      only `rect` → `vec2` and `color` → two `pack2x16float` words remain,
+      28 → 24 floats. Vertex-side work measured as noise above; low value.
+- [ ] Guard `cost += 1u` in `ray_coverage` with `if show_cost`. Likely a
+      no-op: `show_cost` is an override constant, so the pipeline is
+      specialized and `cost` is dead code when it's off.
 - [ ] Shape anti-aliasing without derivatives: `length(dpdx(d), dpdy(d))`
       is about one physical pixel in logical units near an edge; pass the
       scale in `Globals` instead. `fwidth(d)` would be shader-only but
