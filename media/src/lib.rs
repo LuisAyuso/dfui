@@ -17,7 +17,7 @@ pub use convert::Shown;
 
 /// What the server may send this player as is, for a stream request's
 /// `codecs`: H.264 and AAC always, HEVC (10-bit too) where the hardware
-/// decodes it. The answer is worked out once.
+/// decodes it or the CPU is fast enough to. The answer is worked out once.
 pub fn codecs() -> &'static str {
     static CODECS: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
     CODECS.get_or_init(|| {

@@ -252,9 +252,12 @@ impl Decoder {
         self.out.pop_front()
     }
 
-    /// Whether VA-API decodes 10-bit HEVC here: the first frame of a tiny HDR10
-    /// clip comes out of it rather than the software decoder.
+    /// Whether 10-bit HEVC plays here: the first frame of a tiny HDR10 clip
+    /// decodes, through VA-API or on a CPU with threads enough for 4K.
     pub fn hevc10() -> bool {
+        // ponytail: thread count as the speed test; a BC-250 (12 threads) plays 4K
+        // HDR10 on about 2.5 cores. Time a real 4K decode if weaker CPUs stutter.
+        let fast_cpu = std::thread::available_parallelism().is_ok_and(|n| n.get() >= 8);
         let probe = || -> Option<bool> {
             let mut r = Reader::new(&include_bytes!("../tests/hdr10.mp4")[..]).ok()?;
             let Kind::Video { config, .. } = &r.tracks.first()?.kind else {
@@ -264,7 +267,7 @@ impl Decoder {
             while let Some(s) = r.sample().ok()? {
                 dec.decode(&s.data, s.pts).ok()?;
                 if dec.frame().is_some() {
-                    return Some(dec.hardware);
+                    return Some(dec.hardware || fast_cpu);
                 }
             }
             None
@@ -527,8 +530,8 @@ mod tests {
     }
 
     #[test]
-    fn this_machine_decodes_hevc10_in_hardware() {
-        // The NVIDIA dev box does; elsewhere the answer is just printed.
-        eprintln!("hevc10 in hardware: {}", Decoder::hevc10());
+    fn this_machine_plays_hevc10() {
+        // The answer is only printed: it depends on the machine.
+        eprintln!("hevc10: {}", Decoder::hevc10());
     }
 }
