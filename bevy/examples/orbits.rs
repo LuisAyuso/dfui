@@ -4,6 +4,7 @@
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use dfui::taffy::AlignItems;
@@ -24,6 +25,7 @@ struct Hud {
     tx: Sender<Cmd>,
     bodies: usize,
     time: f32,
+    fps: f64,
     speed: f32,
     paused: bool,
 }
@@ -38,7 +40,15 @@ impl dfui::App for Hud {
         };
         let (speed, pause) = (self.tx.clone(), self.tx.clone());
         let panel = column([
-            text("Orbits").size(20.0).into(),
+            row([
+                text("Orbits").size(20.0).into(),
+                spacer().grow(1.0).into(),
+                text(format!("{:.0} fps", self.fps))
+                    .color(Role::Muted)
+                    .into(),
+            ])
+            .align(AlignItems::CENTER)
+            .into(),
             text(format!("{} planets · t = {:.0}", self.bodies, self.time))
                 .color(Role::Muted)
                 .into(),
@@ -115,11 +125,12 @@ struct Planet {
 fn main() {
     let (tx, rx) = channel();
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins((DefaultPlugins, FrameTimeDiagnosticsPlugin::default()))
         .add_plugins(DfuiPlugin::new(move || Hud {
             tx,
             bodies: 0,
             time: 0.0,
+            fps: 0.0,
             speed: 1.0,
             paused: false,
         }))
@@ -234,9 +245,19 @@ fn step(time: Res<Time>, mut sim: ResMut<Sim>, mut planets: Query<(&mut Planet, 
     }
 }
 
-fn hud(sim: Res<Sim>, planets: Query<(), With<Planet>>, mut ui: NonSendMut<Dfui<Hud>>) {
+fn hud(
+    sim: Res<Sim>,
+    diagnostics: Res<DiagnosticsStore>,
+    planets: Query<(), With<Planet>>,
+    mut ui: NonSendMut<Dfui<Hud>>,
+) {
     let bodies = planets.iter().count();
+    let fps = diagnostics
+        .get(&FrameTimeDiagnosticsPlugin::FPS)
+        .and_then(|d| d.smoothed())
+        .unwrap_or(0.0);
     ui.app(|h| {
-        (h.bodies, h.time, h.speed, h.paused) = (bodies, sim.time, sim.speed, sim.paused);
+        (h.bodies, h.time, h.speed, h.paused, h.fps) =
+            (bodies, sim.time, sim.speed, sim.paused, fps);
     });
 }
