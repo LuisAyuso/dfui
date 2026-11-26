@@ -40,10 +40,12 @@ impl<A: App> Bench<A> {
         self.frame()
     }
 
-    /// Paint and damage diff only, as after an event that kept the tree.
+    /// Paint and damage diff, as after an event that kept the tree, plus the
+    /// rebuild a widget asked for while painting (a list scrolled past its rows).
     pub fn paint(&mut self) -> usize {
         let rt = &mut self.0;
         let (scene, spans) = rt.scene(&mut false);
+        rt.rebuild_if_due();
         if let Some((ps, pn)) = &rt.prev {
             std::hint::black_box(damage(ps, pn, &scene, &spans));
         }

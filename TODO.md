@@ -302,8 +302,10 @@ Testing:
 - [ ] Duplicated cubic-to-quadratic splitting in `outline.rs` and `svg2path`.
 - [ ] Tests: goldens only run on the reference machine (a tolerance or a pinned
       software GPU would let CI run them); pattern tests use fixed coordinates.
-- [ ] Benches for `list`, `table` and typing; compare phone numbers against
-      the earlier baseline.
+- [x] Benches for `list`, `table` and typing (`cpu`: `list/*`, `table/*`,
+      `typing/*`).
+- [ ] Run the `list`, `table` and typing benches on the phone and compare
+      them against the earlier baseline.
 - [ ] Docs: 178 undocumented public items; `site/pages/concepts.md` is a stub.
 
 ## Design studies (need discussion before code)
@@ -432,7 +434,16 @@ for 1000). Laying out a 300-char paragraph: ~34 µs uncached (shaped), ~0.1 µs 
 2026-11-08, `be2b81e` against `bedc189` on desktop (alternating runs): no
 regression; every CPU frame bench is within the run-to-run noise (up to ~10%
 at 1000 cards) and `gpu/cards_10` and `gpu/text_wall` are unchanged. Not yet
-repeated on the phone; lists and text input have no bench.
+repeated on the phone.
+
+2026-11-26, desktop: a virtualized list still costs O(n) per frame.
+`list/frame` 263 µs at 1000 rows, 9.7 ms at 100 000; `list/scroll` 131 µs →
+950 µs. `table/frame` 400 µs → 10.2 ms, 439 µs → 12.8 ms sorted (each
+rebuild sorts the whole model). A keystroke (`typing/cards`) costs 16 µs
+alone and 872 µs above 100 cards, since every change rebuilds the whole view.
+
+- [ ] Make list frames independent of the model's size: find what walks all
+      `n` rows per rebuild and per scroll tick (`list/*/100000`).
 
 - [x] Cache text layouts per (text, size, width), evicted after an unused
       frame. Cut frame CPU ~82%.
