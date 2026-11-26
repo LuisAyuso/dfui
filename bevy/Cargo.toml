@@ -1,0 +1,18 @@
+[package]
+name = "dfui-bevy"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+description = "Experimental dfui overlay for Bevy games"
+repository = "https://github.com/LuisAyuso/dfui"
+readme = "README.md"
+keywords = ["bevy", "gui", "hud", "dfui"]
+categories = ["gui", "game-development"]
+include = ["src/**", "README.md"]
+
+[dependencies]
+dfui.workspace = true
+bevy = { version = "0.20", default-features = false, features = ["bevy_ui_render", "bevy_winit"] }
+
+[dev-dependencies]
+bevy = { version = "0.20", default-features = false, features = ["2d", "ui"] }

@@ -9,6 +9,7 @@ part of a change.
 - `src/` — the framework crate (`dfui`)
 - `demo/` — demo app, desktop binary and Android `cdylib`
 - `map/` — experimental map widget (`dfui-map`), optional, on dfui's public API
+- `bevy/` — experimental Bevy overlay (`dfui-bevy`) on `dfui::Embedded`
 - `site/` — docs site published to GitHub Pages: guide pages and a live example per widget
 - `tools/svg2path/` — converts SVG icons to shapes an app can bundle (see Icons in `README.md`)
 - `docs/architecture.md` — how it fits together

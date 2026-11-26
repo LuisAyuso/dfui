@@ -22,8 +22,11 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [x] `Embedded`: a dfui app drawn with a host's wgpu device into its
       texture, fed its winit events, e.g. a game HUD (Bevy 0.20 shares
       wgpu 30 and winit 0.30).
-- [ ] Bevy plugin: forward `RawWinitWindowEvent`s, render into an `Image`
-      shown over the camera, drop input the UI took; HUD example.
+- [x] `dfui-bevy`: forwards `RawWinitWindowEvent`s, renders into an
+      `Image` on a full-window UI node, reports `UiTookInput`; `orbits`
+      example.
+- [ ] `dfui-bevy` follow-ups: one overlay per window, skip unchanged
+      frames, keep the overlay node out of Bevy picking.
 
 ## Findings from a real app
 

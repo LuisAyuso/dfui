@@ -20,7 +20,7 @@ jobs:
           targets: aarch64-linux-android, wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       # dfui-media links ALSA (sound) and FFmpeg (video); bindgen needs libclang.
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libavcodec-dev libavutil-dev libclang-dev
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libavcodec-dev libavutil-dev libclang-dev libudev-dev libwayland-dev libxkbcommon-dev
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete
@@ -44,7 +44,7 @@ jobs:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
       # dfui-media links ALSA (sound) and FFmpeg (video); bindgen needs libclang.
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libavcodec-dev libavutil-dev libclang-dev
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libavcodec-dev libavutil-dev libclang-dev libudev-dev libwayland-dev libxkbcommon-dev
       # Broken intra-doc links and malformed docs fail here before docs.rs sees them.
       - run: cargo doc --no-deps -p dfui --locked
         env:

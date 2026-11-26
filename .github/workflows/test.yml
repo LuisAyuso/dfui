@@ -18,7 +18,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # dfui-media links ALSA (sound) and FFmpeg (video); bindgen needs libclang.
-      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libavcodec-dev libavutil-dev libclang-dev
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libavcodec-dev libavutil-dev libclang-dev libudev-dev libwayland-dev libxkbcommon-dev
       # Selects targets to leave out tests/golden.rs, whose images come from the reference machine.
       - run: cargo test --workspace --lib --bins --test patterns --locked
       # The widget examples and the README, compiled but not run (they open a window).
