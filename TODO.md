@@ -442,8 +442,15 @@ repeated on the phone.
 rebuild sorts the whole model). A keystroke (`typing/cards`) costs 16 µs
 alone and 872 µs above 100 cards, since every change rebuilds the whole view.
 
-- [ ] Make list frames independent of the model's size: find what walks all
-      `n` rows per rebuild and per scroll tick (`list/*/100000`).
+- [x] Cheaper list rebuilds: hashing every key was ~90% of a 100 000-row
+      rebuild, so the key index is reused while the keys are unchanged and
+      `diff` only visits on-screen rows. `list/frame` 8.25 → 0.55 ms,
+      `list/scroll` 699 → 120 µs, `table/frame` 7.86 → 0.72 ms at 100 000.
+- [ ] List frames still O(n): reading every key to spot a change and the
+      height prefix sum (~0.5 ms at 100 000). Needs a change version on
+      `ListModel` and summed heights to go away.
+- [ ] `table` sorts the whole model on every rebuild (2.7 ms sorted vs
+      0.72 ms unsorted at 100 000): keep the order until the sort or keys change.
 
 - [x] Cache text layouts per (text, size, width), evicted after an unused
       frame. Cut frame CPU ~82%.

@@ -1,5 +1,6 @@
 use std::cell::{OnceCell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::mem;
 use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
@@ -105,8 +106,9 @@ struct ListState {
     shown: Vec<(u64, Thunk)>,
     /// Screen y (relative to the list's top) of each built row at the last paint.
     painted: HashMap<u64, f32>,
-    /// Every key at the last build.
-    keys: HashSet<u64>,
+    /// Every key at the last build, in order, and each one's index.
+    keys: Vec<u64>,
+    index: HashMap<u64, usize>,
     anims: HashMap<u64, Anim>,
     ghosts: Vec<Ghost>,
     built_once: bool,
@@ -186,13 +188,25 @@ impl List {
     fn build(&self, s: &mut ListState, now: Instant) -> Element {
         let rows = &*self.rows;
         let n = rows.len();
-        let keys: Vec<u64> = (0..n).map(|i| rows.key(i)).collect();
-        let index: HashMap<u64, usize> = keys.iter().enumerate().map(|(i, &k)| (k, i)).collect();
+        // Hashing every key is most of a rebuild, so skip it while they're unchanged.
+        let same = n == s.keys.len() && (0..n).all(|i| rows.key(i) == s.keys[i]);
+        let (keys, index, prev) = if same {
+            (mem::take(&mut s.keys), mem::take(&mut s.index), None)
+        } else {
+            let keys: Vec<u64> = (0..n).map(|i| rows.key(i)).collect();
+            let index = keys.iter().enumerate().map(|(i, &k)| (k, i)).collect();
+            (keys, index, Some(mem::take(&mut s.index)))
+        };
         let est = s.estimate();
-        let mut ys = Vec::with_capacity(n + 1);
-        ys.push(0.0);
-        for &k in &keys {
-            ys.push(ys.last().unwrap() + s.height(k, est));
+        let mut ys = vec![est; n + 1];
+        ys[0] = 0.0;
+        for (k, &h) in s.heights.borrow().iter() {
+            if let Some(&i) = index.get(k) {
+                ys[i + 1] = h;
+            }
+        }
+        for i in 0..n {
+            ys[i + 1] += ys[i];
         }
         let vh = s.viewport();
 
@@ -215,7 +229,7 @@ impl List {
         let last = ys[..n].partition_point(|&t| t < hi).max(first);
 
         if self.animate && s.built_once {
-            self.diff(s, &index, &ys, offset, now);
+            self.diff(s, &keys, &index, prev.as_ref(), &ys, offset, now);
         }
         s.anims.retain(|_, a| a.running(now));
         s.ghosts
@@ -252,16 +266,21 @@ impl List {
         children.push(spacer(ys[n] - ys[last]));
         s.built = first..last;
         s.top = ys[first];
-        s.keys = keys.into_iter().collect();
+        s.keys = keys;
+        s.index = index;
         s.built_once = true;
         column(children).into()
     }
 
     /// Starts animations for what changed on screen since the last paint.
+    /// `old` is the last build's index, `None` when the keys are unchanged.
+    #[allow(clippy::too_many_arguments)]
     fn diff(
         &self,
         s: &mut ListState,
+        keys: &[u64],
         index: &HashMap<u64, usize>,
+        old: Option<&HashMap<u64, usize>>,
         ys: &[f32],
         offset: f32,
         now: Instant,
@@ -295,11 +314,12 @@ impl List {
                 });
             }
         }
-        for (&key, &i) in index {
+        let n = keys.len();
+        let first = ys[1..].partition_point(|&b| b <= offset);
+        let last = ys[..n].partition_point(|&t| t < offset + vh);
+        for i in first..last.max(first) {
+            let key = keys[i];
             let y = ys[i] - offset;
-            if y + s.height(key, est) <= 0.0 || y >= vh {
-                continue;
-            }
             let cur = s
                 .anims
                 .get(&key)
@@ -308,7 +328,7 @@ impl List {
             let from = match s.painted.get(&key) {
                 Some(&was) if (was - y).abs() > 0.5 => (cur.0, cur.1 + y - was),
                 Some(_) => continue,
-                None if !s.keys.contains(&key) => (-1.0, 0.0),
+                None if old.is_some_and(|o| !o.contains_key(&key)) => (-1.0, 0.0),
                 None => continue,
             };
             s.anims.insert(
