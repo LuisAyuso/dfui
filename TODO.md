@@ -306,10 +306,12 @@ form-heavy with line charts) from egui. The port compiled almost at once;
 the view as a function of one state made saving inputs trivial and
 replaced egui's repaint polling with a `Notifier`. What it hand-rolled:
 
-- [ ] Number field: `text_input` over a number reformats what's typed
-      ("3." becomes "3", an emptied field snaps back), so the app keeps a
-      draft string while it doesn't parse. A `number_input(value)` with
-      range, step and `on_change(f64)` would replace egui's `DragValue`.
+- [x] Number field: `number_input(value).range(..)` keeps the draft while
+      it doesn't parse or is out of range (red), reports valid values, and
+      clamps on Enter. invest_study's own version clamped every keystroke,
+      so a year couldn't be typed from "2".
+- [ ] `number_input` follow-ups: clamp on blur too (only Enter now), step
+      with Up/Down or drag like egui's `DragValue`, formatting (decimals).
 - [ ] Setter boilerplate: `move |cx, v| cx.update(h, move |s: &mut S| s.x = v)`
       per field, against egui's `&mut self.x`. A helper that turns a
       `fn(&mut S, V)` into the handler (`h.set(|s, v| s.x = v)`) would halve it.

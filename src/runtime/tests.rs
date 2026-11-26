@@ -11,9 +11,9 @@ use crate::path::{Path, Shape};
 use crate::text::Font;
 use crate::widget::{Handle, PaintCx, Scope, Widget};
 use crate::widgets::{
-    Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon, icon_button, on_back,
-    on_key, overlays, popup, provide, radio, row, scroll, segmented, slider, snackbar, spacer,
-    stateful, stream_builder, text, text_input, toggle, tooltip, watch,
+    Snapshot, Styled, button, column, dialog, dropdown, future_builder, icon, icon_button,
+    number_input, on_back, on_key, overlays, popup, provide, radio, row, scroll, segmented, slider,
+    snackbar, spacer, stateful, stream_builder, text, text_input, toggle, tooltip, watch,
 };
 
 /// State of the root `stateful`.
@@ -96,6 +96,46 @@ impl App for Screens {
         })
         .into()
     }
+}
+
+struct Year;
+
+impl App for Year {
+    fn view(&self) -> Element {
+        crate::widgets::stateful_with(
+            || 2021.0,
+            |&y: &f64, h| {
+                number_input(y)
+                    .range(1990.0..=2100.0)
+                    .on_change(move |cx, v| cx.update(h, move |s: &mut f64| *s = v))
+            },
+        )
+        .into()
+    }
+}
+
+#[test]
+fn number_input_keeps_out_of_range_drafts_until_valid() {
+    let mut rt = Runtime::new(Year);
+    rt.viewport = (200.0, 200.0);
+    rt.relayout();
+    rt.dispatch(Event::PointerDown { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::PointerUp { x: 10.0, y: 10.0 });
+    rt.dispatch(Event::Key(Key::SelectAll));
+    for (typed, year) in [("2", 2021.0), ("0", 2021.0), ("2", 2021.0), ("6", 2026.0)] {
+        rt.dispatch(Event::Text(typed.into()));
+        assert_eq!(*root::<f64, _>(&mut rt), year, "after {typed}");
+    }
+    rt.dispatch(Event::Text("9".into()));
+    assert_eq!(*root::<f64, _>(&mut rt), 2026.0, "20269 is out of range");
+    rt.dispatch(Event::Key(Key::Enter));
+    assert_eq!(*root::<f64, _>(&mut rt), 2100.0, "Enter clamps");
+    rt.dispatch(Event::Text("x".into()));
+    assert_eq!(
+        *root::<f64, _>(&mut rt),
+        2100.0,
+        "typed after the clamped value"
+    );
 }
 
 #[test]

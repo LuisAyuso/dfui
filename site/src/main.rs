@@ -19,6 +19,7 @@ const WIDGETS: &[&str] = &[
     "scroll",
     "stateful",
     "text_input",
+    "number_input",
     "toggle",
     "slider",
     "progress",

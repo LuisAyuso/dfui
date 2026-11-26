@@ -25,6 +25,7 @@ mod icon;
 mod image;
 mod label;
 mod list;
+mod number_input;
 mod overlay;
 mod page;
 mod progress;
@@ -52,6 +53,7 @@ pub use icon::{Icon, icon, icon_button};
 pub use image::{Image, image};
 pub use label::{Label, text};
 pub use list::{List, list};
+pub use number_input::{NumberInput, number_input};
 pub use overlay::{
     Dropdown, OnBack, OnKey, Overlay, Overlays, Shown, backdrop, bottom_sheet, dialog, drawer,
     dropdown, on_back, on_key, overlay, overlays, popup, screen, snackbar, tooltip,
