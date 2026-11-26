@@ -95,7 +95,11 @@ fn scroll_ticks<A: App>(c: &mut Criterion, name: &str, n: u32, app: A) {
     c.bench_with_input(BenchmarkId::new(name, n), &n, |b, _| {
         b.iter(|| {
             tick += 1;
-            let dy = if (tick / 100).is_multiple_of(2) { 40.0 } else { -40.0 };
+            let dy = if (tick / 100).is_multiple_of(2) {
+                40.0
+            } else {
+                -40.0
+            };
             bench.event(Event::Wheel {
                 x: 200.0,
                 y: 400.0,

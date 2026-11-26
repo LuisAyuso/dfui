@@ -6,8 +6,8 @@ use std::rc::Rc;
 use dfui::model::Keyed;
 use dfui::taffy::AlignItems;
 use dfui::widgets::{
-    Column, Scroll, Styled, button, column, container, list, row, scroll, spacer, stateful, table, text,
-    text_input,
+    Column, Scroll, Styled, button, column, container, list, row, scroll, spacer, stateful, table,
+    text, text_input,
 };
 use dfui::{App, Color, Element, Role, Shadow};
 
