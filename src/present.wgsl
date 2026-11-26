@@ -5,6 +5,8 @@
 override pq: bool = false;
 // The target encodes to sRGB itself, so it gets linear values.
 override srgb: bool = false;
+// Un-premultiplied output.
+override straight: bool = false;
 // Nits that canvas 1.0 means on an HDR screen (ITU-R BT.2408 reference white).
 override white: f32 = 203.0;
 
@@ -55,9 +57,16 @@ fn fs(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> {
         return vec4(pq_encode(nits), 1.0);
     }
     let rgb = clamp(c.rgb, vec3(0.0), vec3(1.0));
-    if srgb {
-        // Premultiplied: decode the color, not the coverage.
-        return vec4(linear(rgb / max(c.a, 1e-6)) * c.a, c.a);
+    if !(srgb || straight) {
+        return vec4(rgb, c.a);
     }
-    return vec4(rgb, c.a);
+    // Premultiplied: decode the color, not the coverage.
+    var u = rgb / max(c.a, 1e-6);
+    if srgb {
+        u = linear(u);
+    }
+    if straight {
+        return vec4(u, c.a);
+    }
+    return vec4(u * c.a, c.a);
 }

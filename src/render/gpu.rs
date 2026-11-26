@@ -178,7 +178,14 @@ struct Present {
 }
 
 impl Present {
-    fn new(gpu: &Gpu, canvas: &wgpu::Texture, target: wgpu::TextureFormat, pq: bool) -> Present {
+    /// `straight` un-premultiplies the output, as engines' textures expect.
+    fn new(
+        gpu: &Gpu,
+        canvas: &wgpu::Texture,
+        target: wgpu::TextureFormat,
+        pq: bool,
+        straight: bool,
+    ) -> Present {
         let device = &gpu.device;
         let shader = device.create_shader_module(wgpu::include_wgsl!("../present.wgsl"));
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -230,6 +237,7 @@ impl Present {
                     constants: &[
                         ("pq", f64::from(u8::from(pq))),
                         ("srgb", f64::from(u8::from(target.is_srgb()))),
+                        ("straight", f64::from(u8::from(straight))),
                     ],
                     ..Default::default()
                 },
@@ -871,7 +879,7 @@ impl Renderer {
         };
         surface.configure(&gpu.device, &config);
         let canvas = canvas(&gpu, (config.width, config.height));
-        let present = Present::new(&gpu, &canvas, format, hdr);
+        let present = Present::new(&gpu, &canvas, format, hdr, false);
         Ok(Renderer {
             surface,
             config,
@@ -903,7 +911,7 @@ impl Renderer {
     fn reconfigure(&mut self) {
         self.surface.configure(&self.gpu.device, &self.config);
         self.canvas = canvas(&self.gpu, (self.config.width, self.config.height));
-        self.present = Present::new(&self.gpu, &self.canvas, self.config.format, self.hdr);
+        self.present = Present::new(&self.gpu, &self.canvas, self.config.format, self.hdr, false);
         self.fresh = true;
     }
 
@@ -1045,7 +1053,7 @@ impl Offscreen {
             view_formats: &[],
         });
         let canvas = canvas(&gpu, size);
-        let present = Present::new(&gpu, &canvas, format, false);
+        let present = Present::new(&gpu, &canvas, format, false, false);
         Offscreen {
             gpu,
             canvas,
@@ -1067,6 +1075,7 @@ impl Offscreen {
             &self.canvas,
             wgpu::TextureFormat::Rgba8Unorm,
             true,
+            false,
         );
     }
 
@@ -1213,7 +1222,7 @@ impl Embed {
         // Its readback rides on our submits; the host submits here.
         gpu.timer = None;
         let canvas = canvas(&gpu, (size.0.max(1), size.1.max(1)));
-        let present = Present::new(&gpu, &canvas, format, false);
+        let present = Present::new(&gpu, &canvas, format, false, true);
         Embed {
             gpu,
             canvas,
@@ -1229,7 +1238,7 @@ impl Embed {
             return;
         }
         self.canvas = canvas(&self.gpu, (w.max(1), h.max(1)));
-        self.present = Present::new(&self.gpu, &self.canvas, self.format, false);
+        self.present = Present::new(&self.gpu, &self.canvas, self.format, false, true);
     }
 
     /// Records the scene into `enc`; the target must be the size given to `resize`.

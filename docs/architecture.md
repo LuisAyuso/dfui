@@ -125,7 +125,8 @@ the window through the `Host` trait.
 game: it takes the host's wgpu device and queue, translates the same winit
 `WindowEvent`s as the window runtime, and records into the host's encoder
 and texture view each frame. The canvas clears to transparent, so an app
-with a transparent `background` draws a premultiplied overlay; sRGB targets
+with a transparent `background` draws an overlay with straight alpha, as
+engine textures expect; sRGB targets
 get linear values from the present pass. An event counts as taken by the UI
 when a widget stopped or captured it, the pointer is over a node that
 painted last frame, or a widget has keyboard focus. Tasks wake a flag that

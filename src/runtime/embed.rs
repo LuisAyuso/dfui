@@ -12,8 +12,8 @@ use crate::widget::Event;
 
 /// A dfui app drawn into the host's texture with the host's wgpu device: the
 /// host forwards window events and records [`render`](Self::render) once a
-/// frame. Draws a premultiplied overlay where the app's background is
-/// transparent.
+/// frame. Where the app's background is transparent it draws an overlay,
+/// with straight (not premultiplied) alpha.
 pub struct Embedded<A: App> {
     rt: Runtime<A>,
     gpu: Embed,
