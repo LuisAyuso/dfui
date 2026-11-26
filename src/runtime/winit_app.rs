@@ -138,14 +138,24 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                     r.window().request_redraw();
                 }
             }
+            e => {
+                self.input(e, scale);
+            }
+        }
+    }
+}
+
+impl<A: App> Runtime<A> {
+    /// Translates an input event; returns whether the UI took it: a widget
+    /// stopped or captured the pointer, or holds keyboard focus.
+    pub(super) fn input(&mut self, event: WindowEvent, scale: f32) -> bool {
+        let took = match event {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x as f32 / scale, position.y as f32 / scale);
                 let (x, y) = self.cursor;
-                self.dispatch(Event::PointerMove { x, y });
+                self.dispatch(Event::PointerMove { x, y })
             }
-            WindowEvent::CursorLeft { .. } => {
-                self.dispatch(Event::Leave);
-            }
+            WindowEvent::CursorLeft { .. } => self.dispatch(Event::Leave),
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
@@ -155,7 +165,7 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                 self.dispatch(match state {
                     ElementState::Pressed => Event::PointerDown { x, y },
                     ElementState::Released => Event::PointerUp { x, y },
-                });
+                })
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let (mut dx, mut dy) = match delta {
@@ -168,30 +178,39 @@ impl<A: App> ApplicationHandler for Runtime<A> {
                 let (x, y) = self.cursor;
                 if self.mods.control_key() {
                     let scale = (-dy / 200.0).exp();
-                    self.dispatch(Event::Pinch { x, y, scale });
+                    self.dispatch(Event::Pinch { x, y, scale })
                 } else {
-                    self.dispatch(Event::Wheel { x, y, dx, dy });
+                    self.dispatch(Event::Wheel { x, y, dx, dy })
                 }
             }
             WindowEvent::PinchGesture { delta, .. } => {
                 let (x, y) = self.cursor;
                 let scale = 1.0 + delta as f32;
-                self.dispatch(Event::Pinch { x, y, scale });
+                self.dispatch(Event::Pinch { x, y, scale })
             }
-            WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
+            WindowEvent::ModifiersChanged(m) => {
+                self.mods = m.state();
+                false
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 self.key_pressed(&event.logical_key, event.text.as_deref());
+                self.focused.is_some()
             }
             WindowEvent::Ime(Ime::Commit(t)) => {
                 self.dispatch(Event::Text(t));
+                self.focused.is_some()
             }
-            WindowEvent::Touch(t) => self.touch(
-                t.id,
-                t.phase,
-                t.location.x as f32 / scale,
-                t.location.y as f32 / scale,
-            ),
-            _ => {}
-        }
+            WindowEvent::Touch(t) => {
+                self.touch(
+                    t.id,
+                    t.phase,
+                    t.location.x as f32 / scale,
+                    t.location.y as f32 / scale,
+                );
+                false
+            }
+            _ => false,
+        };
+        took || self.captured.is_some()
     }
 }

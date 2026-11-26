@@ -24,6 +24,8 @@ mod bench;
 mod clipboard;
 #[cfg(target_os = "android")]
 mod editor;
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+mod embed;
 mod focus;
 // TIMERS is already const; clippy misfires on Android's thread_local expansion.
 #[allow(clippy::missing_const_for_thread_local)]
@@ -70,6 +72,8 @@ mod winit_app;
 
 pub use bench::{Bench, GpuBench, snapshot};
 use clipboard::Clipboard;
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+pub use embed::Embedded;
 
 type PendingRenderer = Pin<Box<dyn Future<Output = Result<Renderer, String>>>>;
 

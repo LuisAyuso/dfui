@@ -119,6 +119,18 @@ the window through the `Host` trait.
   hosts one, embedded by its widget page in an iframe so its canvas and
   event loop don't take over the docs page.
 
+## Embedding
+
+`Embedded` (`runtime/embed.rs`) runs an app inside a host's loop, e.g. a
+game: it takes the host's wgpu device and queue, translates the same winit
+`WindowEvent`s as the window runtime, and records into the host's encoder
+and texture view each frame. The canvas clears to transparent, so an app
+with a transparent `background` draws a premultiplied overlay; sRGB targets
+get linear values from the present pass. An event counts as taken by the UI
+when a widget stopped or captured it, the pointer is over a node that
+painted last frame, or a widget has keyboard focus. Tasks wake a flag that
+`render` checks, as the window runtime does in `about_to_wait`.
+
 ## Layout
 
 `flatten` produces a pre-order `Vec<Node>`, once per rebuilt tree; other

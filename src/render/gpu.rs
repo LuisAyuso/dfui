@@ -227,7 +227,10 @@ impl Present {
                 module: &shader,
                 entry_point: Some("fs"),
                 compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &[("pq", f64::from(u8::from(pq)))],
+                    constants: &[
+                        ("pq", f64::from(u8::from(pq))),
+                        ("srgb", f64::from(u8::from(target.is_srgb()))),
+                    ],
                     ..Default::default()
                 },
                 targets: &[Some(target.into())],
@@ -341,7 +344,15 @@ impl Gpu {
             })
             .await
             .map_err(|e| format!("the GPU can't run dfui: {e}"))?;
+        Ok(Gpu::with_device(device, queue, format))
+    }
 
+    /// Sets up on a device someone else made; it needs fragment-stage storage buffers.
+    pub(crate) fn with_device(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Gpu {
         let globals = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
             size: size_of::<Globals>() as u64,
@@ -483,7 +494,7 @@ impl Gpu {
             .features()
             .contains(wgpu::Features::TIMESTAMP_QUERY)
             .then(|| GpuTimer::new(&device));
-        Ok(Gpu {
+        Gpu {
             device,
             queue,
             pipeline,
@@ -501,7 +512,7 @@ impl Gpu {
             empty: true,
             timer,
             canvas_format: format,
-        })
+        }
     }
 
     /// Reads back the last timestamp sample if its mapping has completed.
@@ -628,7 +639,7 @@ impl Gpu {
                     ops: wgpu::Operations {
                         load: match scissor {
                             Some(_) => wgpu::LoadOp::Load,
-                            None => wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            None => wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         },
                         store: wgpu::StoreOp::Store,
                     },
@@ -1122,51 +1133,119 @@ impl Offscreen {
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         self.present(&mut enc);
         self.gpu.submit(enc);
-        let gpu = &self.gpu;
-        let s = self.target.size();
-        let (w, h) = (s.width, s.height);
-        let target = &self.target;
-        let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-        let buf = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: (row * h) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut enc = gpu.device.create_command_encoder(&Default::default());
-        enc.copy_texture_to_buffer(
-            target.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buf,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(row),
-                    rows_per_image: None,
-                },
+        read_texture(&self.gpu.device, &self.gpu.queue, &self.target)
+    }
+}
+
+/// Reads an RGBA8 texture back to the CPU.
+pub(crate) fn read_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    target: &wgpu::Texture,
+) -> Pixels {
+    let s = target.size();
+    let (w, h) = (s.width, s.height);
+    let row = (w * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: (row * h) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&Default::default());
+    enc.copy_texture_to_buffer(
+        target.as_image_copy(),
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buf,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: None,
             },
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-        );
-        gpu.queue.submit([enc.finish()]);
-        buf.slice(..)
-            .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
-        gpu.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("poll");
-        let data = buf.slice(..).get_mapped_range().expect("mapped range");
-        let mut rgba = vec![0; (w * h * 4) as usize];
-        for y in 0..h {
-            let src = &data[(y * row) as usize..][..(w * 4) as usize];
-            rgba[(y * w * 4) as usize..][..(w * 4) as usize].copy_from_slice(src);
-        }
-        Pixels {
+        },
+        wgpu::Extent3d {
             width: w,
             height: h,
-            rgba,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit([enc.finish()]);
+    buf.slice(..)
+        .map_async(wgpu::MapMode::Read, |r| r.expect("map readback"));
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .expect("poll");
+    let data = buf.slice(..).get_mapped_range().expect("mapped range");
+    let mut rgba = vec![0; (w * h * 4) as usize];
+    for y in 0..h {
+        let src = &data[(y * row) as usize..][..(w * 4) as usize];
+        rgba[(y * w * 4) as usize..][..(w * 4) as usize].copy_from_slice(src);
+    }
+    Pixels {
+        width: w,
+        height: h,
+        rgba,
+    }
+}
+
+/// Draws scenes with someone else's device into their texture, e.g. a game's.
+pub(crate) struct Embed {
+    gpu: Gpu,
+    canvas: wgpu::Texture,
+    present: Present,
+    format: wgpu::TextureFormat,
+}
+
+impl Embed {
+    /// `format` is the target's; sRGB targets get linear values.
+    pub(crate) fn new(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        format: wgpu::TextureFormat,
+        size: (u32, u32),
+    ) -> Embed {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            *SHARED.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some((device.clone(), queue.clone()));
         }
+        let mut gpu = Gpu::with_device(device, queue, wgpu::TextureFormat::Rgba16Float);
+        // Its readback rides on our submits; the host submits here.
+        gpu.timer = None;
+        let canvas = canvas(&gpu, (size.0.max(1), size.1.max(1)));
+        let present = Present::new(&gpu, &canvas, format, false);
+        Embed {
+            gpu,
+            canvas,
+            present,
+            format,
+        }
+    }
+
+    /// Physical px.
+    pub(crate) fn resize(&mut self, (w, h): (u32, u32)) {
+        let s = self.canvas.size();
+        if (s.width, s.height) == (w.max(1), h.max(1)) {
+            return;
+        }
+        self.canvas = canvas(&self.gpu, (w.max(1), h.max(1)));
+        self.present = Present::new(&self.gpu, &self.canvas, self.format, false);
+    }
+
+    /// Records the scene into `enc`; the target must be the size given to `resize`.
+    pub(crate) fn render(
+        &mut self,
+        enc: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        scene: &Scene,
+        text: &mut Text,
+        scale: f32,
+    ) {
+        let s = self.canvas.size();
+        let viewport = [s.width as f32 / scale, s.height as f32 / scale];
+        let view = self.canvas.create_view(&Default::default());
+        self.gpu.draw(enc, &view, viewport, scene, text, None);
+        self.gpu.present(enc, &self.present, target, None);
     }
 }
 

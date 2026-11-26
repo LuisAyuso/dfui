@@ -19,6 +19,11 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
       unchanged on the Pixel 10a, for ASCII outlines growing 89 → 253 KB.
 - [x] Status bar icon color: dark icons over a light `App::background`
       (API 30+).
+- [x] `Embedded`: a dfui app drawn with a host's wgpu device into its
+      texture, fed its winit events, e.g. a game HUD (Bevy 0.20 shares
+      wgpu 30 and winit 0.30).
+- [ ] Bevy plugin: forward `RawWinitWindowEvent`s, render into an `Image`
+      shown over the camera, drop input the UI took; HUD example.
 
 ## Findings from a real app
 

@@ -1933,3 +1933,49 @@ fn reveal_glides_to_the_focused_item_and_then_lets_go() {
     assert_eq!(first_item(&rt).0, -180.0);
     task::set_clock(None);
 }
+
+struct Hud;
+
+impl App for Hud {
+    fn view(&self) -> Element {
+        column([button(text("+")).height(40.0).into()]).into()
+    }
+    fn background(&self) -> Color {
+        Color::TRANSPARENT
+    }
+}
+
+#[test]
+#[ignore = "needs a GPU"]
+fn embedded_draws_an_overlay_into_the_hosts_texture() {
+    let off = crate::render::Offscreen::new((1, 1));
+    let (device, queue) = off.device();
+    let (device, queue) = (device.clone(), queue.clone());
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d {
+            width: 100,
+            height: 100,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let mut ui = super::Embedded::new(Hud, device.clone(), queue.clone(), format, (100, 100), 1.0);
+    let mut enc = device.create_command_encoder(&Default::default());
+    ui.render(&mut enc, &target.create_view(&Default::default()));
+    queue.submit([enc.finish()]);
+    let px = crate::render::read_texture(&device, &queue, &target);
+    let alpha = |x: u32, y: u32| px.rgba[((y * 100 + x) * 4 + 3) as usize];
+    assert_eq!(alpha(50, 20), 255, "the button is drawn");
+    assert_eq!(alpha(50, 80), 0, "the game shows below it");
+
+    assert!(ui.event(Event::PointerDown { x: 50.0, y: 20.0 }));
+    assert!(ui.event(Event::PointerUp { x: 50.0, y: 20.0 }));
+    assert!(!ui.event(Event::PointerDown { x: 50.0, y: 80.0 }));
+}

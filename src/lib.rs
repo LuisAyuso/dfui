@@ -23,6 +23,8 @@ pub use path::{Path, Shape};
 #[cfg(not(target_arch = "wasm32"))]
 pub use render::gpu;
 pub use render::{Bitmap, Color, Pixels, Rect, Shadow, hdr};
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
+pub use runtime::Embedded;
 pub use runtime::task::{Notifier, Sleep, sleep};
 pub use source::{Cache, Latest, cached, polled};
 #[cfg(not(target_arch = "wasm32"))]
