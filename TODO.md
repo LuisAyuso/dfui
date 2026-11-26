@@ -33,7 +33,16 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [x] `plot` with layers of aesthetics, stats and geoms: line (sharp or
       smooth), point, bar, boxplot, candle; mean/sum/count/min/max/box
       stats; nice ticks, grid and axis labels.
-- [ ] Legend, hover crosshair and tooltip, pan and zoom.
+- [x] Legend: one entry per named layer (`Layer::name`) and rule.
+- [x] Reference lines: `Plot::vline`/`hline` spanning the plot, with a
+      color and legend name.
+- [x] Per-layer row filter (`Layer::filter`); ungrouped layers take the
+      palette by layer index, so series split into layers keep their color.
+- [ ] Stable colors per group: grouped layers still color by rank among
+      the groups present, so a missing group shifts the rest.
+- [ ] x tick formatter, e.g. dates or years without the `.0`.
+- [ ] Hover crosshair and tooltip, pan and zoom with a reset (double click).
+- [ ] Linked x axes between plots, for a tall chart over a short one.
 - [ ] Facets, per-layer data, area and stacked bars, log and time scales.
 - [ ] Cache stats between paints and lines as `Shape`s when the data is
       unchanged.
@@ -289,6 +298,42 @@ Testing:
       never resolve in it and real screens can't be checked headless. Poll
       ready tasks before rendering (or take a frame count) so an app with
       stubbed sources can snapshot its actual screens.
+
+## Findings from a fourth app
+
+From porting invest_study (an ETF planner and a mortgage calculator, both
+form-heavy with line charts) from egui. The port compiled almost at once;
+the view as a function of one state made saving inputs trivial and
+replaced egui's repaint polling with a `Notifier`. What it hand-rolled:
+
+- [ ] Number field: `text_input` over a number reformats what's typed
+      ("3." becomes "3", an emptied field snaps back), so the app keeps a
+      draft string while it doesn't parse. A `number_input(value)` with
+      range, step and `on_change(f64)` would replace egui's `DragValue`.
+- [ ] Setter boilerplate: `move |cx, v| cx.update(h, move |s: &mut S| s.x = v)`
+      per field, against egui's `&mut self.x`. A helper that turns a
+      `fn(&mut S, V)` into the handler (`h.set(|s, v| s.x = v)`) would halve it.
+- [ ] Rows of editable entries lose their state slots' meaning when one is
+      removed (state is keyed by position) and there's no id to `key` them by.
+      Document the pattern, or key by a generated id helper.
+- [ ] Checkbox: `toggle` stands in, but a form of options reads better
+      with checkboxes.
+- [ ] Striped grid of plain rows: `table` needs a `Keyed` model; a
+      `grid(rows)` with column widths and a highlighted row would do for
+      computed rows like a payment schedule.
+- [ ] Scroll to a child: `start_at(fraction)` only approximates "show the
+      current row"; `reveal` needs its span in content px, which the app
+      doesn't know.
+- [ ] A light button for list items: `.flat()` still fills with the accent;
+      the app recolors with `Role::Selected`.
+- [ ] Children built conditionally: `Vec<Element>` with `push(x.into())`
+      everywhere. Accept `Option<Element>` in `row`/`column` children, or a
+      small `children![]` macro.
+- [ ] Async results into a model: the app drains an mpsc channel inside its
+      `watch` build. A documented pattern (or a channel source that applies
+      results to a `stateful`) for "spawn work, merge result into app state".
+- [ ] dfui-plots gaps, see that section: tick formatter, pan/zoom, linked
+      axes (legend, reference lines and per-layer filters are done).
 
 ## From the code review
 - [x] Shape storage: equal shapes share one copy, and shapes not drawn for 600

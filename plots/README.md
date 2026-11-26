@@ -20,6 +20,10 @@ plot(&rows)
   per group, optional corner `.radius`), `boxplot`, `candle`.
 - Stats: `Identity`, `Mean`, `Sum`, `Count`, `Min`, `Max`, `Box`, over the
   rows that share a group and x.
+- Layers: `.name(..)` lists one in the legend, `.filter(..)` keeps some
+  rows, so several layers can share one data set; ungrouped layers take
+  palette colors in layer order. `vline`/`hline` draw reference lines
+  across the plot, named in the legend too.
 - Data changes: build the plot from fresh rows on each rebuild, e.g. inside
   `watch(&notifier, ..)`.
 - Long lines are thinned to each pixel column's envelope before stroking.

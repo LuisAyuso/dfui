@@ -2711,6 +2711,7 @@ name = "dfui-plots"
 version = "0.2.0"
 dependencies = [
  "dfui",
+ "image",
 ]
 
 [[package]]

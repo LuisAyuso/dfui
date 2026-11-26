@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dfui::widgets::{Styled, column, row, watch};
-use dfui::{App, Element, Notifier};
+use dfui::{App, Element, Notifier, Role};
 use dfui_plots::{Stat, bar, boxplot, candle, line, plot, point};
 
 #[derive(Clone, Copy)]
@@ -36,8 +36,17 @@ impl App for Plots {
             let data: Rc<[Tick]> = ticks.lock().unwrap().as_slice().into();
             let candles = ohlc(&data);
             let bucket = |r: &Tick| (r.t / BUCKET).floor();
+            let series = |s: u64, name: &str| {
+                line()
+                    .x(|r: &Tick| r.t)
+                    .y(|r| r.v)
+                    .filter(move |r| r.series == s)
+                    .name(name)
+            };
             let sharp = plot(&data)
-                .layer(line().x(|r: &Tick| r.t).y(|r| r.v).group(|r| r.series))
+                .layer(series(0, "fast"))
+                .layer(series(1, "slow"))
+                .hline("zero", 0.0, Role::Muted)
                 .y_label("sharp");
             let smooth = plot(&data)
                 .layer(

@@ -17,12 +17,16 @@ const BAND: f32 = 0.8;
 /// Segments per stroked path: the shader walks a band's curves per pixel.
 const CHUNK: usize = 16;
 const PALETTE: [u32; 6] = [0x3b6fe0, 0xe0703b, 0x2e9d5b, 0xb04fd0, 0xd64545, 0x2aa7b8];
+/// Legend swatch diameter and the space between entries, logical px.
+const SWATCH: f32 = 9.0;
+const LEGEND_GAP: f32 = 14.0;
 const UP: Color = Color::hex(0x2e9d5b);
 const DOWN: Color = Color::hex(0xd64545);
 
 type Num<T> = Rc<dyn Fn(&T) -> f64>;
 type Ohlc<T> = Rc<dyn Fn(&T) -> [f64; 4]>;
 type Group<T> = Rc<dyn Fn(&T) -> u64>;
+type Keep<T> = Rc<dyn Fn(&T) -> bool>;
 
 /// How a layer draws its summarized data.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,7 +103,9 @@ pub struct Layer<T> {
     y: Option<Num<T>>,
     ohlc: Option<Ohlc<T>>,
     group: Option<Group<T>>,
+    filter: Option<Keep<T>>,
     color: Option<Ink>,
+    name: Option<String>,
 }
 
 fn layer<T>(geom: Geom, stat: Stat) -> Layer<T> {
@@ -110,7 +116,9 @@ fn layer<T>(geom: Geom, stat: Stat) -> Layer<T> {
         y: None,
         ohlc: None,
         group: None,
+        filter: None,
         color: None,
+        name: None,
     }
 }
 
@@ -172,9 +180,22 @@ impl<T> Layer<T> {
         self
     }
 
-    /// One color for every group, instead of one each from the palette.
+    /// One color for every group. Without it each group takes the next
+    /// palette color, or an ungrouped layer the one at its layer index.
     pub fn color(mut self, ink: impl Into<Ink>) -> Self {
         self.color = Some(ink.into());
+        self
+    }
+
+    /// Only the rows `keep` accepts, so layers can share one data set.
+    pub fn filter(mut self, keep: impl Fn(&T) -> bool + 'static) -> Self {
+        self.filter = Some(Rc::new(keep));
+        self
+    }
+
+    /// Lists the layer in the plot's legend under `name`.
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
         self
     }
 
@@ -208,6 +229,7 @@ impl<T> Layer<T> {
         let mut d: Vec<Datum> = rows
             .iter()
             .enumerate()
+            .filter(|(_, r)| self.filter.as_ref().is_none_or(|keep| keep(r)))
             .map(|(i, r)| {
                 let x = self.x.as_ref().map_or(i as f64, |f| f(r));
                 let g = self.group.as_ref().map_or(0, |f| f(r));
@@ -387,6 +409,7 @@ pub fn plot<T: 'static>(data: &Rc<[T]>) -> Plot<T> {
         y_range: None,
         x_label: None,
         y_label: None,
+        rules: Vec::new(),
         style: Style {
             size: Size {
                 width: Dimension::percent(1.0),
@@ -405,7 +428,16 @@ pub struct Plot<T> {
     y_range: Option<Range<f64>>,
     x_label: Option<String>,
     y_label: Option<String>,
+    rules: Vec<Rule>,
     style: Style,
+}
+
+/// A reference line across the whole plot at a fixed x or y.
+struct Rule {
+    vertical: bool,
+    at: f64,
+    color: Ink,
+    name: String,
 }
 
 impl<T> Plot<T> {
@@ -435,6 +467,74 @@ impl<T> Plot<T> {
         self.y_label = Some(s.into());
         self
     }
+
+    /// A vertical line at `x` across the plot, e.g. "today"; listed in the
+    /// legend unless `name` is empty.
+    pub fn vline(mut self, name: impl Into<String>, x: f64, color: impl Into<Ink>) -> Self {
+        self.rules.push(Rule {
+            vertical: true,
+            at: x,
+            color: color.into(),
+            name: name.into(),
+        });
+        self
+    }
+
+    /// A horizontal line at `y` across the plot, e.g. a target; listed in
+    /// the legend unless `name` is empty.
+    pub fn hline(mut self, name: impl Into<String>, y: f64, color: impl Into<Ink>) -> Self {
+        self.rules.push(Rule {
+            vertical: false,
+            at: y,
+            color: color.into(),
+            name: name.into(),
+        });
+        self
+    }
+
+    /// Color of layer `li`'s group at `rank` among its groups.
+    fn color(&self, cx: &PaintCx, li: usize, rank: usize) -> Color {
+        let l = &self.layers[li];
+        match l.color {
+            Some(ink) => cx.color(ink),
+            None if l.group.is_none() => Color::hex(PALETTE[li % PALETTE.len()]),
+            None => Color::hex(PALETTE[rank % PALETTE.len()]),
+        }
+    }
+
+    /// Named layers and rules, in the order they were added.
+    fn legend(&self, cx: &PaintCx) -> Vec<(String, Color)> {
+        let layers = self.layers.iter().enumerate().filter_map(|(li, l)| {
+            let c = match l.geom {
+                Geom::Candle if l.color.is_none() => UP,
+                _ => self.color(cx, li, 0),
+            };
+            Some((l.name.clone()?, c))
+        });
+        let rules = self
+            .rules
+            .iter()
+            .filter(|r| !r.name.is_empty())
+            .map(|r| (r.name.clone(), cx.color(r.color)));
+        layers.chain(rules).collect()
+    }
+}
+
+/// Legend entries flowed into lines no wider than `w`: each entry's x
+/// offset, and the line it's on.
+fn flow(widths: &[f32], w: f32) -> Vec<(f32, usize)> {
+    let (mut x, mut line) = (0.0, 0);
+    widths
+        .iter()
+        .map(|&ew| {
+            if x > 0.0 && x + ew > w {
+                (x, line) = (0.0, line + 1);
+            }
+            let at = (x, line);
+            x += ew + LEGEND_GAP;
+            at
+        })
+        .collect()
 }
 
 impl<T: 'static> From<Plot<T>> for Element {
@@ -498,8 +598,15 @@ impl<T: 'static> Widget for Plot<T> {
                 y = [y[0].min(0.0), y[1].max(0.0)];
             }
         }
+        for r in self.rules.iter().filter(|r| r.at.is_finite()) {
+            let e = if r.vertical { &mut x } else { &mut y };
+            *e = [e[0].min(r.at), e[1].max(r.at)];
+        }
         if !x[0].is_finite() {
-            (x, y) = ([0.0, 1.0], [0.0, 1.0]);
+            x = [0.0, 1.0];
+        }
+        if !y[0].is_finite() {
+            y = [0.0, 1.0];
         }
         let xr = self.x_range.clone().unwrap_or(x[0]..x[1]);
         let xr = if xr.end > xr.start { xr } else { pad(xr, 0.0) };
@@ -517,11 +624,21 @@ impl<T: 'static> Widget for Plot<T> {
             .iter()
             .map(|s| cx.measure(s, Font::DEFAULT, FONT, None).width)
             .fold(0.0, f32::max);
-        let top = if self.y_label.is_some() {
+        let legend = self.legend(cx);
+        let entry_w: Vec<f32> = legend
+            .iter()
+            .map(|(s, _)| SWATCH + 6.0 + cx.measure(s, Font::DEFAULT, FONT, None).width)
+            .collect();
+        let placed = flow(&entry_w, r.w);
+        let legend_h = placed
+            .last()
+            .map_or(0.0, |&(_, l)| (l + 1) as f32 * (line_h + 4.0));
+        let label_h = if self.y_label.is_some() {
             line_h + 4.0
         } else {
-            8.0
+            0.0
         };
+        let top = (label_h + legend_h).max(8.0);
         let bottom = line_h
             + 6.0
             + if self.x_label.is_some() {
@@ -574,20 +691,22 @@ impl<T: 'static> Widget for Plot<T> {
         if let Some(s) = &self.y_label {
             cx.text(s, Font::DEFAULT, FONT, ink, None, (r.x, r.y));
         }
+        for ((s, c), (dx, l)) in legend.iter().zip(&placed) {
+            let (x, y) = (r.x + dx, r.y + label_h + *l as f32 * (line_h + 4.0));
+            let dot = Rect::new(x, y + (line_h - SWATCH) / 2.0, SWATCH, SWATCH);
+            cx.fill(dot, SWATCH / 2.0, *c);
+            cx.text(s, Font::DEFAULT, FONT, muted, None, (x + SWATCH + 6.0, y));
+        }
 
         cx.with_clip(area, |cx| {
-            for (l, d) in self.layers.iter().zip(&layers) {
+            for (li, (l, d)) in self.layers.iter().zip(&layers).enumerate() {
                 let groups: Vec<u64> = {
                     let mut g: Vec<u64> = d.iter().map(|d| d.group).collect();
                     g.dedup();
                     g
                 };
-                let color = |cx: &PaintCx, g: u64| match l.color {
-                    Some(ink) => cx.color(ink),
-                    None => {
-                        let gi = groups.iter().position(|&x| x == g).unwrap_or(0);
-                        Color::hex(PALETTE[gi % PALETTE.len()])
-                    }
+                let color = |cx: &PaintCx, g: u64| {
+                    self.color(cx, li, groups.iter().position(|&x| x == g).unwrap_or(0))
                 };
                 let band = (spacing(d) as f32 * area.w / (xr.end - xr.start) as f32) * BAND;
                 match l.geom {
@@ -666,6 +785,15 @@ impl<T: 'static> Widget for Plot<T> {
                     }
                 }
             }
+            for rule in &self.rules {
+                let c = cx.color(rule.color);
+                let rect = if rule.vertical {
+                    Rect::new(px(rule.at) - 0.75, area.y, 1.5, area.h)
+                } else {
+                    Rect::new(area.x, py(rule.at) - 0.75, area.w, 1.5)
+                };
+                cx.fill(rect, 0.0, c);
+            }
         });
     }
 }
@@ -712,6 +840,22 @@ mod tests {
         assert_eq!(ys(Stat::Sum), [6.0, 5.0, 10.0]);
         assert_eq!(ys(Stat::Count), [2.0, 1.0, 1.0]);
         assert_eq!(ys(Stat::Identity).len(), 4);
+    }
+
+    #[test]
+    fn filter_keeps_row_index_as_default_x() {
+        let rows = [1.0, -2.0, 3.0];
+        let d = line::<f64>().y(|v| *v).filter(|v| *v > 0.0).compute(&rows);
+        let xy: Vec<(f64, f64)> = d.iter().map(|d| (d.x, d.y)).collect();
+        assert_eq!(xy, [(0.0, 1.0), (2.0, 3.0)]);
+    }
+
+    #[test]
+    fn legend_flows_onto_new_lines() {
+        assert_eq!(
+            flow(&[40.0, 40.0, 40.0], 100.0),
+            [(0.0, 0), (54.0, 0), (0.0, 1)]
+        );
     }
 
     #[test]
