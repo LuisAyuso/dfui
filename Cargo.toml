@@ -38,9 +38,9 @@ name = "gpu"
 harness = false
 
 [workspace]
-members = ["bevy", "demo", "map", "media", "site", "tools/svg2path"]
+members = ["bevy", "demo", "map", "media", "plots", "site", "tools/svg2path"]
 
-# dfui, dfui-map and dfui-media release together from one `v*` tag; bump both lines.
+# dfui and its sibling crates release together from one `v*` tag; bump both lines.
 [workspace.package]
 version = "0.2.0"
 

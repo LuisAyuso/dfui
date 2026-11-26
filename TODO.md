@@ -28,6 +28,16 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [ ] `dfui-bevy` follow-ups: one overlay per window, skip unchanged
       frames, keep the overlay node out of Bevy picking.
 
+## dfui-plots
+
+- [x] `plot` with layers of aesthetics, stats and geoms: line (sharp or
+      smooth), point, bar, boxplot, candle; mean/sum/count/min/max/box
+      stats; nice ticks, grid and axis labels.
+- [ ] Legend, hover crosshair and tooltip, pan and zoom.
+- [ ] Facets, per-layer data, area and stacked bars, log and time scales.
+- [ ] Cache stats between paints and lines as `Shape`s when the data is
+      unchanged.
+
 ## Findings from a real app
 
 From building the movies-thing music player (dfui on Android and Linux: a
