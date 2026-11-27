@@ -32,6 +32,41 @@ pub struct Day {
     pub max: f32,
     /// Chance of precipitation (AEMET) or amount (GeoSphere), as shown.
     pub rain: String,
+    /// The day's strongest wind.
+    pub wind: Option<Wind>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Wind {
+    pub kmh: f32,
+    /// Compass point it blows from, 0 north to 7 north-west, clockwise;
+    /// none when calm.
+    pub from: Option<u8>,
+}
+
+/// AEMET's compass points, Spanish: north is N, west is O.
+fn aemet_wind(dir: &Value, kmh: &Value) -> Option<Wind> {
+    // A single city's hourly forecast gives each as a one-item list.
+    let one = |v: &Value| match v {
+        Value::Array(a) => a.first().cloned().unwrap_or_default(),
+        v => v.clone(),
+    };
+    let points = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+    let dir = one(dir);
+    Some(Wind {
+        kmh: num(&one(kmh))?,
+        from: points.iter().position(|p| dir == *p).map(|i| i as u8),
+    })
+}
+
+/// Wind from its eastward and northward components, m/s.
+fn uv_wind(u: f32, v: f32) -> Wind {
+    let kmh = u.hypot(v) * 3.6;
+    let from = (-u).atan2(-v).to_degrees().rem_euclid(360.0);
+    Wind {
+        kmh,
+        from: (kmh >= 2.0).then(|| ((from / 45.0).round() as u8) % 8),
+    }
 }
 
 pub type Forecast = Result<Vec<Day>, String>;
@@ -45,6 +80,9 @@ pub struct Hour {
     pub temp: f32,
     /// Precipitation, mm.
     pub rain: f32,
+    /// Chance of precipitation, %, where the source gives one.
+    pub chance: Option<f32>,
+    pub wind: Option<Wind>,
 }
 
 pub type Hourly = Result<Vec<Hour>, String>;
@@ -252,6 +290,7 @@ fn batch_shape(json: &str) -> Result<String, String> {
                 .map(|(k, v)| {
                     let k = match k.as_str() {
                         "value" => "valor".to_owned(),
+                        "vientoAndRachaMax" => "viento".to_owned(),
                         _ => k.chars().fold(String::new(), |mut s, c| {
                             if c.is_uppercase() {
                                 s.push('_');
@@ -310,9 +349,31 @@ fn parse_aemet(json: &str) -> Forecast {
                 min: num(&d["temperatura"]["minima"])?,
                 max: num(&d["temperatura"]["maxima"])?,
                 rain: format!("{:.0} %", rain.fold(0.0, f32::max)),
+                wind: (list(d, "viento").iter())
+                    .filter_map(|w| aemet_wind(&w["direccion"], &w["velocidad"]))
+                    .max_by(|a, b| a.kmh.total_cmp(&b.kmh)),
             })
         })
         .collect())
+}
+
+/// The chance of precipitation for `hour` from AEMET's blocks of hours,
+/// periods like "0713" and "1901" (past midnight).
+fn chance(d: &Value, hour: &str) -> Option<f32> {
+    let h: u32 = hour.parse().ok()?;
+    list(d, "prob_precipitacion").iter().find_map(|p| {
+        let period = p["periodo"].as_str()?;
+        let (from, to) = (
+            period.get(..2)?.parse().ok()?,
+            period.get(2..)?.parse().ok()?,
+        );
+        let inside = if from < to {
+            (from..to).contains(&h)
+        } else {
+            h >= from || h < to
+        };
+        inside.then(|| num(&p["valor"])).flatten()
+    })
 }
 
 /// AEMET's hourly forecast: per day, series of `{periodo, valor}` where the
@@ -342,6 +403,10 @@ fn parse_aemet_hourly(json: &str) -> Hourly {
                 ),
                 temp,
                 rain: mm("precipitacion") + mm("nieve"),
+                chance: chance(d, hour),
+                wind: (list(d, "viento").iter())
+                    .find(|w| w["periodo"] == hour && !w["direccion"].is_null())
+                    .and_then(|w| aemet_wind(&w["direccion"], &w["velocidad"])),
             });
         }
     }
@@ -361,7 +426,7 @@ fn aemet_sky(code: &str) -> Sky {
     }
 }
 
-const GEOSPHERE: &str = "https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v2-1h-1km?parameters=2t,tcc,tp,sf,cape";
+const GEOSPHERE: &str = "https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v2-1h-1km?parameters=2t,tcc,tp,sf,cape,10u,10v";
 
 /// One request for all cities: ~60 hourly steps, and the same folded into days.
 fn geosphere(cities: &[City]) -> Result<Vec<Series>, String> {
@@ -419,6 +484,8 @@ fn parse_geosphere(json: &str) -> Result<Vec<Series>, String> {
                 series("sf"),
                 series("cape"),
             );
+            let (u, v) = (series("10u"), series("10v"));
+            let wind = |k: usize| uv_wind(u[k], v[k]);
             let hours: Vec<Hour> = (0..local.len())
                 .filter_map(|k| {
                     let (day, hour) = local[k]?;
@@ -428,6 +495,8 @@ fn parse_geosphere(json: &str) -> Result<Vec<Series>, String> {
                         sky: sky(tcc[k], tp[k], sf[k], cape[k] > STORM_CAPE, 0.1),
                         temp: t[k],
                         rain: tp[k],
+                        chance: None,
+                        wind: Some(wind(k)),
                     })
                 })
                 .collect();
@@ -449,6 +518,7 @@ fn parse_geosphere(json: &str) -> Result<Vec<Series>, String> {
                     min: temps.clone().fold(f32::INFINITY, f32::min),
                     max: temps.fold(f32::NEG_INFINITY, f32::max),
                     rain: format!("{rain:.1} mm"),
+                    wind: (chunk.iter().map(|&k| wind(k))).max_by(|a, b| a.kmh.total_cmp(&b.kmh)),
                 });
             }
             (days, hours)
@@ -507,7 +577,9 @@ mod tests {
             "temperatura":[{"valor":"5","periodo":"07"},{"valor":"9","periodo":"08"}],
             "estado_cielo":[{"valor":"16n","periodo":"07"},{"valor":"25","periodo":"08"}],
             "precipitacion":[{"valor":"Ip","periodo":"07"},{"valor":"1.2","periodo":"08"}],
-            "nieve":[{"valor":"0","periodo":"07"},{"valor":"0","periodo":"08"}]}]}}}"#;
+            "nieve":[{"valor":"0","periodo":"07"},{"valor":"0","periodo":"08"}],
+            "viento":[{"periodo":"07","direccion":"C","velocidad":"0"},{"periodo":"08","direccion":"SO","velocidad":"18"}],
+            "prob_precipitacion":[{"periodo":"0107","valor":"10"},{"periodo":"0713","valor":"60"}]}]}}}"#;
         let h = parse_aemet_hourly(json).unwrap();
         assert_eq!(h.len(), 2);
         assert_eq!(
@@ -515,6 +587,25 @@ mod tests {
             (7, Sky::Cloudy, 5.0, 0.0)
         );
         assert_eq!((h[1].sky, h[1].rain), (Sky::Rain, 1.2));
+        let calm = Wind {
+            kmh: 0.0,
+            from: None,
+        };
+        let south_west = Wind {
+            kmh: 18.0,
+            from: Some(5),
+        };
+        assert_eq!((h[0].wind, h[1].wind), (Some(calm), Some(south_west)));
+        assert_eq!((h[0].chance, h[1].chance), (Some(60.0), Some(60.0)));
+        let late = serde_json::json!({"prob_precipitacion":[{"periodo":"1901","valor":"30"}]});
+        assert_eq!(
+            (
+                chance(&late, "23"),
+                chance(&late, "00"),
+                chance(&late, "12")
+            ),
+            (Some(30.0), Some(30.0), None)
+        );
     }
 
     #[test]
@@ -522,12 +613,40 @@ mod tests {
         let json = r#"[{"prediccion":{"dia":[{"fecha":"2026-11-27T00:00:00",
             "temperatura":{"maxima":14,"minima":3},
             "estadoCielo":[{"value":"25","periodo":"00-24"}],
-            "probPrecipitacion":[{"value":85,"periodo":"00-24"}]}]}}]"#;
+            "probPrecipitacion":[{"value":85,"periodo":"00-24"}],
+            "viento":[{"direccion":"N","velocidad":10,"periodo":"00-12"},{"direccion":"O","velocidad":25,"periodo":"12-24"}]}]}}]"#;
         let days = parse_aemet(&batch_shape(json).unwrap()).unwrap();
         assert_eq!(
             (days[0].sky, days[0].min, days[0].rain.as_str()),
             (Sky::Rain, 3.0, "85 %")
         );
+        assert_eq!(
+            days[0].wind,
+            Some(Wind {
+                kmh: 25.0,
+                from: Some(6)
+            })
+        );
+        let hourly = r#"[{"prediccion":{"dia":[{"fecha":"2026-11-27T00:00:00",
+            "temperatura":[{"value":"5","periodo":"07"}],
+            "vientoAndRachaMax":[{"direccion":["NE"],"velocidad":["12"],"periodo":"07"},{"value":"30","periodo":"07"}]}]}}]"#;
+        let h = parse_aemet_hourly(&batch_shape(hourly).unwrap()).unwrap();
+        assert_eq!(
+            h[0].wind,
+            Some(Wind {
+                kmh: 12.0,
+                from: Some(1)
+            })
+        );
+    }
+
+    #[test]
+    fn wind_from_components() {
+        // Blowing towards the east is a west wind; 10 m/s is 36 km/h.
+        let w = uv_wind(10.0, 0.0);
+        assert_eq!((w.kmh.round(), w.from), (36.0, Some(6)));
+        assert_eq!(uv_wind(0.0, -5.0).from, Some(0));
+        assert_eq!(uv_wind(0.1, 0.1).from, None);
     }
 
     #[test]
@@ -557,7 +676,9 @@ mod tests {
               "tcc":{{"data":[0,0,0,0,0,0,0,100,100,100,100,100,100,100]}},
               "tp":{{"data":[0,0,0,0,0,0,0,1,1,0,0,0,0,0]}},
               "sf":{{"data":[0,0,0,0,0,0,0,1,1,0,0,0,0,0]}},
-              "cape":{{"data":[0,0,0,0,0,0,0,0,0,0,0,0,0,0]}}}}}}}}]}}"#,
+              "cape":{{"data":[0,0,0,0,0,0,0,0,0,0,0,0,0,0]}},
+              "10u":{{"data":[0,0,0,0,0,0,0,0,0,0,0,0,0,0]}},
+              "10v":{{"data":[1,1,1,5,1,1,1,0,0,0,0,0,0,0]}}}}}}}}]}}"#,
             ts.join(",")
         );
         let (days, hours) = &parse_geosphere(&json).unwrap()[0];
@@ -573,5 +694,13 @@ mod tests {
             (Sky::Clear, 1.0, 7.0)
         );
         assert_eq!((days[1].sky, days[1].rain.as_str()), (Sky::Snow, "2.0 mm"));
+        // The day's strongest, 5 m/s from the south.
+        assert_eq!(
+            days[0].wind,
+            Some(Wind {
+                kmh: 18.0,
+                from: Some(4)
+            })
+        );
     }
 }

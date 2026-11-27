@@ -189,6 +189,9 @@ fn place(country: &'static Country) -> Place {
 struct Icons {
     sky: [Shape; 7],
     droplets: Shape,
+    wind: Shape,
+    /// Pointing north, then clockwise by compass point.
+    arrows: [Shape; 8],
     back: Shape,
 }
 
@@ -210,6 +213,17 @@ fn icons() -> Icons {
             load!("cloud-lightning"),
         ],
         droplets: load!("droplets"),
+        wind: load!("wind"),
+        arrows: [
+            load!("arrow-up"),
+            load!("arrow-up-right"),
+            load!("arrow-right"),
+            load!("arrow-down-right"),
+            load!("arrow-down"),
+            load!("arrow-down-left"),
+            load!("arrow-left"),
+            load!("arrow-up-left"),
+        ],
         back: load!("chevron-left"),
     }
 }
@@ -476,6 +490,23 @@ fn overlaps(a: &Rect, b: &Rect) -> bool {
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
+/// The wind: an arrow the way it blows, none when calm, and its speed in
+/// km/h, followed by `unit`, in a column `width` wide.
+fn wind_cells(w: forecast::Wind, icons: &Icons, unit: &str, width: f32) -> [Element; 3] {
+    let to = w.from.map_or(0, |p| (p as usize + 4) % 8);
+    let arrow = MUTED.alpha(if w.from.is_some() { 1.0 } else { 0.0 });
+    [
+        icon(&icons.wind).size(14.0).color(MUTED).into(),
+        icon(&icons.arrows[to]).size(14.0).color(arrow).into(),
+        // Fixed, so a shorter speed doesn't shift the columns before it.
+        text(format!("{:.0}{unit}", w.kmh))
+            .size(13.0)
+            .color(MUTED)
+            .width(width)
+            .into(),
+    ]
+}
+
 /// Whole degrees, without "-0".
 fn deg(t: f32) -> f32 {
     t.round() + 0.0
@@ -518,9 +549,12 @@ fn days(
     let mut out = Vec::new();
     for d in days {
         let (day, is_open) = (d.day, open == Some(d.day));
-        let mut cells = vec![text(day_name(d.day, words)).color(INK).width(80.0).into()];
+        let mut cells = vec![text(day_name(d.day, words)).color(INK).width(64.0).into()];
         cells.extend(day_cells(d, icons));
-        let r = row(cells).gap(10.0).align(AlignItems::CENTER).fill_width();
+        if let Some(w) = d.wind {
+            cells.extend(wind_cells(w, icons, "", 28.0));
+        }
+        let r = row(cells).gap(8.0).align(AlignItems::CENTER).fill_width();
         let b = button(r)
             .flat()
             .fill_width()
@@ -565,7 +599,7 @@ fn day_cells(d: &Day, icons: &Icons) -> [Element; 4] {
             .width(80.0)
             .into(),
         icon(&icons.droplets).size(14.0).color(ACCENT).into(),
-        text(&d.rain).size(13.0).color(MUTED).width(56.0).into(),
+        text(&d.rain).size(13.0).color(MUTED).width(50.0).into(),
     ]
 }
 
@@ -578,11 +612,16 @@ fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons, words: &Wor
         Some(Ok(hours)) => {
             let rows: Vec<Element> = (hours.iter().filter(|h| h.day == day))
                 .map(|h| {
-                    let rain = match h.rain >= 0.1 {
-                        true => format!("{:.1} mm", h.rain),
-                        false => String::new(),
+                    // A dry hour keeps the column's space, empty.
+                    let wet = h.rain >= 0.1;
+                    let mm = if wet {
+                        format!("{:.1} mm", h.rain)
+                    } else {
+                        String::new()
                     };
-                    row([
+                    let rain = text(mm).size(13.0).color(ACCENT).width(52.0);
+                    let drop = ACCENT.alpha(if wet { 1.0 } else { 0.0 });
+                    let mut cells = vec![
                         text(format!("{:02}:00", h.hour))
                             .size(13.0)
                             .color(MUTED)
@@ -596,11 +635,17 @@ fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons, words: &Wor
                             .size(13.0)
                             .grow(1.0)
                             .into(),
-                        text(rain).size(13.0).color(ACCENT).into(),
-                    ])
-                    .gap(10.0)
-                    .align(AlignItems::CENTER)
-                    .into()
+                        icon(&icons.droplets).size(13.0).color(drop).into(),
+                        rain.into(),
+                    ];
+                    if let Some(c) = h.chance {
+                        let c = text(format!("{c:.0} %")).size(13.0).color(MUTED);
+                        cells.push(c.width(40.0).into());
+                    }
+                    if let Some(w) = h.wind {
+                        cells.extend(wind_cells(w, icons, " km/h", 56.0));
+                    }
+                    row(cells).gap(8.0).align(AlignItems::CENTER).into()
                 })
                 .collect();
             if rows.is_empty() {
