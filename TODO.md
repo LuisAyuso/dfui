@@ -367,12 +367,10 @@ and the app worked around the rest:
       overlay and declutters them itself (overlapping ones become dots,
       the selected one first). A marker layer with priorities and a
       fallback for collisions would serve it and the bus app's stops.
-- [ ] Map scale in `on_tap`: it gets map coordinates but not px per unit,
-      so a tap radius in px needs the overlay to pass its scale out through
-      a `Cell`. Hand `on_tap` the scale, or the view's `to_px`.
-- [ ] Per-side padding: `padding` and `padding_xy` only; one side takes
-      `style_mut().padding.bottom = taffy::LengthPercentage::length(..)`.
-      `padding_top`/`_right`/`_bottom`/`_left`, or `padding_sides([t, r, b, l])`.
+- [x] Map scale in `on_tap`: the handler gets the scale (px per unit) with
+      the point, so a tap radius in px needs no `Cell` out of the overlay.
+- [x] Per-side padding: `padding_top`/`_right`/`_bottom`/`_left` over
+      `padding`, instead of `style_mut()` and taffy's `LengthPercentage`.
 - [ ] Icon rotation: `icon(..).rotate(deg)`. Wind direction is eight
       Lucide arrows, so only eight directions.
 - [ ] Android app scaffold: each app copies busapp's `cdylib` crate type,

@@ -322,6 +322,10 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `Styled::style_mut(&self) -> &mut Style`: The taffy style the modifiers write; also an escape hatch for the rest.
 - `Styled::padding(self, p: f32) -> Self`: Space between the box's edges and its children on all sides, logical px.
 - `Styled::padding_xy(self, x: f32, y: f32) -> Self`: Padding of `x` left and right and `y` top and bottom, logical px.
+- `Styled::padding_top(self, p: f32) -> Self`: Padding on the top only, logical px, over what `padding` or `padding_xy` set before it, e.g. clearing the status bar.
+- `Styled::padding_right(self, p: f32) -> Self`: Padding on the right only, logical px; see `padding_top`.
+- `Styled::padding_bottom(self, p: f32) -> Self`: Padding on the bottom only, logical px; see `padding_top`.
+- `Styled::padding_left(self, p: f32) -> Self`: Padding on the left only, logical px; see `padding_top`.
 - `Styled::gap(self, g: f32) -> Self`: Space between children, along both axes, logical px.
 - `Styled::grow(self, g: f32) -> Self`: Share of the parent's spare main-axis space to take; 0 by default.
 - `Styled::shrink(self, s: f32) -> Self`: How much to give up when the parent is too small; 1 by default, 0 keeps the size.
@@ -495,4 +499,4 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `Map::focus(self, focus: Option<(Point, f32)>) -> Self`: Centres on `center` and zooms in to at least `scale` whenever this differs from the focus of the last build, e.g. to show a search result.
 - `Map::fit(self, bounds: Rect) -> Self`: Fits `bounds` (in [`MapBuilder::point`] units) to the widget, zooming in or out, whenever they differ from the last build's, e.g. to show one region and then the whole map again.
 - `Map::overlay(self, f: impl Fn(&mut PaintCx, &dyn Fn(Point) -> Point) + 'static) -> Self`: Paints over the map, given a function from map points to logical px, e.g. to draw markers that keep their size while zooming.
-- `Map::on_tap(self, f: impl Fn(&mut EventCx, Point) + 'static) -> Self`: Runs on a tap that didn't pan or pinch, with the map point under it in [`MapBuilder::point`] metres.
+- `Map::on_tap(self, f: impl Fn(&mut EventCx, Point, f32) + 'static) -> Self`: Runs on a tap that didn't pan or pinch, with the map point under it in [`MapBuilder::point`] metres and the scale in logical px per metre, e.g. to take taps within a few px of a marker.

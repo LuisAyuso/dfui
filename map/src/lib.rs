@@ -1138,7 +1138,7 @@ pub fn map(data: &Rc<MapData>) -> Map {
     }
 }
 
-type TapFn = dyn Fn(&mut EventCx, Point);
+type TapFn = dyn Fn(&mut EventCx, Point, f32);
 type OverlayFn = dyn Fn(&mut PaintCx, &dyn Fn(Point) -> Point);
 
 /// See [`map`].
@@ -1183,8 +1183,9 @@ impl Map {
     }
 
     /// Runs on a tap that didn't pan or pinch, with the map point under it
-    /// in [`MapBuilder::point`] metres.
-    pub fn on_tap(mut self, f: impl Fn(&mut EventCx, Point) + 'static) -> Self {
+    /// in [`MapBuilder::point`] metres and the scale in logical px per metre,
+    /// e.g. to take taps within a few px of a marker.
+    pub fn on_tap(mut self, f: impl Fn(&mut EventCx, Point, f32) + 'static) -> Self {
         self.on_tap = Some(Rc::new(f));
         self
     }
@@ -1340,10 +1341,11 @@ impl Widget for Map {
                 if v.press.take().is_some() && !v.panning && inside(x, y) {
                     let s = v.scale;
                     let c = v.center;
-                    tap = Some([
+                    let at = [
                         c[0] + (x - r.x - r.w / 2.0) / s,
                         c[1] + (y - r.y - r.h / 2.0) / s,
-                    ]);
+                    ];
+                    tap = Some((at, s));
                 }
             }
             Event::Cancel => v.press = None,
@@ -1364,8 +1366,8 @@ impl Widget for Map {
         if stop {
             cx.stop();
         }
-        if let (Some(p), Some(f)) = (tap, &self.on_tap) {
-            f(cx, p);
+        if let (Some((p, s)), Some(f)) = (tap, &self.on_tap) {
+            f(cx, p, s);
         }
         cx.request_redraw();
     }
@@ -1670,12 +1672,12 @@ mod tests {
     fn taps_report_the_map_point_and_pans_dont() {
         use std::cell::RefCell;
 
-        struct App(Rc<MapData>, Rc<RefCell<Vec<Point>>>);
+        struct App(Rc<MapData>, Rc<RefCell<Vec<(Point, f32)>>>);
         impl dfui::App for App {
             fn view(&self) -> Element {
                 let taps = self.1.clone();
                 map(&self.0)
-                    .on_tap(move |_, p| taps.borrow_mut().push(p))
+                    .on_tap(move |_, p, s| taps.borrow_mut().push((p, s)))
                     .into()
             }
         }
@@ -1687,7 +1689,7 @@ mod tests {
         b.event(Event::PointerDown { x: 50.0, y: 50.0 });
         b.event(Event::PointerMove { x: 10.0, y: 50.0 });
         b.event(Event::PointerUp { x: 10.0, y: 50.0 });
-        assert_eq!(*taps.borrow(), [[80.0, 20.0]]);
+        assert_eq!(*taps.borrow(), [([80.0, 20.0], 1.0)]);
     }
 
     #[test]

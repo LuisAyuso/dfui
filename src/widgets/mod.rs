@@ -92,6 +92,27 @@ pub trait Styled: Sized {
         };
         self
     }
+    /// Padding on the top only, logical px, over what `padding` or
+    /// `padding_xy` set before it, e.g. clearing the status bar.
+    fn padding_top(mut self, p: f32) -> Self {
+        self.style_mut().padding.top = LengthPercentage::length(p);
+        self
+    }
+    /// Padding on the right only, logical px; see `padding_top`.
+    fn padding_right(mut self, p: f32) -> Self {
+        self.style_mut().padding.right = LengthPercentage::length(p);
+        self
+    }
+    /// Padding on the bottom only, logical px; see `padding_top`.
+    fn padding_bottom(mut self, p: f32) -> Self {
+        self.style_mut().padding.bottom = LengthPercentage::length(p);
+        self
+    }
+    /// Padding on the left only, logical px; see `padding_top`.
+    fn padding_left(mut self, p: f32) -> Self {
+        self.style_mut().padding.left = LengthPercentage::length(p);
+        self
+    }
     /// Space between children, along both axes, logical px.
     fn gap(mut self, g: f32) -> Self {
         self.style_mut().gap = Size::length(g);
@@ -205,5 +226,8 @@ mod tests {
         assert_eq!(s.flex_grow, 1.0);
         assert_eq!(s.size.width, Dimension::length(10.0));
         assert_eq!(s.flex_wrap, FlexWrap::Wrap);
+        let s = Probe::default().padding(1.0).padding_bottom(5.0).0;
+        let (one, five) = (LengthPercentage::length(1.0), LengthPercentage::length(5.0));
+        assert_eq!((s.padding.top, s.padding.bottom), (one, five));
     }
 }
