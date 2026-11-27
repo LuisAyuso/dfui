@@ -50,6 +50,8 @@ const JOIN_PX: f32 = 1.5;
 const MAX_CELL_PX: f32 = 256.0;
 /// Scale [`MAX_CELL_PX`] is measured at for full detail, px per metre.
 const FULL_CELL_SCALE: f32 = 4.0;
+/// How long the view takes to move to a new focus or fit.
+const GLIDE: Duration = Duration::from_millis(450);
 /// Time a frame spends storing new tiles before leaving the rest for the
 /// next frames, coarser levels standing in.
 const BUDGET: Duration = Duration::from_millis(4);
@@ -1029,34 +1031,85 @@ struct View {
     focused: Option<(Point, f32)>,
     /// The last [`Map::fit`] applied.
     fitted: Option<Rect>,
+    /// A move to a new focus or fit under way.
+    glide: Option<Glide>,
+}
+
+/// From a centre and scale to another, starting at a time.
+#[derive(Clone, Copy)]
+struct Glide {
+    from: (Point, f32),
+    to: (Point, f32),
+    start: Instant,
 }
 
 impl View {
-    fn fit(&mut self, map: &Map, r: Rect) {
+    /// Applies a new start, focus or fit: the start at once, the others
+    /// gliding there from `now`.
+    fn fit(&mut self, map: &Map, r: Rect, now: Instant) {
         let b = map.data.bounds;
-        if self.scale <= 0.0 && b.w > 0.0 {
+        let first = self.scale <= 0.0;
+        if first && b.w > 0.0 {
             (self.center, self.scale) = map.start.unwrap_or((
                 [b.x + b.w / 2.0, b.y + b.h / 2.0],
                 (r.w / b.w).min(r.h / b.h),
             ));
         }
+        let mut to = None;
         if map.focus != self.focused {
             if let Some((center, scale)) = map.focus {
-                (self.center, self.scale) = (center, self.scale.max(scale));
+                to = Some((center, self.scale.max(scale)));
             }
             self.focused = map.focus;
         }
         if map.fit.is_some() && map.fit != self.fitted {
             if let Some(b) = map.fit.filter(|b| b.w > 0.0 && b.h > 0.0) {
-                self.center = [b.x + b.w / 2.0, b.y + b.h / 2.0];
-                self.scale = (r.w / b.w).min(r.h / b.h);
+                to = Some((
+                    [b.x + b.w / 2.0, b.y + b.h / 2.0],
+                    (r.w / b.w).min(r.h / b.h),
+                ));
             }
             self.fitted = map.fit;
         }
+        match to {
+            Some(to) if first => (self.center, self.scale) = to,
+            Some(to) => {
+                let from = (self.center, self.scale);
+                self.glide = Some(Glide {
+                    from,
+                    to,
+                    start: now,
+                });
+            }
+            None => {}
+        }
+    }
+
+    /// Moves along the glide to `now`; true while it hasn't arrived.
+    fn step(&mut self, now: Instant) -> bool {
+        let Some(g) = self.glide else { return false };
+        let t =
+            (now.saturating_duration_since(g.start).as_secs_f32() / GLIDE.as_secs_f32()).min(1.0);
+        // Ease in and out (cubic).
+        let e = if t < 0.5 {
+            4.0 * t * t * t
+        } else {
+            1.0 - (2.0 - 2.0 * t).powi(3) / 2.0
+        };
+        let ((c0, s0), (c1, s1)) = (g.from, g.to);
+        // ponytail: centre lerps while scale moves geometrically, so long hops
+        // curve slightly; van Wijk–Nuij's zoom path if that ever shows.
+        self.scale = s0 * (s1 / s0).powf(e);
+        self.center = [c0[0] + (c1[0] - c0[0]) * e, c0[1] + (c1[1] - c0[1]) * e];
+        if t >= 1.0 {
+            self.glide = None;
+        }
+        self.glide.is_some()
     }
 
     /// Zooms by `k` keeping the metre under `(x, y)` in place.
     fn zoom(&mut self, data: &MapData, r: Rect, x: f32, y: f32, k: f32) {
+        self.glide = None;
         let fit = (r.w / data.bounds.w).min(r.h / data.bounds.h);
         let to = (self.scale * k).clamp(fit / 4.0, 200.0);
         let (dx, dy) = (x - r.x - r.w / 2.0, y - r.y - r.h / 2.0);
@@ -1155,10 +1208,14 @@ impl Widget for Map {
     }
 
     fn paint(&self, cx: &mut PaintCx) {
-        let r = cx.rect;
+        let (r, now) = (cx.rect, cx.now);
         let v = cx.state.get::<View>();
-        v.fit(self, r);
+        v.fit(self, r, now);
+        let gliding = v.step(now);
         let (s, c) = (v.scale, v.center);
+        if gliding {
+            cx.request_frame();
+        }
         let visible = Rect::new(c[0] - r.w / 2.0 / s, c[1] - r.h / 2.0 / s, r.w / s, r.h / s);
         let screen = |b: Rect| {
             let x = r.x + r.w / 2.0 + (b.x - c[0]) * s;
@@ -1255,11 +1312,11 @@ impl Widget for Map {
     }
 
     fn event(&self, ev: &Event, cx: &mut EventCx) {
-        let (r, data) = (cx.rect, &*self.data);
+        let (r, data, now) = (cx.rect, &*self.data, cx.now);
         let inside = |x, y| cx.rect.contains(x, y) && cx.clip.contains(x, y);
         let (mut capture, mut stop, mut tap) = (false, false, None);
         let v = cx.state.get::<View>();
-        v.fit(self, r);
+        v.fit(self, r, now);
         match *ev {
             Event::PointerDown { x, y } if inside(x, y) => {
                 v.press = Some(([x, y], [x, y]));
@@ -1269,6 +1326,7 @@ impl Widget for Map {
                 let Some((start, last)) = v.press else { return };
                 v.panning |= (x - start[0]).hypot(y - start[1]) > SLOP;
                 if v.panning {
+                    v.glide = None;
                     let s = v.scale;
                     v.center = [
                         v.center[0] - (x - last[0]) / s,
@@ -1594,7 +1652,7 @@ mod tests {
         let data = empty();
         let r = Rect::new(0.0, 0.0, 100.0, 100.0);
         let mut v = View::default();
-        v.fit(&map(&data), r);
+        v.fit(&map(&data), r, Instant::now());
         let at = |v: &View| {
             [
                 v.center[0] + (80.0 - 50.0) / v.scale,
@@ -1637,11 +1695,14 @@ mod tests {
         let data = empty();
         let r = Rect::new(0.0, 0.0, 100.0, 100.0);
         let mut v = View::default();
+        let t = Instant::now();
         let focused = map(&data).focus(Some(([10.0, 20.0], 5.0)));
-        v.fit(&focused, r);
+        v.fit(&focused, r, t);
+        v.step(t + GLIDE);
         assert_eq!((v.center, v.scale), ([10.0, 20.0], 5.0));
         v.center = [0.0, 0.0];
-        v.fit(&focused, r);
+        v.fit(&focused, r, t);
+        assert!(!v.step(t + GLIDE));
         assert_eq!(v.center, [0.0, 0.0]);
     }
 
@@ -1650,9 +1711,15 @@ mod tests {
         let data = empty();
         let r = Rect::new(0.0, 0.0, 100.0, 50.0);
         let mut v = View::default();
-        v.fit(&map(&data).fit(Rect::new(0.0, 0.0, 10.0, 10.0)), r);
+        let t = Instant::now();
+        v.fit(&map(&data).fit(Rect::new(0.0, 0.0, 10.0, 10.0)), r, t);
+        v.step(t + GLIDE);
         assert_eq!((v.center, v.scale), ([5.0, 5.0], 5.0));
-        v.fit(&map(&data).fit(Rect::new(0.0, 0.0, 400.0, 100.0)), r);
+        v.fit(&map(&data).fit(Rect::new(0.0, 0.0, 400.0, 100.0)), r, t);
+        // Halfway in time is halfway in zoom, geometrically.
+        assert!(v.step(t + GLIDE / 2));
+        assert!((v.scale - (5.0f32 * 0.25).sqrt()).abs() < 1e-4);
+        assert!(!v.step(t + GLIDE));
         assert_eq!((v.center, v.scale), ([200.0, 50.0], 0.25));
     }
 }
