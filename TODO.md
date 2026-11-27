@@ -362,7 +362,7 @@ and the app worked around the rest:
       Wijk–Nuij zooms out mid-flight for long moves.
 - [ ] Map scales for regions and countries: levels and tile sizes are fixed
       in metres for a city, so a country only draws in km units (see
-      `map/README.md`, Limitations). Derive them from the map's extent, or
+      `libs/map/README.md`, Limitations). Derive them from the map's extent, or
       take the unit in `MapBuilder`.
 - [ ] Map markers: meteo paints its weather chips with names on an
       overlay; which show is now `dfui::Placer`'s job (the selected one
@@ -382,7 +382,7 @@ and the app worked around the rest:
 - [x] Text a hair wider than a fixed `width` measured two lines tall but
       painted on one (paint has 1px of slack, measure didn't), so it sat
       high in its row: meteo's "0.0 mm" columns. Measure has the slack too.
-- [x] Map scale in `on_tap`: the handler gets the scale (px per unit) with
+- [x] Map scale on taps: `on_tap_scaled` gets the scale (px per unit) with
       the point, so a tap radius in px needs no `Cell` out of the overlay.
 - [x] Per-side padding: `padding_top`/`_right`/`_bottom`/`_left` over
       `padding`, instead of `style_mut()` and taffy's `LengthPercentage`.
@@ -496,8 +496,8 @@ and the app worked around the rest:
       `Event::Pinch`; ctrl+wheel and touchpad pinch on desktop.
 - [ ] Multi-touch follow-ups: a two-finger touch held still and released
       still taps what's under it unless a widget captures; no rotation.
-- [ ] Maps experiment (`map/`, `dfui-map`, on crates.io): OSM geometry cut into
-      quadtree tiles of `Shape`s; numbers and limits in `map/README.md`.
+- [ ] Maps (`libs/map/`, `dfui-map`, on crates.io): OSM geometry cut into
+      quadtree tiles of `Shape`s; numbers and limits in `libs/map/README.md`.
       Runs on the phone (`osm_android`, the bus app). Maps save to bytes,
       keep lines by their middle and carry levels of detail; tiles stream
       in under a per-frame budget, coarser levels standing in. 8–12 ms GPU

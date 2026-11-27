@@ -2,10 +2,12 @@
 
 [![crates.io](https://img.shields.io/crates/v/dfui-media.svg)](https://crates.io/crates/dfui-media)
 [![docs.rs](https://img.shields.io/docsrs/dfui-media)](https://docs.rs/dfui-media)
-[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
 [![tests](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml)
+[![lint](https://github.com/LuisAyuso/dfui/actions/workflows/lint.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/lint.yml)
+[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
+[![license](https://img.shields.io/crates/l/dfui-media.svg)](https://github.com/LuisAyuso/dfui/blob/main/LICENSE)
 
-Experimental hardware-decoded video for [dfui](https://github.com/LuisAyuso/dfui).
+Hardware-decoded video for [dfui](https://github.com/LuisAyuso/dfui).
 It plays fragmented MP4 (H.264 or HEVC, 8- or 10-bit, with AAC sound) and
 draws the frames as dfui bitmaps: VA-API through libavcodec on Linux, with
 zero-copy frames when the GPU imports dmabufs, and MediaCodec on Android

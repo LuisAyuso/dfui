@@ -1,4 +1,4 @@
-//! Experimental vector maps for dfui: the app projects its geometry (e.g.
+//! Vector maps for dfui: the app projects its geometry (e.g.
 //! from OpenStreetMap) with a [`MapBuilder`], which packs it into tiled
 //! [`Shape`]s at a few levels of detail, and [`map`] pans and zooms them.
 //! Shapes are stored on the GPU as they come into view, so moving the map
@@ -164,8 +164,8 @@ impl MapBuilder {
 
     /// `s` at `size` metres along the polyline, e.g. a street's name inside
     /// it: centred, reading left to right, each glyph turned to the line
-    /// under its middle. Shows once `size` reaches [`MIN_LABEL_PX`] and the
-    /// same text placed earlier is [`LABEL_SPACING_PX`] away; false,
+    /// under its middle. Shows once `size` reaches 7 logical px on screen and
+    /// the same text placed earlier is 300 px away; false,
     /// adding nothing, when the text is longer than the line or the line
     /// bends too sharply under it.
     pub fn label(
@@ -264,7 +264,7 @@ impl MapBuilder {
     }
 
     /// Cuts every layer at each level of detail into quadtree cells of at
-    /// most [`MAX_QUADS`] segments.
+    /// most 128 segments.
     pub fn build(self) -> MapData {
         let (mut tiles, mut table) = (Vec::new(), Vec::new());
         for (i, l) in self.layers.iter().enumerate() {
@@ -879,7 +879,7 @@ impl MapData {
     /// a level; a u32 count of tiles and for each its cell as four f32,
     /// min_scale, a u32 of its layer and (high byte, 255 for labels) level
     /// and a u32 length of its geometry; then each tile's geometry as
-    /// [`encode`] writes it.
+    /// the crate's `encode` writes it.
     pub fn to_bytes(&self) -> Vec<u8> {
         let geos: Vec<Vec<u8>> = self
             .tiles
@@ -1183,9 +1183,14 @@ impl Map {
     }
 
     /// Runs on a tap that didn't pan or pinch, with the map point under it
-    /// in [`MapBuilder::point`] metres and the scale in logical px per metre,
-    /// e.g. to take taps within a few px of a marker.
-    pub fn on_tap(mut self, f: impl Fn(&mut EventCx, Point, f32) + 'static) -> Self {
+    /// in [`MapBuilder::point`] metres.
+    pub fn on_tap(self, f: impl Fn(&mut EventCx, Point) + 'static) -> Self {
+        self.on_tap_scaled(move |cx, p, _| f(cx, p))
+    }
+
+    /// [`Map::on_tap`], also given the scale in logical px per metre, e.g. to
+    /// take taps within a few px of a marker.
+    pub fn on_tap_scaled(mut self, f: impl Fn(&mut EventCx, Point, f32) + 'static) -> Self {
         self.on_tap = Some(Rc::new(f));
         self
     }
@@ -1677,7 +1682,7 @@ mod tests {
             fn view(&self) -> Element {
                 let taps = self.1.clone();
                 map(&self.0)
-                    .on_tap(move |_, p, s| taps.borrow_mut().push((p, s)))
+                    .on_tap_scaled(move |_, p, s| taps.borrow_mut().push((p, s)))
                     .into()
             }
         }

@@ -483,7 +483,7 @@ Every public function, method and type, with the first sentence of its docs. Gen
 
 ## dfui-map
 
-### map/src/lib.rs
+### libs/map/src/lib.rs
 
 - `struct MapBuilder`: Collects areas and lines in metres around an origin and packs them into [`MapData`].
 - `struct Layer(usize)`: One of a [`MapBuilder`]'s layers.
@@ -493,9 +493,9 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `MapBuilder::area(&self, layer: Layer, outers: &[Vec<Point>], holes: &[Vec<Point>])`: A filled area, e.g. an OSM multipolygon: `outers` filled, `holes` cut out of them.
 - `MapBuilder::line(&self, layer: Layer, points: &[Point], width: f32)`: A line `width` metres wide through `points`, with round caps and bevelled joins.
 - `MapBuilder::label(&self, layer: Layer, points: &[Point], text: &Text, font: Font, s: &str, size: f32) -> bool`: `s` at `size` metres along the polyline, e.g. a street's name inside it: centred, reading left to right, each glyph turned to the line under its middle.
-- `MapBuilder::build(self) -> MapData`: Cuts every layer at each level of detail into quadtree cells of at most [`MAX_QUADS`] segments.
+- `MapBuilder::build(self) -> MapData`: Cuts every layer at each level of detail into quadtree cells of at most 128 segments.
 - `struct MapData`: Geometry ready to draw, from [`MapBuilder::build`] or [`MapData::from_bytes`].
-- `MapData::to_bytes(&self) -> Vec<u8>`: The map as [`MapData::from_bytes`] reads it, little-endian: `DFM2`, the bounds as four f32; a u32 count of layers and for each its color as four f32 and a u32 of the level drawn in place of each, four bits a level; a u32 count of tiles and for each its cell as four f32, min_scale, a u32 of its layer and (high byte, 255 for labels) level and a u32 length of its geometry; then each tile's geometry as [`encode`] writes it.
+- `MapData::to_bytes(&self) -> Vec<u8>`: The map as [`MapData::from_bytes`] reads it, little-endian: `DFM2`, the bounds as four f32; a u32 count of layers and for each its color as four f32 and a u32 of the level drawn in place of each, four bits a level; a u32 count of tiles and for each its cell as four f32, min_scale, a u32 of its layer and (high byte, 255 for labels) level and a u32 length of its geometry; then each tile's geometry as the crate's `encode` writes it.
 - `MapData::from_bytes(bytes: &'static [u8]) -> Option<MapData>`: A map written by [`MapData::to_bytes`], usually `include_bytes!`d.
 - `MapData::tiles(&self) -> usize`: The tiles across every level, for gauging how heavy a map is.
 - `MapData::segments(&self) -> usize`: The segments across all tiles, each 32 bytes on the GPU once drawn.
@@ -505,4 +505,5 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `Map::focus(self, focus: Option<(Point, f32)>) -> Self`: Centres on `center` and zooms in to at least `scale` whenever this differs from the focus of the last build, e.g. to show a search result.
 - `Map::fit(self, bounds: Rect) -> Self`: Fits `bounds` (in [`MapBuilder::point`] units) to the widget, zooming in or out, whenever they differ from the last build's, e.g. to show one region and then the whole map again.
 - `Map::overlay(self, f: impl Fn(&mut PaintCx, &dyn Fn(Point) -> Point) + 'static) -> Self`: Paints over the map, given a function from map points to logical px, e.g. to draw markers that keep their size while zooming.
-- `Map::on_tap(self, f: impl Fn(&mut EventCx, Point, f32) + 'static) -> Self`: Runs on a tap that didn't pan or pinch, with the map point under it in [`MapBuilder::point`] metres and the scale in logical px per metre, e.g. to take taps within a few px of a marker.
+- `Map::on_tap(self, f: impl Fn(&mut EventCx, Point) + 'static) -> Self`: Runs on a tap that didn't pan or pinch, with the map point under it in [`MapBuilder::point`] metres.
+- `Map::on_tap_scaled(self, f: impl Fn(&mut EventCx, Point, f32) + 'static) -> Self`: [`Map::on_tap`], also given the scale in logical px per metre, e.g. to take taps within a few px of a marker.

@@ -1,9 +1,11 @@
-# dfui-map (experiment)
+# dfui-map
 
 [![crates.io](https://img.shields.io/crates/v/dfui-map.svg)](https://crates.io/crates/dfui-map)
 [![docs.rs](https://img.shields.io/docsrs/dfui-map)](https://docs.rs/dfui-map)
-[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
 [![tests](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml)
+[![lint](https://github.com/LuisAyuso/dfui/actions/workflows/lint.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/lint.yml)
+[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
+[![license](https://img.shields.io/crates/l/dfui-map.svg)](https://github.com/LuisAyuso/dfui/blob/main/LICENSE)
 
 A pannable, zoomable vector map widget built only on [dfui](https://github.com/LuisAyuso/dfui)'s public API. dfui
 itself doesn't depend on it; an app opts in by depending on `dfui-map`.

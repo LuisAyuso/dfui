@@ -1,9 +1,11 @@
-# dfui-bevy (experiment)
+# dfui-bevy
 
 [![crates.io](https://img.shields.io/crates/v/dfui-bevy.svg)](https://crates.io/crates/dfui-bevy)
 [![docs.rs](https://img.shields.io/docsrs/dfui-bevy)](https://docs.rs/dfui-bevy)
-[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
 [![tests](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml)
+[![lint](https://github.com/LuisAyuso/dfui/actions/workflows/lint.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/lint.yml)
+[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
+[![license](https://img.shields.io/crates/l/dfui-bevy.svg)](https://github.com/LuisAyuso/dfui/blob/main/LICENSE)
 
 A [dfui](https://github.com/LuisAyuso/dfui) app as the HUD of a
 [Bevy](https://bevyengine.org) 0.20 game. dfui draws with Bevy's own wgpu

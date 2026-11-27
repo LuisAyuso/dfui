@@ -1,4 +1,4 @@
-//! Experimental plots for dfui in the spirit of ggplot2: a [`plot`] of some
+//! Plots for dfui in the spirit of ggplot2: a [`plot`] of some
 //! rows holds [`Layer`]s, each mapping rows to aesthetics (x, y, group,
 //! ohlc), summarizing them with a [`Stat`] and drawing them as a [`Geom`].
 //! Pass fresh rows on every rebuild and the plot follows them.
@@ -94,7 +94,7 @@ impl Datum {
     }
 }
 
-/// A geom with its aesthetics and stat; see [`line`], [`point`], [`bar`],
+/// A geom with its aesthetics and stat; see [`line()`], [`point`], [`bar`],
 /// [`boxplot`] and [`candle`].
 pub struct Layer<T> {
     geom: Geom,
