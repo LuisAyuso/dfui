@@ -261,10 +261,11 @@ Patterns the app hand-rolled that belong in dfui:
       needed a −24 px offset against the device) and takes raw pointer
       events. A `tap(x, y)` with device-like insets, together with the
       `snapshot` item under Testing.
-- [ ] Label placement: busiest first, right of the point or else left,
+- [x] Label placement: busiest first, right of the point or else left,
       dropped if it would overlap a placed one, so more show when zoomed
-      in. The network view does it; `dfui-map`'s street labels face the
-      same problem.
+      in: `dfui::Placer` (and `Rect::overlaps`), used by the network view
+      and meteo's map. `dfui-map`'s street labels space same-named labels
+      at build time instead, a different problem.
 - [ ] Android location and permissions: busapp's `gps.rs` asks for the
       permission and keeps the providers updating through a `PendingIntent`
       nobody receives (no Java class), reading the newest fix once a
@@ -364,9 +365,10 @@ and the app worked around the rest:
       `map/README.md`, Limitations). Derive them from the map's extent, or
       take the unit in `MapBuilder`.
 - [ ] Map markers: meteo paints its weather chips with names on an
-      overlay and declutters them itself (overlapping ones become dots,
-      the selected one first). A marker layer with priorities and a
-      fallback for collisions would serve it and the bus app's stops.
+      overlay; which show is now `dfui::Placer`'s job (the selected one
+      first, the rest as dots). A marker layer in `dfui-map` (points with a
+      priority, drawn and hit-tested by the map) would still save the
+      overlay and tap code it and the bus app's stops repeat.
 - [x] Map scale in `on_tap`: the handler gets the scale (px per unit) with
       the point, so a tap radius in px needs no `Cell` out of the overlay.
 - [x] Per-side padding: `padding_top`/`_right`/`_bottom`/`_left` over

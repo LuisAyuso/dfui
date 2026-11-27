@@ -104,7 +104,12 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `Rect::new(x: f32, y: f32, w: f32, h: f32) -> Rect`: A box with its top-left corner at `x`, `y`.
 - `Rect::contains(&self, x: f32, y: f32) -> bool`: Whether the point is inside: left and top edges count, right and bottom don't.
 - `Rect::intersect(&self, o: &Rect) -> Rect`: The overlap of both boxes; zero-sized where they don't meet.
+- `Rect::overlaps(&self, o: &Rect) -> bool`: Whether both boxes share some area; touching edges don't count.
 - `Rect::union(&self, o: &Rect) -> Rect`: The smallest box containing both.
+- `struct Placer`
+- `Placer::new() -> Self`
+- `Placer::place(&self, spots: impl IntoIterator<Item = Rect>) -> Option<Rect>`: The first of `spots` that overlaps nothing placed yet, now taken; `None` leaves everything as it was.
+- `Placer::is_free(&self, r: &Rect) -> bool`: Whether `r` overlaps nothing placed, without taking it; e.g. to skip a dot that a placed label would cover.
 - `struct Pixels`: A rendered frame: sRGB RGBA8, row-major.
 
 ### src/runtime/android.rs

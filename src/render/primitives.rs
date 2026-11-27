@@ -108,6 +108,12 @@ impl Rect {
         Rect::new(x, y, (r - x).max(0.0), (b - y).max(0.0))
     }
 
+    /// Whether both boxes share some area; touching edges don't count.
+    pub fn overlaps(&self, o: &Rect) -> bool {
+        let i = self.intersect(o);
+        i.w > 0.0 && i.h > 0.0
+    }
+
     /// The smallest box containing both.
     pub fn union(&self, o: &Rect) -> Rect {
         let x = self.x.min(o.x);
@@ -115,6 +121,36 @@ impl Rect {
         let r = (self.x + self.w).max(o.x + o.w);
         let b = (self.y + self.h).max(o.y + o.h);
         Rect::new(x, y, r - x, b - y)
+    }
+}
+
+/// Places labels or markers without overlaps: each takes the first of its
+/// candidate spots that's still free, in the order they're placed, so place
+/// the most important first. E.g. map labels right of their point or else
+/// left, dropped when neither fits, so more show as zooming in makes room.
+// ponytail: O(placed) per spot, fine for hundreds; a grid for thousands.
+#[derive(Clone, Debug, Default)]
+pub struct Placer {
+    taken: Vec<Rect>,
+}
+
+impl Placer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The first of `spots` that overlaps nothing placed yet, now taken;
+    /// `None` leaves everything as it was.
+    pub fn place(&mut self, spots: impl IntoIterator<Item = Rect>) -> Option<Rect> {
+        let at = spots.into_iter().find(|s| self.is_free(s))?;
+        self.taken.push(at);
+        Some(at)
+    }
+
+    /// Whether `r` overlaps nothing placed, without taking it; e.g. to skip a
+    /// dot that a placed label would cover.
+    pub fn is_free(&self, r: &Rect) -> bool {
+        !self.taken.iter().any(|t| t.overlaps(r))
     }
 }
 
@@ -235,7 +271,22 @@ pub struct Shadow {
 
 #[cfg(test)]
 mod tests {
-    use super::Bitmap;
+    use super::{Bitmap, Placer, Rect};
+
+    #[test]
+    fn placer_takes_the_first_free_spot() {
+        let mut p = Placer::new();
+        let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+        assert_eq!(p.place([a]), Some(a));
+        // Right of the first is free; overlapping it isn't.
+        let (over, beside) = (
+            Rect::new(5.0, 0.0, 10.0, 10.0),
+            Rect::new(10.0, 0.0, 10.0, 10.0),
+        );
+        assert_eq!(p.place([over, beside]), Some(beside));
+        assert_eq!(p.place([over]), None);
+        assert!(!p.is_free(&over) && p.is_free(&Rect::new(0.0, 10.0, 5.0, 5.0)));
+    }
 
     #[test]
     #[should_panic(expected = "rgba size")]
