@@ -14,10 +14,10 @@ use crate::theme::Ink;
 use crate::widget::{BuildCx, Element, PaintCx, Widget};
 
 /// How far toward bold an ancestor wants its labels, 0..=1, whether to dim
-/// them, and their default color; a button sets the first two before its
-/// children paint.
+/// them, their default color, and whether a pressed one centers in its box;
+/// a button sets the first two before its children paint.
 #[derive(Clone, Default)]
-pub(crate) struct Emphasis(pub Rc<Cell<f32>>, pub Rc<Cell<bool>>, pub Ink);
+pub(crate) struct Emphasis(pub Rc<Cell<f32>>, pub Rc<Cell<bool>>, pub Ink, pub bool);
 
 #[derive(Default)]
 struct LabelState {
@@ -135,10 +135,12 @@ impl Widget for Label {
     fn paint(&self, cx: &mut PaintCx) {
         let (r, s, now) = (cx.rect, self.size, cx.now);
         let st = cx.state.get::<LabelState>();
-        let (pressed, dim, content) = st
+        let (pressed, dim, content, centered) = st
             .emphasis
             .as_ref()
-            .map_or((0.0, false, Ink::Content), |e| (e.0.get(), e.1.get(), e.2));
+            .map_or((0.0, false, Ink::Content, false), |e| {
+                (e.0.get(), e.1.get(), e.2, e.3)
+            });
         let target = if self.emphasized { 1.0 } else { 0.0 };
         st.bold.to(target, now, MORPH, ease::out_cubic);
         let (own, moving) = (st.bold.get(now), st.bold.running(now));
@@ -155,8 +157,9 @@ impl Widget for Label {
         let c = if dim { c.alpha(c.a * 0.5) } else { c };
         let regular = std::ptr::eq(self.font.0, Font::DEFAULT.0);
         let max = Some(r.w + 1.0);
-        // A button centers its label; an emphasized one keeps its start.
-        let center = pressed > 0.0;
+        // A button centers its label; a list item's and an emphasized one keep
+        // their start.
+        let center = pressed > 0.0 && centered;
         if t > 0.0 && regular && !self.text.contains('\n') {
             let fits = match self.max_lines {
                 None => true,

@@ -260,7 +260,8 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `Button::on_click(self, f: impl Fn(&mut EventCx) + 'static) -> Self`: Runs on release inside the button, e.g. to `update` local state.
 - `Button::color(self, c: impl Into<Ink>) -> Self`: Background color; [`Role::Accent`] by default.
 - `Button::radius(self, r: f32) -> Self`: Corner radius, logical px; 8 by default.
-- `Button::flat(self) -> Self`: No drop shadow, e.g. for items in a list.
+- `Button::flat(self) -> Self`: No drop shadow; it keeps the accent fill and centres its child.
+- `Button::list_item(self) -> Self`: A row of a list: no shadow, the surface color so only hover and press show, ink-colored text, as wide as its parent with the child stretched across it, e.g. `button(row([name.grow(1.0), value])).list_item()`.
 - `Button::enabled(self, on: bool) -> Self`: When false the button is dimmed and ignores input; it keeps its size.
 
 ### src/widgets/chip.rs

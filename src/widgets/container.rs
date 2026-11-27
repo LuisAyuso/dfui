@@ -66,7 +66,12 @@ impl Container {
     }
     /// Default color of the text and icons inside, to contrast with `bg`.
     pub fn content(mut self, c: impl Into<Ink>) -> Self {
-        self.emphasis = Some(Emphasis(Default::default(), Default::default(), c.into()));
+        self.emphasis = Some(Emphasis(
+            Default::default(),
+            Default::default(),
+            c.into(),
+            false,
+        ));
         self
     }
     /// Corner radius of the background and border, logical px.

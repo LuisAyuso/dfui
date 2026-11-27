@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::time::Duration;
 
-use taffy::{AlignItems, JustifyContent, LengthPercentage, Style};
+use taffy::{AlignItems, FlexDirection, JustifyContent, LengthPercentage, Style};
 
 use super::Styled;
 use super::label::Emphasis;
@@ -108,6 +108,7 @@ pub fn button(child: impl Into<Element>) -> Button {
             Default::default(),
             Default::default(),
             Role::OnAccent.into(),
+            true,
         ),
     }
 }
@@ -128,10 +129,25 @@ impl Button {
         self.radius = r;
         self
     }
-    /// No drop shadow, e.g. for items in a list.
+    /// No drop shadow; it keeps the accent fill and centres its child. For
+    /// the rows of a list, see [`Button::list_item`].
     pub fn flat(mut self) -> Self {
         self.flat = true;
         self
+    }
+    /// A row of a list: no shadow, the surface color so only hover and press
+    /// show, ink-colored text, as wide as its parent with the child stretched
+    /// across it, e.g. `button(row([name.grow(1.0), value])).list_item()`.
+    /// `color` after it marks a selected row.
+    pub fn list_item(mut self) -> Self {
+        self.flat = true;
+        self.color = Role::Surface.into();
+        self.emphasis.2 = Role::Ink.into();
+        self.emphasis.3 = false;
+        self.style.flex_direction = FlexDirection::Column;
+        self.style.align_items = AlignItems::STRETCH;
+        self.style.justify_content = JustifyContent::CENTER;
+        self.fill_width()
     }
     /// When false the button is dimmed and ignores input; it keeps its size.
     pub fn enabled(mut self, on: bool) -> Self {

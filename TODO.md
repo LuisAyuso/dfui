@@ -282,10 +282,10 @@ Patterns the app hand-rolled that belong in dfui:
 
 Layout and widgets:
 
-- [ ] `button().flat()` only drops the shadow; the background stays
-      `Role::Accent` and the child is centered. A plain list row took
-      `.flat().color(Color::WHITE).justify(JustifyContent::START)`. A
-      borderless row style, or at least docs saying what `flat` keeps.
+- [x] `button().flat()` only drops the shadow; the background stays
+      `Role::Accent` and the child is centered. `Button::list_item` is the
+      list row (surface color, ink text, child stretched and left, a pressed
+      label kept in place); `flat`'s docs point to it.
 - [ ] Text in a `row` shrinks and wraps by default: a "5 min" label beside a
       long name broke onto two lines until `.shrink(0.0)`. Consider labels
       not shrinking below their width by default, or document it.
@@ -332,10 +332,8 @@ replaced egui's repaint polling with a `Notifier`. What it hand-rolled:
 - [ ] Scroll to a child: `start_at(fraction)` only approximates "show the
       current row"; `reveal` needs its span in content px, which the app
       doesn't know.
-- [ ] A light button for list items: `.flat()` still fills with the accent;
-      the app recolors with `Role::Selected`. meteo hit it too: its city and
-      day rows need `.flat().color(..).fill_width()` plus `fill_width` on
-      the inner row to read as rows.
+- [x] A light button for list items: `Button::list_item`, see the third
+      app's findings; meteo hit it too.
 - [ ] Children built conditionally: `Vec<Element>` with `push(x.into())`
       everywhere. Accept `Option<Element>` in `row`/`column` children, or a
       small `children![]` macro.

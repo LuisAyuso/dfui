@@ -141,6 +141,31 @@ fn button_states() {
 }
 
 #[test]
+fn list_items() {
+    fn item(name: &str, value: &str) -> dfui::widgets::Button {
+        let cells = [text(name).grow(1.0).into(), text(value).into()];
+        button(row(cells)).list_item()
+    }
+    let view = || {
+        column([
+            item("Madrid", "12°").into(),
+            item("Sevilla", "20°").color(Role::Selected).into(),
+        ])
+        .padding(8.0)
+        .into()
+    };
+    let mut b = bench(view, (200.0, 110.0));
+    let rest = b.image(SCALE);
+    b.event(Event::PointerMove { x: 40.0, y: 25.0 });
+    b.settle();
+    let hover = b.image(SCALE);
+    b.event(Event::PointerDown { x: 40.0, y: 25.0 });
+    b.settle();
+    let pressed = b.image(SCALE);
+    check("list_items", &strip(&[rest, hover, pressed]));
+}
+
+#[test]
 fn toggle_off_on() {
     let v = || {
         row([toggle(false).into(), toggle(true).into()])
