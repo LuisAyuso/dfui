@@ -9,4 +9,5 @@ publish = false
 dfui.workspace = true
 dfui-map = { path = "../map" }
 serde_json = "1"
+flate2 = "1"
 ureq = "3.5"

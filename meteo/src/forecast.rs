@@ -1,8 +1,9 @@
 //! Daily and hourly forecasts: AEMET OpenData for Spain, GeoSphere Austria for Austria.
 //! Fetched on worker threads into [`STORE`], which wakes the UI.
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::{Condvar, LazyLock, Mutex};
+use std::collections::HashMap;
+use std::io::Read;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 use dfui::Notifier;
@@ -68,13 +69,21 @@ fn put(city: &'static str, f: Forecast) {
     STORE.notifier.notify();
 }
 
-/// Loads Austria in one request and starts the AEMET queue with the
-/// capitals' days; other Spanish cities wait for [`want`].
+/// Loads each country's cities in one go: all of Spain's municipalities
+/// from AEMET's daily and hourly batches, Austria from one GeoSphere request.
 pub fn start(spain: &'static [City], austria: &'static [City]) {
-    for c in spain.iter().filter(|c| c.capital).rev() {
-        want(c, false);
-    }
-    std::thread::spawn(aemet_worker);
+    std::thread::spawn(move || {
+        let days = aemet_batch("diaria", "localidad_", spain);
+        for (c, f) in spain.iter().zip(days) {
+            put(c.name, f.and_then(|s| parse_aemet(&s)));
+        }
+        let hours = aemet_batch("horaria", "localidad_h_", spain);
+        for (c, h) in spain.iter().zip(hours) {
+            let h = h.and_then(|s| parse_aemet_hourly(&s));
+            STORE.hourly.lock().unwrap().insert(c.name, h);
+        }
+        STORE.notifier.notify();
+    });
     std::thread::spawn(move || {
         let r = geosphere(austria);
         for (i, c) in austria.iter().enumerate() {
@@ -91,144 +100,171 @@ pub fn start(spain: &'static [City], austria: &'static [City]) {
     });
 }
 
-/// AEMET requests still to make: a city and whether it's the hourly one.
-static QUEUE: Mutex<VecDeque<(&City, bool)>> = Mutex::new(VecDeque::new());
-static QUEUED: Condvar = Condvar::new();
-
-/// Queues `city`'s daily or hourly AEMET forecast ahead of what's waiting,
-/// once: what the user just opened goes first.
-pub fn want(city: &'static City, hourly: bool) {
-    static ASKED: Mutex<Vec<(&str, bool)>> = Mutex::new(Vec::new());
-    let mut asked = ASKED.lock().unwrap();
-    if city.aemet.is_empty() || asked.contains(&(city.name, hourly)) {
-        return;
-    }
-    asked.push((city.name, hourly));
-    QUEUE.lock().unwrap().push_front((city, hourly));
-    QUEUED.notify_one();
-}
-
-/// Makes the queued requests one at a time, paced for AEMET's rate limit.
-fn aemet_worker() {
-    loop {
-        let (city, hourly) = {
-            let mut q = QUEUE.lock().unwrap();
-            loop {
-                match q.pop_front() {
-                    Some(job) => break job,
-                    None => q = QUEUED.wait(q).unwrap(),
-                }
-            }
-        };
-        let r = aemet_get(if hourly { "horaria" } else { "diaria" }, city.aemet);
-        let no_key = r.as_ref().is_err_and(|e| e == NO_KEY);
-        if hourly {
-            let h = r.and_then(|s| parse_aemet_hourly(&s));
-            STORE.hourly.lock().unwrap().insert(city.name, h);
-            STORE.notifier.notify();
-        } else {
-            put(city.name, r.and_then(|s| parse_aemet(&s)));
-        }
-        if !no_key {
-            // ponytail: fixed pacing under AEMET's per-minute limit; read its rate headers if it still throttles.
-            std::thread::sleep(Duration::from_millis(1500));
-        }
-    }
+fn get_bytes(url: &str) -> Result<Vec<u8>, ureq::Error> {
+    ureq::get(url)
+        .call()?
+        .body_mut()
+        .with_config()
+        .limit(64 << 20)
+        .read_to_vec()
 }
 
 fn get(url: &str) -> Result<String, ureq::Error> {
-    let bytes = ureq::get(url).call()?.body_mut().read_to_vec()?;
-    // AEMET serves ISO-8859-15; close enough to Latin-1 for city names.
-    Ok(String::from_utf8(bytes)
-        .unwrap_or_else(|e| e.into_bytes().iter().map(|&b| b as char).collect()))
+    Ok(String::from_utf8_lossy(&get_bytes(url)?).into_owned())
 }
 
 /// Shown on the Spanish tab without a key, so in Spanish.
 const NO_KEY: &str = "Falta AEMET_API_KEY (opendata.aemet.es)";
 
-/// AEMET's `prediccion/especifica/municipio/{kind}` for a municipality.
-/// It answers with a link to the data; both requests count to its limit.
-fn aemet_get(kind: &str, code: &str) -> Result<String, String> {
-    let key = std::env::var("AEMET_API_KEY").map_err(|_| NO_KEY)?;
+/// AEMET's `prediccion/especifica/municipio/{kind}/todos`, a .tar.gz with a
+/// `{prefix}{INE code}.json` per municipality, as each city's JSON.
+fn aemet_batch(kind: &str, prefix: &str, cities: &[City]) -> Vec<Result<String, String>> {
+    let files = aemet_get(kind).and_then(|gz| {
+        let names: Vec<String> = cities
+            .iter()
+            .map(|c| format!("{prefix}{}.json", c.aemet))
+            .collect();
+        untar(flate2::read::GzDecoder::new(gz.as_slice()), &names).map_err(|e| e.to_string())
+    });
+    match files {
+        Ok(mut files) => cities
+            .iter()
+            .map(|c| {
+                files
+                    .remove(&format!("{prefix}{}.json", c.aemet))
+                    .ok_or_else(|| format!("{} no está en AEMET", c.aemet))
+            })
+            .collect(),
+        Err(e) => cities.iter().map(|_| Err(e.clone())).collect(),
+    }
+}
+
+/// The files in `tar` named in `wanted`, skipping the rest unread.
+fn untar(mut tar: impl Read, wanted: &[String]) -> std::io::Result<HashMap<String, String>> {
+    let mut out = HashMap::new();
+    let mut header = [0; 512];
+    while tar.read_exact(&mut header).is_ok() && header[0] != 0 {
+        let field = |r: std::ops::Range<usize>| {
+            let f = &header[r];
+            String::from_utf8_lossy(&f[..f.iter().position(|&b| b == 0).unwrap_or(f.len())])
+                .into_owned()
+        };
+        let name = field(0..100);
+        let size = u64::from_str_radix(field(124..136).trim(), 8).unwrap_or(0);
+        let padded = size.div_ceil(512) * 512;
+        let mut body = (&mut tar).take(padded);
+        if wanted.contains(&name) {
+            let mut data = vec![0; padded as usize];
+            body.read_exact(&mut data)?;
+            data.truncate(size as usize);
+            out.insert(name, String::from_utf8_lossy(&data).into_owned());
+        } else {
+            std::io::copy(&mut body, &mut std::io::sink())?;
+        }
+    }
+    Ok(out)
+}
+
+/// One of AEMET's `todos` batches. It answers with a link to the data;
+/// both requests count to its limit.
+fn aemet_get(kind: &str) -> Result<Vec<u8>, String> {
+    let key = std::env::var("AEMET_API_KEY")
+        .ok()
+        .or(option_env!("AEMET_KEY_FILE").map(str::to_owned))
+        .ok_or(NO_KEY)?;
     let url = format!(
-        "https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/{kind}/{code}?api_key={key}"
+        "https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/{kind}/todos?api_key={key}"
     );
-    let mut wait = Duration::from_secs(5);
     loop {
         let r = get(&url).and_then(|meta| {
             let meta: Value = serde_json::from_str(&meta).unwrap_or_default();
-            get(meta["datos"].as_str().unwrap_or_default())
+            get_bytes(meta["datos"].as_str().unwrap_or_default())
         });
         match r {
-            Err(ureq::Error::StatusCode(429)) if wait < Duration::from_secs(60) => {
-                std::thread::sleep(wait);
-                wait *= 2;
-            }
+            // AEMET's limit is per minute and it says to try again the next one.
+            Err(ureq::Error::StatusCode(429)) => std::thread::sleep(Duration::from_secs(61)),
             r => return r.map_err(|e| e.to_string()),
         }
     }
 }
 
+/// A number AEMET's batches give as a string ("Ip" is a trace of rain).
+fn num(v: &Value) -> Option<f32> {
+    v.as_str()?.parse().ok()
+}
+
+/// Series `k` of `d`; AEMET's batches, converted from XML, give a one-entry
+/// series as the entry itself.
+fn list<'a>(d: &'a Value, k: &str) -> &'a [Value] {
+    match &d[k] {
+        Value::Array(a) => a,
+        Value::Null => &[],
+        v => std::slice::from_ref(v),
+    }
+}
+
+/// The `valor` of the entry in series `k` for `periodo`.
+fn at<'a>(d: &'a Value, k: &str, periodo: &str) -> Option<&'a Value> {
+    Some(&list(d, k).iter().find(|e| e["periodo"] == periodo)?["valor"])
+}
+
 fn parse_aemet(json: &str) -> Forecast {
     let v: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let days = v[0]["prediccion"]["dia"].as_array().ok_or("no forecast")?;
+    let days = v["root"]["prediccion"]["dia"]
+        .as_array()
+        .ok_or("no forecast")?;
     Ok(days
         .iter()
         .filter_map(|d| {
-            let sky = d["estadoCielo"].as_array()?;
-            let sky = sky
+            let sky = list(d, "estado_cielo")
                 .iter()
-                .filter(|s| s["value"].as_str().is_some_and(|v| !v.is_empty()));
+                .filter(|s| s["valor"].as_str().is_some_and(|v| !v.is_empty()));
             // The whole day if given, else the first period that has a value.
             let sky = sky
                 .clone()
                 .find(|s| s["periodo"] == "00-24")
                 .or(sky.clone().next());
-            let rain = d["probPrecipitacion"]
-                .as_array()?
+            let rain = list(d, "prob_precipitacion")
                 .iter()
-                .filter_map(|p| p["value"].as_f64());
+                .filter_map(|p| num(&p["valor"]));
             Some(Day {
                 day: days_from_iso(d["fecha"].as_str()?)?,
-                sky: aemet_sky(sky.and_then(|s| s["value"].as_str()).unwrap_or("")),
-                min: d["temperatura"]["minima"].as_f64()? as f32,
-                max: d["temperatura"]["maxima"].as_f64()? as f32,
-                rain: format!("{:.0} %", rain.fold(0.0, f64::max)),
+                sky: aemet_sky(sky.and_then(|s| s["valor"].as_str()).unwrap_or("")),
+                min: num(&d["temperatura"]["minima"])?,
+                max: num(&d["temperatura"]["maxima"])?,
+                rain: format!("{:.0} %", rain.fold(0.0, f32::max)),
             })
         })
         .collect())
 }
 
-/// AEMET's hourly forecast: per day, series of `{value, periodo}` where the
-/// period is the hour and values are strings ("Ip" is a trace of rain).
+/// AEMET's hourly forecast: per day, series of `{periodo, valor}` where the
+/// period is the hour.
 fn parse_aemet_hourly(json: &str) -> Hourly {
     let v: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-    let days = v[0]["prediccion"]["dia"].as_array().ok_or("no forecast")?;
+    let days = v["root"]["prediccion"]["dia"]
+        .as_array()
+        .ok_or("no forecast")?;
     let mut out = Vec::new();
     for d in days {
         let Some(day) = d["fecha"].as_str().and_then(days_from_iso) else {
             continue;
         };
-        let at = |k: &str, hour: &str| -> Option<String> {
-            let s = d[k].as_array()?.iter().find(|e| e["periodo"] == hour)?;
-            s["value"].as_str().map(str::to_owned)
-        };
-        for t in d["temperatura"].as_array().into_iter().flatten() {
-            let (Some(hour), Some(temp)) = (t["periodo"].as_str(), t["value"].as_str()) else {
+        for t in list(d, "temperatura") {
+            let (Some(hour), Some(temp)) = (t["periodo"].as_str(), num(&t["valor"])) else {
                 continue;
             };
-            let num = |k| {
-                at(k, hour)
-                    .and_then(|v| v.parse::<f32>().ok())
-                    .unwrap_or(0.0)
-            };
-            let (rain, snow) = (num("precipitacion"), num("nieve"));
+            let mm = |k| at(d, k, hour).and_then(num).unwrap_or(0.0);
             out.push(Hour {
                 day,
                 hour: hour.parse().unwrap_or(0),
-                sky: aemet_sky(&at("estadoCielo", hour).unwrap_or_default()),
-                temp: temp.parse().unwrap_or(f32::NAN),
-                rain: rain + snow,
+                sky: aemet_sky(
+                    at(d, "estado_cielo", hour)
+                        .and_then(Value::as_str)
+                        .unwrap_or(""),
+                ),
+                temp,
+                rain: mm("precipitacion") + mm("nieve"),
             });
         }
     }
@@ -373,12 +409,12 @@ mod tests {
 
     #[test]
     fn aemet() {
-        let json = r#"[{"prediccion":{"dia":[
-            {"fecha":"2026-11-27T00:00:00","temperatura":{"maxima":14,"minima":3},
-             "estadoCielo":[{"value":"","periodo":"00-24"},{"value":"25","periodo":"00-12"}],
-             "probPrecipitacion":[{"value":40,"periodo":"00-12"},{"value":85,"periodo":"12-24"}]},
-            {"fecha":"2026-11-28T00:00:00","temperatura":{"maxima":16,"minima":5},
-             "estadoCielo":[{"value":"11n"}],"probPrecipitacion":[{"value":0}]}]}}]"#;
+        let json = r#"{"root":{"prediccion":{"dia":[
+            {"fecha":"2026-11-27","temperatura":{"maxima":"14","minima":"3"},
+             "estado_cielo":[{"periodo":"00-24","descripcion":""},{"valor":"25","periodo":"00-12"}],
+             "prob_precipitacion":[{"periodo":"00-24"},{"valor":"40","periodo":"00-12"},{"valor":"85","periodo":"12-24"}]},
+            {"fecha":"2026-11-28","temperatura":{"maxima":"16","minima":"5"},
+             "estado_cielo":{"valor":"11n"},"prob_precipitacion":{"valor":"0"}}]}}}"#;
         let days = parse_aemet(json).unwrap();
         assert_eq!(days.len(), 2);
         assert_eq!(
@@ -390,11 +426,11 @@ mod tests {
 
     #[test]
     fn aemet_hourly() {
-        let json = r#"[{"prediccion":{"dia":[{"fecha":"2026-11-27T00:00:00",
-            "temperatura":[{"value":"5","periodo":"07"},{"value":"9","periodo":"08"}],
-            "estadoCielo":[{"value":"16n","periodo":"07"},{"value":"25","periodo":"08"}],
-            "precipitacion":[{"value":"Ip","periodo":"07"},{"value":"1.2","periodo":"08"}],
-            "nieve":[{"value":"0","periodo":"07"},{"value":"0","periodo":"08"}]}]}}]"#;
+        let json = r#"{"root":{"prediccion":{"dia":[{"fecha":"2026-11-27",
+            "temperatura":[{"valor":"5","periodo":"07"},{"valor":"9","periodo":"08"}],
+            "estado_cielo":[{"valor":"16n","periodo":"07"},{"valor":"25","periodo":"08"}],
+            "precipitacion":[{"valor":"Ip","periodo":"07"},{"valor":"1.2","periodo":"08"}],
+            "nieve":[{"valor":"0","periodo":"07"},{"valor":"0","periodo":"08"}]}]}}}"#;
         let h = parse_aemet_hourly(json).unwrap();
         assert_eq!(h.len(), 2);
         assert_eq!(
@@ -402,6 +438,22 @@ mod tests {
             (7, Sky::Cloudy, 5.0, 0.0)
         );
         assert_eq!((h[1].sky, h[1].rain), (Sky::Rain, 1.2));
+    }
+
+    #[test]
+    fn untars_only_the_wanted_files() {
+        let mut tar = Vec::new();
+        for (name, body) in [("a.json", "skipped"), ("b.json", "{}")] {
+            let mut h = [0u8; 512];
+            h[..name.len()].copy_from_slice(name.as_bytes());
+            h[124..135].copy_from_slice(format!("{:011o}", body.len()).as_bytes());
+            tar.extend(h);
+            tar.extend(body.bytes().chain(std::iter::repeat(0)).take(512));
+        }
+        tar.extend([0; 1024]);
+        let files = untar(tar.as_slice(), &["b.json".to_owned()]).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files["b.json"], "{}");
     }
 
     #[test]

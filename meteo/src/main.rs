@@ -243,13 +243,9 @@ impl App for Meteo {
     }
 }
 
-/// Opens city `i`: zooms to its region and loads the region's cities.
+/// Opens city `i`: zooms to its region.
 fn open(cx: &mut EventCx, h: Handle<Ui>, cities: &'static [City], i: usize) {
     let c = &cities[i];
-    for other in cities.iter().filter(|o| o.region == c.region).rev() {
-        forecast::want(other, false);
-    }
-    forecast::want(c, true);
     cx.update(h, move |u: &mut Ui| {
         (u.region, u.city) = (Some(c.region), Some(i))
     });
