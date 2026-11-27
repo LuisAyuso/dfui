@@ -122,6 +122,9 @@ impl Widget for Label {
             AvailableSpace::MinContent => Some(0.0),
             AvailableSpace::MaxContent => None,
         });
+        // The same 1px of slack as `paint`, so a line that paint keeps whole
+        // isn't measured as two.
+        let max = max.map(|w| w + 1.0);
         let l = text.layout(&self.shown(text, self.font, max), self.font, self.size, max);
         Size {
             width: known.width.unwrap_or(l.width),

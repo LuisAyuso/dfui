@@ -189,6 +189,22 @@ fn text_in_a_short_row() {
 }
 
 #[test]
+fn text_just_wider_than_its_width_stays_on_one_line() {
+    // "0.0 mm" is a hair over 50 px: it's painted with 1px of slack, so it
+    // has to be measured with it too, or its box is two lines tall.
+    let view = || {
+        let cells = [
+            text("Innsbruck").grow(1.0).into(),
+            text("0.0 mm").size(13.0).width(50.0).into(),
+        ];
+        let item = button(row(cells).align(dfui::taffy::AlignItems::CENTER)).list_item();
+        scroll(column([item.into()])).padding(8.0).into()
+    };
+    let mut b = bench(view, (220.0, 60.0));
+    check("text_at_its_width", &b.image(SCALE));
+}
+
+#[test]
 fn toggle_off_on() {
     let v = || {
         row([toggle(false).into(), toggle(true).into()])
