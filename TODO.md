@@ -638,6 +638,11 @@ baseline above, and use `DFUI_SHOW_COST` to see what a screen is bound by):
 - [x] `image` is a dev-dependency only: `snapshot` returns plain `Pixels`.
 - [x] Integration tests of usual app patterns, driven by input events
       (`tests/patterns.rs`).
+- [x] `docs/api.md`: every public item with its first doc sentence, one
+      line each, written by `tools/api-index`, whose test fails when it's
+      stale; for agents and people to find what exists before rewriting it.
+      ponytail: reads rustfmt'd lines, not Rust, with a list of internal
+      types to skip; rustdoc JSON would be exact once it's on stable.
 - [ ] Fold the demo's `#[ignore]` snapshot tests into the goldens.
 - [ ] Release signing config for real distribution: apps sign in CI with
       `CARGO_APK_RELEASE_KEYSTORE` from secrets (see "Release template"

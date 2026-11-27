@@ -40,7 +40,8 @@ pub struct Label {
     style: Style,
 }
 
-/// A run of text, wrapped at spaces to the available width.
+/// A run of text, wrapped at spaces to the available width unless held to a
+/// few lines by [`Label::max_lines`] (one for a table cell).
 #[doc = example!("text")]
 pub fn text(s: impl Into<String>) -> Label {
     Label {

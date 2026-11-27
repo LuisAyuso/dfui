@@ -48,7 +48,8 @@ All of them release together under one version.
 
 - [Examples and guides](https://luisayuso.github.io/dfui/): getting started,
   concepts, and a live page per widget.
-- [API reference](https://docs.rs/dfui).
+- [API reference](https://docs.rs/dfui), and [docs/api.md](docs/api.md):
+  every public item with its first doc sentence on one line, to search.
 - Design: [architecture](docs/architecture.md), [rendering](docs/rendering.md),
   [glyphs](docs/glyphs.md), [state management](docs/state-management.md),
   [theming](docs/theming.md), [HDR](docs/hdr.md).

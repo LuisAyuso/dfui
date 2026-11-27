@@ -4,6 +4,10 @@ Start with `README.md` for the commands, `docs/architecture.md` for how it fits
 together, and `TODO.md` for the roadmap. Tick off or add items in `TODO.md` as
 part of a change.
 
+Before writing a helper, a layout workaround or a widget, look it up in
+`docs/api.md`: every public function, method and type, one line each. Apps
+on dfui (busapp, meteo) live in their own repos and point here too.
+
 ## Layout
 
 - `src/` — the framework crate (`dfui`)
@@ -11,7 +15,9 @@ part of a change.
 - `map/` — experimental map widget (`dfui-map`), optional, on dfui's public API
 - `bevy/` — experimental Bevy overlay (`dfui-bevy`) on `dfui::Embedded`
 - `site/` — docs site published to GitHub Pages: guide pages and a live example per widget
+- `tools/api-index/` — writes `docs/api.md` from the sources
 - `tools/svg2path/` — converts SVG icons to shapes an app can bundle (see Icons in `README.md`)
+- `docs/api.md` — generated index of the public API, one line per item
 - `docs/architecture.md` — how it fits together
 - `docs/rendering.md` — renderer details and design decisions
 - `docs/glyphs.md` — how text and icons are drawn from outlines (Slug)
@@ -39,6 +45,9 @@ Tests marked `#[ignore]` need a GPU: `cargo test -- --include-ignored`.
 
 - Keep comments to a minimum: only a non-obvious why, never past behavior.
   Docstrings are one short paragraph.
+- When the public API or its docs change, run `cargo run -p api-index`; its
+  test fails while `docs/api.md` is out of date. When an app hand-rolls
+  something dfui has, fix the docs where it was missed, not only `TODO.md`.
 - A `ponytail:` comment marks a deliberate shortcut and its ceiling.
 - Commit directly to `main`. Title up to 50 characters saying what changed;
   a short body saying why.
