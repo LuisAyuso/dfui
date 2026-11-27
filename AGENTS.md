@@ -10,7 +10,6 @@ part of a change.
 - `demo/` — demo app, desktop binary and Android `cdylib`
 - `map/` — experimental map widget (`dfui-map`), optional, on dfui's public API
 - `bevy/` — experimental Bevy overlay (`dfui-bevy`) on `dfui::Embedded`
-- `meteo/` — weather app for Spain (AEMET) and Austria (GeoSphere) on `dfui-map`
 - `site/` — docs site published to GitHub Pages: guide pages and a live example per widget
 - `tools/svg2path/` — converts SVG icons to shapes an app can bundle (see Icons in `README.md`)
 - `docs/architecture.md` — how it fits together
