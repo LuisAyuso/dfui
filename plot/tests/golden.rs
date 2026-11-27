@@ -1,5 +1,5 @@
 //! Golden image of a plot, rendered on the GPU of the reference machine.
-//! `DFUI_BLESS=1 cargo test -p dfui-plots --test golden` rewrites it; on a
+//! `DFUI_BLESS=1 cargo test -p dfui-plot --test golden` rewrites it; on a
 //! mismatch the actual image lands in `target/golden/`.
 
 use std::path::PathBuf;
@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use dfui::widgets::{Styled, column};
 use dfui::{Color, Element, Role};
-use dfui_plots::{line, plot};
+use dfui_plot::{line, plot};
 use image::RgbaImage;
 
 const TOLERANCE: u8 = 2;

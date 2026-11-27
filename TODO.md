@@ -28,7 +28,7 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [ ] `dfui-bevy` follow-ups: one overlay per window, skip unchanged
       frames, keep the overlay node out of Bevy picking.
 
-## dfui-plots
+## dfui-plot
 
 - [x] `plot` with layers of aesthetics, stats and geoms: line (sharp or
       smooth), point, bar, boxplot, candle; mean/sum/count/min/max/box
@@ -334,7 +334,7 @@ replaced egui's repaint polling with a `Notifier`. What it hand-rolled:
 - [ ] Async results into a model: the app drains an mpsc channel inside its
       `watch` build. A documented pattern (or a channel source that applies
       results to a `stateful`) for "spawn work, merge result into app state".
-- [ ] dfui-plots gaps, see that section: tick formatter, pan/zoom, linked
+- [ ] dfui-plot gaps, see that section: tick formatter, pan/zoom, linked
       axes (legend, reference lines and per-layer filters are done).
 
 ## From the code review

@@ -40,7 +40,7 @@ fn main() { dfui::run(Counter); }
 | [dfui-map](map/) | Pannable, zoomable vector maps, built on dfui's public API. |
 | [dfui-media](media/) | Hardware-decoded video (VA-API, MediaCodec), HDR. |
 | [dfui-bevy](bevy/) | A dfui app as the HUD of a Bevy game. |
-| [dfui-plots](plots/) | ggplot-style plots: lines, bars, boxes, candles. |
+| [dfui-plot](plot/) | ggplot-style plots: lines, bars, boxes, candles. |
 
 All of them release together under one version.
 

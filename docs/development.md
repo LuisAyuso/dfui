@@ -33,7 +33,8 @@ DFUI_BLESS=1 cargo test --test golden
 
 ## Releasing
 
-dfui, dfui-map and dfui-media share one version (`[workspace.package]` in
-`Cargo.toml`, and the `dfui` line under `[workspace.dependencies]`). A `v*`
-tag that matches it runs the tests and publishes all three
+dfui, dfui-map, dfui-media, dfui-bevy and dfui-plot share one version
+(`[workspace.package]` in `Cargo.toml`, and the `dfui` line under
+`[workspace.dependencies]`). A `v*` tag that matches it runs the tests and
+publishes them all
 (`.github/workflows/release.yml`).

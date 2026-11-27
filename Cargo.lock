@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "dfui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arboard",
  "bytemuck",
@@ -2660,7 +2660,7 @@ dependencies = [
 
 [[package]]
 name = "dfui-bevy"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bevy",
  "dfui",
@@ -2680,7 +2680,7 @@ dependencies = [
 
 [[package]]
 name = "dfui-map"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "android_logger",
  "dfui",
@@ -2691,7 +2691,7 @@ dependencies = [
 
 [[package]]
 name = "dfui-media"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "android_logger",
  "bytemuck",
@@ -2707,9 +2707,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "dfui-plots"
-version = "0.2.0"
+name = "dfui-plot"
+version = "0.2.1"
 dependencies = [
+ "criterion",
  "dfui",
  "image",
 ]

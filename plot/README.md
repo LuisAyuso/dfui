@@ -1,4 +1,9 @@
-# dfui-plots (experiment)
+# dfui-plot (experiment)
+
+[![crates.io](https://img.shields.io/crates/v/dfui-plot.svg)](https://crates.io/crates/dfui-plot)
+[![docs.rs](https://img.shields.io/docsrs/dfui-plot)](https://docs.rs/dfui-plot)
+[![examples](https://img.shields.io/badge/examples-live-blue)](https://luisayuso.github.io/dfui/)
+[![tests](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml/badge.svg)](https://github.com/LuisAyuso/dfui/actions/workflows/test.yml)
 
 Plot widgets for [dfui](https://github.com/LuisAyuso/dfui) in the spirit of
 ggplot2, built only on dfui's public API. dfui itself doesn't depend on it.
@@ -29,5 +34,5 @@ plot(&rows)
 - Long lines are thinned to each pixel column's envelope before stroking.
 
 ```sh
-cargo run -p dfui-plots --release --example plots
+cargo run -p dfui-plot --release --example plot
 ```

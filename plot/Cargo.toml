@@ -1,5 +1,5 @@
 [package]
-name = "dfui-plots"
+name = "dfui-plot"
 version.workspace = true
 edition = "2024"
 license = "MIT"

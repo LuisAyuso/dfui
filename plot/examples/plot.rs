@@ -1,5 +1,5 @@
-//! Live plots fed from a background thread: `cargo run -p dfui-plots
-//! --release --example plots`.
+//! Live plots fed from a background thread: `cargo run -p dfui-plot
+//! --release --example plot`.
 
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use dfui::widgets::{Styled, column, row, watch};
 use dfui::{App, Element, Notifier, Role};
-use dfui_plots::{Stat, bar, boxplot, candle, line, plot, point};
+use dfui_plot::{Stat, bar, boxplot, candle, line, plot, point};
 
 #[derive(Clone, Copy)]
 struct Tick {

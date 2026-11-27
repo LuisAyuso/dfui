@@ -38,14 +38,14 @@ name = "gpu"
 harness = false
 
 [workspace]
-members = ["bevy", "demo", "map", "media", "plots", "site", "tools/svg2path"]
+members = ["bevy", "demo", "map", "media", "plot", "site", "tools/svg2path"]
 
 # dfui and its sibling crates release together from one `v*` tag; bump both lines.
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 
 [workspace.dependencies]
-dfui = { path = ".", version = "0.2.0" }
+dfui = { path = ".", version = "0.2.1" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = "30"
