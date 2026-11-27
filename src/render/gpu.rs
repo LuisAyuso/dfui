@@ -1198,6 +1198,7 @@ pub(crate) fn read_texture(
 }
 
 /// Draws scenes with someone else's device into their texture, e.g. a game's.
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 pub(crate) struct Embed {
     gpu: Gpu,
     canvas: wgpu::Texture,
@@ -1205,6 +1206,7 @@ pub(crate) struct Embed {
     format: wgpu::TextureFormat,
 }
 
+#[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
 impl Embed {
     /// `format` is the target's; sRGB targets get linear values.
     pub(crate) fn new(
