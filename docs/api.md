@@ -427,8 +427,8 @@ Every public function, method and type, with the first sentence of its docs. Gen
 
 ### src/widgets/segmented.rs
 
-- `struct Segmented`: A row of options with a sliding indicator under `selected`.
-- `fn segmented<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Segmented`: Pill-shaped segmented button with equal-width options.
+- `struct Segmented`: A row of options with a sliding indicator under `selected`, whose label turns bold, morphing glyph by glyph.
+- `fn segmented<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Segmented`: Pill-shaped segmented button with equal-width options; the selected one's label is bold.
 - `fn tabs<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Segmented`: Tab bar with an underline; the app shows the selected tab's content.
 - `Segmented::on_change(self, f: impl Fn(&mut EventCx, usize) + 'static) -> Self`: Called with the tapped option's index when it isn't already selected.
 - `Segmented::accent(self, c: impl Into<Ink>) -> Self`: Color of the selected label and the tab underline; [`Role::Accent`] by default.

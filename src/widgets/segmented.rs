@@ -47,7 +47,8 @@ struct SegState {
     weight: Vec<Animated<f32>>,
 }
 
-/// A row of options with a sliding indicator under `selected`.
+/// A row of options with a sliding indicator under `selected`, whose label
+/// turns bold, morphing glyph by glyph.
 pub struct Segmented {
     labels: Vec<String>,
     selected: usize,
@@ -57,7 +58,8 @@ pub struct Segmented {
     style: Style,
 }
 
-/// Pill-shaped segmented button with equal-width options.
+/// Pill-shaped segmented button with equal-width options; the selected
+/// one's label is bold.
 #[doc = example!("segmented")]
 pub fn segmented<S: Into<String>>(
     labels: impl IntoIterator<Item = S>,
@@ -256,12 +258,7 @@ impl Widget for Segmented {
             for ((l, &slot), t) in self.labels.iter().zip(&slots).zip(weights) {
                 match self.look {
                     Look::Tabs => self.tab_label(cx, l, t, slot, y),
-                    Look::Segmented => {
-                        let lw = cx.text.layout(l, Font::DEFAULT, SIZE, None).width;
-                        let lx = slot.0 + (slot.1 - lw) / 2.0;
-                        let ink = cx.theme.ink;
-                        cx.text(l, Font::DEFAULT, SIZE, ink, None, (lx, y));
-                    }
+                    Look::Segmented => weight(cx, l, SIZE, cx.theme.ink, t, slot, y, true),
                 }
             }
         });
