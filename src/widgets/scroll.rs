@@ -162,6 +162,9 @@ impl Widget for Scroll {
             }
             s.start = self.start;
         }
+        // Content that shrank (a long list swapped for a short one) mustn't
+        // leave the offset past its end, showing nothing.
+        s.offset = s.offset.clamp(0.0, max);
         s.max = max;
         Some(match self.horizontal {
             true => (s.offset, 0.0),

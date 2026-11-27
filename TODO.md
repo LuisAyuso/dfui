@@ -369,6 +369,9 @@ and the app worked around the rest:
       first, the rest as dots). A marker layer in `dfui-map` (points with a
       priority, drawn and hit-tested by the map) would still save the
       overlay and tap code it and the bus app's stops repeat.
+- [x] A scroll whose content shrank kept its offset past the end and
+      showed nothing: meteo's city view after scrolling its town list. The
+      offset is clamped to the content now (`scroll_shrinks` golden).
 - [x] Text a hair wider than a fixed `width` measured two lines tall but
       painted on one (paint has 1px of slack, measure didn't), so it sat
       high in its row: meteo's "0.0 mm" columns. Measure has the slack too.

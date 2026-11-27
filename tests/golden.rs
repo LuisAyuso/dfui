@@ -608,6 +608,38 @@ fn rows() -> Element {
 }
 
 #[test]
+fn scroll_clamps_when_its_content_shrinks() {
+    // Scrolled to the end of 30 rows, then swapped for 3 (e.g. a list of
+    // cities for one city's days): the 3 show instead of an empty view.
+    let view = || {
+        stateful(|short: &bool, h| {
+            let n = if *short { 3 } else { 30 };
+            let list = (1..=n).map(|i| text(format!("Row {i}")).into());
+            column([
+                button(text("Swap"))
+                    .on_click(move |cx| cx.update(h, |s: &mut bool| *s = true))
+                    .into(),
+                scroll(column(list).gap(8.0)).fill().into(),
+            ])
+            .fill()
+        })
+        .fill()
+        .into()
+    };
+    let mut b = bench(view, (160.0, 200.0));
+    b.event(Event::Wheel {
+        x: 80.0,
+        y: 150.0,
+        dx: 0.0,
+        dy: 5000.0,
+    });
+    b.settle();
+    tap(&mut b, 30.0, 20.0);
+    b.settle();
+    check("scroll_shrinks", &b.image(SCALE));
+}
+
+#[test]
 fn scroll_wheel_and_fling() {
     let mut b = bench(rows, (160.0, 200.0));
     let mut frames = vec![b.image(SCALE)];
