@@ -44,8 +44,13 @@ screen ~2.6 ms GPU; the GPU likely clocks higher at 120 Hz.
 - [ ] Hover crosshair and tooltip, pan and zoom with a reset (double click).
 - [ ] Linked x axes between plots, for a tall chart over a short one.
 - [ ] Facets, per-layer data, area and stacked bars, log and time scales.
-- [ ] Cache stats between paints and lines as `Shape`s when the data is
-      unchanged.
+- [x] `cargo bench -p dfui-plot` (800×500, two groups): bar/boxplot stats
+      stay cheap (100k rows: ~1.8/3.8 ms); lines are bound by outline band
+      building, ~1.6 ms at 1k rows, ~9 ms at 10k after one-pass bands.
+- [ ] Lines past a few thousand points: decimate harder (2 points per px
+      column), or cache them as `Shape`s while the data is unchanged.
+- [ ] Cache stats between paints when the data is unchanged; only matters
+      past ~100k rows.
 
 ## Findings from a real app
 

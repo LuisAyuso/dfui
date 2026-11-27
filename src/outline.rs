@@ -169,7 +169,7 @@ impl Outlines {
 
     fn insert(&mut self, raw: Vec<Quad>, pad: f32, transient: bool) -> Option<OutlineGlyph> {
         let quads = monotonic(raw)?;
-        if transient {
+        if transient && self.transient.0 + quads.len() <= TRANSIENT_CURVES {
             let (c, b) = self.transient;
             let (glyph, bands) = build(&quads, pad, c as u32, b as u32);
             let (c_end, b_end) = (c + quads.len(), b + bands.len());
@@ -243,26 +243,44 @@ fn build(quads: &[Quad], pad: f32, first: u32, header: u32) -> (OutlineGlyph, Ve
     // Horizontal bands slice y and are scanned by +x rays; vertical bands the reverse.
     for (axis, base) in [(1usize, 0u32), (0, n)] {
         let size = (hi[axis] - lo[axis]) / n as f32;
-        for i in 0..n {
-            let (b0, b1) = (lo[axis] + i as f32 * size, lo[axis] + (i + 1) as f32 * size);
-            let start = header + bands.len() as u32;
-            let mut members: Vec<usize> = (0..quads.len())
-                .filter(|&k| {
-                    let q = &quads[k];
-                    q[0][axis].min(q[2][axis]) <= b1 && q[0][axis].max(q[2][axis]) >= b0
-                })
-                .collect();
-            // Furthest reach along the ray first, so the shader can stop at the
-            // first curve lying entirely behind the pixel.
-            let ray = 1 - axis;
-            members.sort_by(|&a, &b| {
-                let reach = |k: usize| quads[k][0][ray].max(quads[k][2][ray]);
-                reach(b).total_cmp(&reach(a))
-            });
-            bands.extend(members.iter().map(|&k| first + k as u32));
-            let h = 2 * (base + i) as usize;
-            bands[h] = start;
-            bands[h + 1] = header + bands.len() as u32 - start;
+        let edge = |i: u32| lo[axis] + i as f32 * size;
+        let at = |v: f32| ((v - lo[axis]) / size).floor().clamp(0.0, n as f32) as u32;
+        let span = |q: &Quad| {
+            let (q0, q1) = (q[0][axis].min(q[2][axis]), q[0][axis].max(q[2][axis]));
+            // One band of slack each side, then the exact test, so rounding
+            // never drops a curve from a band it touches.
+            let (from, to) = if size > 0.0 {
+                (at(q0).saturating_sub(1), (at(q1) + 1).min(n - 1))
+            } else {
+                (0, n - 1)
+            };
+            (from..=to).filter(move |&i| q0 <= edge(i + 1) && q1 >= edge(i))
+        };
+        // Furthest reach along the ray first, so the shader can stop at the
+        // first curve lying entirely behind the pixel.
+        let ray = 1 - axis;
+        let reach: Vec<f32> = quads.iter().map(|q| q[0][ray].max(q[2][ray])).collect();
+        let mut order: Vec<usize> = (0..quads.len()).collect();
+        order.sort_by(|&a, &b| reach[b].total_cmp(&reach[a]));
+        let mut at_band = vec![0usize; n as usize];
+        for q in quads {
+            span(q).for_each(|i| at_band[i as usize] += 1);
+        }
+        let mut end = bands.len();
+        for (i, c) in at_band.iter_mut().enumerate() {
+            (*c, end) = (end, end + *c);
+            bands[2 * (base as usize + i)] = header + *c as u32;
+        }
+        bands.resize(end, 0);
+        for &k in &order {
+            for i in span(&quads[k]) {
+                bands[at_band[i as usize]] = first + k as u32;
+                at_band[i as usize] += 1;
+            }
+        }
+        for (i, end) in at_band.into_iter().enumerate() {
+            let h = 2 * (base as usize + i);
+            bands[h + 1] = header + end as u32 - bands[h];
         }
     }
     let glyph = OutlineGlyph {
