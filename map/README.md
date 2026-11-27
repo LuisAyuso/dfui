@@ -136,6 +136,11 @@ geometry into the margins, so 128 segments per tile is the balance.
   them.
 - **Projection is for cities.** Equirectangular `f32` metres around one
   origin: fine for tens of km, wrong for countries or the whole world.
+  The levels of detail and tile sizes are tuned in metres too: the coarsest
+  level starts at 1/32 px/m, about 10 km across a phone. For a region or a
+  country (borders and a few cities), pass kilometres instead of metres to
+  `MapBuilder` and everywhere else a map takes units, as the meteo app does
+  for Spain and Austria.
 - **Cartography is minimal.** No casings, dashes or one-way arrows. Bevel
   joins only; caps are polygons. OSM relations keep only member ways that
   close by themselves.

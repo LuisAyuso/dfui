@@ -99,6 +99,9 @@ pub trait Styled: Sized {
     }
     /// Share of the parent's spare main-axis space to take; 0 by default.
     /// The content still sets the minimum, so see `fill` around a [`scroll()`].
+    /// With a zero size on that axis, siblings split the space by their
+    /// shares alone: `height(0.0).grow(1.0)` over `height(0.0).grow(2.0)`
+    /// is a third and two thirds.
     fn grow(mut self, g: f32) -> Self {
         self.style_mut().flex_grow = g;
         self

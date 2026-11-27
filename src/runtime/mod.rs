@@ -41,8 +41,10 @@ mod insets_cell {
 use insets_cell::INSETS;
 
 /// The system bars' insets over the window, logical px: top, right, bottom,
-/// left. For content in a [`Layer::Screen`](crate::Layer::Screen) layer to
-/// pad itself clear of them; views rebuild when they change.
+/// left. The root view is already padded by them, so only content under the
+/// bars, in a [`Layer::Screen`](crate::Layer::Screen) layer such as
+/// [`backdrop`](crate::widgets::backdrop) for an edge-to-edge app, pads
+/// itself by them; views rebuild when they change.
 pub fn insets() -> [f32; 4] {
     INSETS.get()
 }

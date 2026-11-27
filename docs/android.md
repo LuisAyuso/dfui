@@ -57,3 +57,24 @@ again. `eprintln!` output is lost on Android, so log with `log` and
 `android_logger` (see `android_main` in `demo/src/lib.rs`) and read the logs
 with `adb logcat`. `dfui::android::with_activity` runs JNI calls with the
 activity from any thread.
+
+An app that uses the network declares it in its `Cargo.toml`:
+
+```toml
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+```
+
+A launcher icon is an adaptive icon in Android resources, which cargo-apk
+packs with `resources = "res"` under `[package.metadata.android]` and
+`icon = "@mipmap/ic_launcher"` under `[package.metadata.android.application]`:
+
+- `res/mipmap-anydpi-v26/ic_launcher.xml`: an `<adaptive-icon>` with a
+  `<background android:drawable="@color/ic_launcher_bg"/>` and a
+  `<foreground android:drawable="@drawable/ic_launcher_fg"/>`.
+- `res/values/colors.xml`: the `ic_launcher_bg` color.
+- `res/drawable-xxxhdpi/ic_launcher_fg.png`: the foreground, 432×432 px for
+  the 108 dp canvas, e.g. `rsvg-convert -w 432 -h 432 icon.svg`.
+
+The launcher crops the icon to its own shape (a circle on Pixels), so keep
+what matters inside the middle 66 dp. busapp and meteo ship one each.

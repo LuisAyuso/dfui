@@ -68,8 +68,7 @@ Android lifecycle and platform:
       compile/link, zipalign, apksigner). Ship that as a script/template, or
       fold it into the cargo-apk replacement (Tooling). Resources do work:
       busapp ships an adaptive launcher icon with `resources = "res"` and
-      `icon = "@mipmap/ic_launcher"`; worth a line in the README's Android
-      section.
+      `icon = "@mipmap/ic_launcher"`, now described in `docs/android.md`.
 - [x] JNI helper: `dfui::android::with_activity`; its module docs say how
       to reach app classes from native threads.
 - [x] Logging: `log` + `android_logger`, documented in the README.
@@ -327,12 +326,16 @@ replaced egui's repaint polling with a `Notifier`. What it hand-rolled:
       with checkboxes.
 - [ ] Striped grid of plain rows: `table` needs a `Keyed` model; a
       `grid(rows)` with column widths and a highlighted row would do for
-      computed rows like a payment schedule.
+      computed rows like a payment schedule. meteo's hour rows line up
+      only by a fixed `width` on every cell; one too narrow wraps its
+      text (unless `max_lines(1)`) and a shorter last cell shifts the row.
 - [ ] Scroll to a child: `start_at(fraction)` only approximates "show the
       current row"; `reveal` needs its span in content px, which the app
       doesn't know.
 - [ ] A light button for list items: `.flat()` still fills with the accent;
-      the app recolors with `Role::Selected`.
+      the app recolors with `Role::Selected`. meteo hit it too: its city and
+      day rows need `.flat().color(..).fill_width()` plus `fill_width` on
+      the inner row to read as rows.
 - [ ] Children built conditionally: `Vec<Element>` with `push(x.into())`
       everywhere. Accept `Option<Element>` in `row`/`column` children, or a
       small `children![]` macro.
@@ -341,6 +344,42 @@ replaced egui's repaint polling with a `Notifier`. What it hand-rolled:
       results to a `stateful`) for "spawn work, merge result into app state".
 - [ ] dfui-plot gaps, see that section: tick formatter, pan/zoom, linked
       axes (legend, reference lines and per-layer filters are done).
+
+## Findings from a fifth app
+
+From meteo (github.com/LuisAyuso/meteo): daily and hourly forecasts for
+Spain and Austria on a `dfui-map` of their regions, on the phone. The UI
+came together quickly; `watch` + `Notifier` took worker-thread data with no
+glue, `Element::key` gave each country tab its own map view, and
+`wait_bar` was there for the rate-limit notice. dfui-map needed two changes
+and the app worked around the rest:
+
+- [x] `Map::fit(bounds)`: zooms in or out to show a rect, for a region
+      view; `focus` only zoomed in on a point.
+- [x] The view glides to a new focus or fit (450 ms, eased, zoom
+      geometric). ponytail: centre and zoom move independently; van
+      Wijk–Nuij zooms out mid-flight for long moves.
+- [ ] Map scales for regions and countries: levels and tile sizes are fixed
+      in metres for a city, so a country only draws in km units (see
+      `map/README.md`, Limitations). Derive them from the map's extent, or
+      take the unit in `MapBuilder`.
+- [ ] Map markers: meteo paints its weather chips with names on an
+      overlay and declutters them itself (overlapping ones become dots,
+      the selected one first). A marker layer with priorities and a
+      fallback for collisions would serve it and the bus app's stops.
+- [ ] Map scale in `on_tap`: it gets map coordinates but not px per unit,
+      so a tap radius in px needs the overlay to pass its scale out through
+      a `Cell`. Hand `on_tap` the scale, or the view's `to_px`.
+- [ ] Per-side padding: `padding` and `padding_xy` only; one side takes
+      `style_mut().padding.bottom = taffy::LengthPercentage::length(..)`.
+      `padding_top`/`_right`/`_bottom`/`_left`, or `padding_sides([t, r, b, l])`.
+- [ ] Icon rotation: `icon(..).rotate(deg)`. Wind direction is eight
+      Lucide arrows, so only eight directions.
+- [ ] Android app scaffold: each app copies busapp's `cdylib` crate type,
+      `android_main` with `android_logger`, the INTERNET permission and the
+      icon resources, and has to know cargo-apk needs `--lib` next to a
+      desktop `main.rs`. An `android_main!(App)` macro and a template
+      (with "Release template" above) would make it a few lines.
 
 ## From the code review
 - [x] Shape storage: equal shapes share one copy, and shapes not drawn for 600
