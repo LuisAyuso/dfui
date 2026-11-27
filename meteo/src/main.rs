@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use dfui::path::Point;
 use dfui::taffy::AlignItems;
-use dfui::widgets::{Styled, column, icon, row, segmented, spacer, stateful, text, watch};
+use dfui::widgets::{Styled, button, column, icon, row, scroll, segmented, stateful, text, watch};
 use dfui::{App, Color, Element, Font, Rect, Shape};
 use dfui_map::{MapBuilder, MapData, map};
 use serde_json::Value;
@@ -96,6 +96,9 @@ const BORDER: Color = Color::hex(0xb8b0a2);
 const INK: Color = Color::hex(0x2b2d33);
 const MUTED: Color = Color::hex(0x6b7080);
 const ACCENT: Color = Color::hex(0x1a73e8);
+const ERROR: Color = Color::hex(0xc62828);
+/// Behind an open day and its hours.
+const TINT: Color = Color::hex(0xeef2f7);
 /// Region borders, km wide: dfui-map strokes in map units.
 const BORDER_KM: f32 = 1.2;
 /// A tap selects the closest city within this many km.
@@ -194,6 +197,8 @@ fn icons() -> Icons {
 struct Ui {
     country: usize,
     city: Option<usize>,
+    /// The day whose hours are open.
+    day: Option<i64>,
 }
 
 struct Meteo {
@@ -233,18 +238,20 @@ fn screen(place: &Place, icons: &Rc<Icons>, ui: &Ui, h: dfui::Handle<Ui>) -> Ele
             |f| match f.as_ref().map(|f| f.as_ref().ok().and_then(|d| d.first())) {
                 None => (None, "…".into()),
                 Some(None) => (None, "–".into()),
-                Some(Some(d)) => (Some(d.sky), format!("{:.0}°", d.max)),
+                Some(Some(d)) => (Some(d.sky), format!("{}°", deg(d.max))),
             },
         )
         .collect();
 
     let (points, chips, selected) = (place.cities.clone(), icons.clone(), ui.city);
     let taps = place.cities.clone();
+    let cities = country.cities;
     let m = map(&place.data)
         .on_tap(move |cx, p| {
             let d = |c: &Point| (c[0] - p[0]).hypot(c[1] - p[1]);
             let near = (0..taps.len()).min_by(|&a, &b| d(&taps[a]).total_cmp(&d(&taps[b])));
             if let Some(i) = near.filter(|&i| d(&taps[i]) < REACH_KM) {
+                forecast::want_hourly(&cities[i]);
                 cx.update(h, move |u: &mut Ui| u.city = Some(i));
             }
         })
@@ -272,26 +279,45 @@ fn screen(place: &Place, icons: &Rc<Icons>, ui: &Ui, h: dfui::Handle<Ui>) -> Ele
             }
         });
 
-    let tabs = segmented(COUNTRIES.iter().map(|c| c.name), ui.country)
-        .on_change(move |cx, i| cx.update(h, move |u: &mut Ui| (u.country, u.city) = (i, None)));
+    let tabs = segmented(COUNTRIES.iter().map(|c| c.name), ui.country).on_change(move |cx, i| {
+        cx.update(h, move |u: &mut Ui| {
+            (u.country, u.city, u.day) = (i, None, None)
+        })
+    });
     let mut panel: Vec<Element> = vec![tabs.into()];
+    let mut list: Vec<Element> = Vec::new();
     match ui.city {
         None => panel.push(text("Tap a city on the map").color(MUTED).into()),
         Some(i) => {
-            panel.push(
-                text(country.cities[i].name)
-                    .font(Font::BOLD)
-                    .size(20.0)
-                    .into(),
-            );
+            let name = country.cities[i].name;
+            panel.push(text(name).font(Font::BOLD).size(20.0).into());
+            let hourly = STORE.hourly.lock().unwrap().get(name).cloned();
             match &forecasts[i] {
-                None => panel.push(text("Loading…").color(MUTED).into()),
-                Some(Err(e)) => panel.push(text(e).size(13.0).color(Color::hex(0xc62828)).into()),
-                Some(Ok(days)) => panel.extend(days.iter().map(|d| day_row(d, icons))),
+                None => list.push(text("Loading…").color(MUTED).into()),
+                Some(Err(e)) => list.push(text(e).size(13.0).color(ERROR).into()),
+                Some(Ok(days)) => {
+                    for d in days {
+                        let (day, open) = (d.day, ui.day == Some(d.day));
+                        list.push(
+                            button(day_row(d, icons))
+                                .flat()
+                                .color(if open { TINT } else { Color::WHITE })
+                                .on_click(move |cx| {
+                                    cx.update(h, move |u: &mut Ui| {
+                                        u.day = if open { None } else { Some(day) }
+                                    })
+                                })
+                                .into(),
+                        );
+                        if open {
+                            list.push(hours(hourly.as_ref(), day, icons));
+                        }
+                    }
+                }
             }
         }
     }
-    panel.push(spacer().grow(1.0).into());
+    panel.push(scroll(column(list).gap(4.0)).grow(1.0).into());
     panel.push(text(country.credit).size(11.0).color(MUTED).into());
 
     row([
@@ -300,13 +326,72 @@ fn screen(place: &Place, icons: &Rc<Icons>, ui: &Ui, h: dfui::Handle<Ui>) -> Ele
         column(panel)
             .gap(12.0)
             .padding(16.0)
-            .width(320.0)
+            .width(360.0)
             .shrink(0.0)
             .bg(Color::WHITE)
             .into(),
     ])
     .fill()
     .into()
+}
+
+/// Whole degrees, without "-0".
+fn deg(t: f32) -> f32 {
+    t.round() + 0.0
+}
+
+/// The hours of `day`, or why there are none.
+fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons) -> Element {
+    let rows: Vec<Element> = match hourly {
+        None => vec![text("Loading hours…").size(13.0).color(MUTED).into()],
+        Some(Err(e)) => vec![text(e).size(13.0).color(ERROR).into()],
+        Some(Ok(hours)) => {
+            let rows: Vec<Element> = (hours.iter().filter(|h| h.day == day))
+                .map(|h| {
+                    let rain = if h.rain >= 0.1 {
+                        format!("{:.1} mm", h.rain)
+                    } else {
+                        String::new()
+                    };
+                    row([
+                        text(format!("{:02}:00", h.hour))
+                            .size(13.0)
+                            .color(MUTED)
+                            .width(48.0)
+                            .into(),
+                        icon(&icons.sky[h.sky as usize])
+                            .size(18.0)
+                            .color(INK)
+                            .into(),
+                        text(format!("{}°", deg(h.temp)))
+                            .size(13.0)
+                            .grow(1.0)
+                            .into(),
+                        text(rain).size(13.0).color(ACCENT).into(),
+                    ])
+                    .gap(10.0)
+                    .align(AlignItems::CENTER)
+                    .into()
+                })
+                .collect();
+            if rows.is_empty() {
+                vec![
+                    text("No hourly forecast this far ahead")
+                        .size(13.0)
+                        .color(MUTED)
+                        .into(),
+                ]
+            } else {
+                rows
+            }
+        }
+    };
+    column(rows)
+        .gap(2.0)
+        .padding_xy(12.0, 8.0)
+        .bg(TINT)
+        .radius(8.0)
+        .into()
 }
 
 fn day_row(d: &Day, icons: &Icons) -> Element {
@@ -321,16 +406,17 @@ fn day_row(d: &Day, icons: &Icons) -> Element {
         _ => forecast::weekday(d.day),
     };
     row([
-        text(name).width(80.0).into(),
+        text(name).color(INK).width(80.0).into(),
         icon(&icons.sky[d.sky as usize])
             .size(22.0)
             .color(INK)
             .into(),
-        text(format!("{:.0}° / {:.0}°", d.max, d.min))
+        text(format!("{}° / {}°", deg(d.max), deg(d.min)))
+            .color(INK)
             .grow(1.0)
             .into(),
         icon(&icons.droplets).size(14.0).color(ACCENT).into(),
-        text(&d.rain).size(13.0).color(MUTED).into(),
+        text(&d.rain).size(13.0).color(MUTED).shrink(0.0).into(),
     ])
     .gap(10.0)
     .align(AlignItems::CENTER)

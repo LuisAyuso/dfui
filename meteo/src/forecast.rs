@@ -1,4 +1,4 @@
-//! Daily forecasts: AEMET OpenData for Spain, GeoSphere Austria for Austria.
+//! Daily and hourly forecasts: AEMET OpenData for Spain, GeoSphere Austria for Austria.
 //! Fetched on worker threads into [`STORE`], which wakes the UI.
 
 use std::collections::HashMap;
@@ -34,15 +34,33 @@ pub struct Day {
 
 pub type Forecast = Result<Vec<Day>, String>;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hour {
+    pub day: i64,
+    /// Local hour, 0–23.
+    pub hour: i64,
+    pub sky: Sky,
+    pub temp: f32,
+    /// Precipitation, mm.
+    pub rain: f32,
+}
+
+pub type Hourly = Result<Vec<Hour>, String>;
+
+/// One place's days and hours.
+type Series = (Vec<Day>, Vec<Hour>);
+
 pub struct Store {
     pub notifier: Notifier,
     /// By city name; a city missing is still loading.
     pub data: Mutex<HashMap<&'static str, Forecast>>,
+    pub hourly: Mutex<HashMap<&'static str, Hourly>>,
 }
 
 pub static STORE: LazyLock<Store> = LazyLock::new(|| Store {
     notifier: Notifier::new(),
     data: Mutex::default(),
+    hourly: Mutex::default(),
 });
 
 fn put(city: &'static str, f: Forecast) {
@@ -55,13 +73,33 @@ pub fn start(spain: &'static [City], austria: &'static [City]) {
     std::thread::spawn(move || {
         let r = geosphere(austria);
         for (i, c) in austria.iter().enumerate() {
-            put(
-                c.name,
-                r.as_ref()
-                    .map(|days| days.get(i).cloned().unwrap_or_default())
-                    .map_err(Clone::clone),
-            );
+            let (days, hours) = match &r {
+                Ok(all) => {
+                    let (d, h) = all.get(i).cloned().unwrap_or_default();
+                    (Ok(d), Ok(h))
+                }
+                Err(e) => (Err(e.clone()), Err(e.clone())),
+            };
+            STORE.hourly.lock().unwrap().insert(c.name, hours);
+            put(c.name, days);
         }
+    });
+}
+
+/// Fetches AEMET's hourly forecast for `city` once, on a thread: it is asked
+/// for when a city is opened, as fetching all of them would double the load
+/// on AEMET's rate limit.
+pub fn want_hourly(city: &'static City) {
+    static ASKED: Mutex<Vec<&str>> = Mutex::new(Vec::new());
+    let mut asked = ASKED.lock().unwrap();
+    if city.aemet.is_empty() || asked.contains(&city.name) {
+        return;
+    }
+    asked.push(city.name);
+    std::thread::spawn(move || {
+        let r = aemet_get("horaria", city.aemet).and_then(|s| parse_aemet_hourly(&s));
+        STORE.hourly.lock().unwrap().insert(city.name, r);
+        STORE.notifier.notify();
     });
 }
 
@@ -72,36 +110,39 @@ fn get(url: &str) -> Result<String, ureq::Error> {
         .unwrap_or_else(|e| e.into_bytes().iter().map(|&b| b as char).collect()))
 }
 
-/// AEMET answers with a link to the data; both requests count to its limit.
-fn aemet(cities: &'static [City]) {
-    let Ok(key) = std::env::var("AEMET_API_KEY") else {
-        for c in cities {
-            put(c.name, Err("Set AEMET_API_KEY (opendata.aemet.es)".into()));
-        }
-        return;
-    };
-    for c in cities {
-        let url = format!(
-            "https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/diaria/{}?api_key={key}",
-            c.aemet
-        );
-        let mut wait = Duration::from_secs(5);
-        let f = loop {
-            let r = get(&url).and_then(|meta| {
-                let meta: Value = serde_json::from_str(&meta).unwrap_or_default();
-                get(meta["datos"].as_str().unwrap_or_default())
-            });
-            match r {
-                Err(ureq::Error::StatusCode(429)) if wait < Duration::from_secs(60) => {
-                    std::thread::sleep(wait);
-                    wait *= 2;
-                }
-                r => break r.map_err(|e| e.to_string()).and_then(|s| parse_aemet(&s)),
+/// AEMET's `prediccion/especifica/municipio/{kind}` for a municipality.
+/// It answers with a link to the data; both requests count to its limit.
+fn aemet_get(kind: &str, code: &str) -> Result<String, String> {
+    let key =
+        std::env::var("AEMET_API_KEY").map_err(|_| "Set AEMET_API_KEY (opendata.aemet.es)")?;
+    let url = format!(
+        "https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/{kind}/{code}?api_key={key}"
+    );
+    let mut wait = Duration::from_secs(5);
+    loop {
+        let r = get(&url).and_then(|meta| {
+            let meta: Value = serde_json::from_str(&meta).unwrap_or_default();
+            get(meta["datos"].as_str().unwrap_or_default())
+        });
+        match r {
+            Err(ureq::Error::StatusCode(429)) if wait < Duration::from_secs(60) => {
+                std::thread::sleep(wait);
+                wait *= 2;
             }
-        };
-        put(c.name, f);
-        // ponytail: fixed pacing under AEMET's per-minute limit; read its rate headers if it still throttles.
-        std::thread::sleep(Duration::from_millis(1500));
+            r => return r.map_err(|e| e.to_string()),
+        }
+    }
+}
+
+fn aemet(cities: &'static [City]) {
+    for c in cities {
+        let f = aemet_get("diaria", c.aemet);
+        let no_key = f.as_ref().is_err_and(|e| e.starts_with("Set AEMET"));
+        put(c.name, f.and_then(|s| parse_aemet(&s)));
+        if !no_key {
+            // ponytail: fixed pacing under AEMET's per-minute limit; read its rate headers if it still throttles.
+            std::thread::sleep(Duration::from_millis(1500));
+        }
     }
 }
 
@@ -135,6 +176,42 @@ fn parse_aemet(json: &str) -> Forecast {
         .collect())
 }
 
+/// AEMET's hourly forecast: per day, series of `{value, periodo}` where the
+/// period is the hour and values are strings ("Ip" is a trace of rain).
+fn parse_aemet_hourly(json: &str) -> Hourly {
+    let v: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let days = v[0]["prediccion"]["dia"].as_array().ok_or("no forecast")?;
+    let mut out = Vec::new();
+    for d in days {
+        let Some(day) = d["fecha"].as_str().and_then(days_from_iso) else {
+            continue;
+        };
+        let at = |k: &str, hour: &str| -> Option<String> {
+            let s = d[k].as_array()?.iter().find(|e| e["periodo"] == hour)?;
+            s["value"].as_str().map(str::to_owned)
+        };
+        for t in d["temperatura"].as_array().into_iter().flatten() {
+            let (Some(hour), Some(temp)) = (t["periodo"].as_str(), t["value"].as_str()) else {
+                continue;
+            };
+            let num = |k| {
+                at(k, hour)
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(0.0)
+            };
+            let (rain, snow) = (num("precipitacion"), num("nieve"));
+            out.push(Hour {
+                day,
+                hour: hour.parse().unwrap_or(0),
+                sky: aemet_sky(&at("estadoCielo", hour).unwrap_or_default()),
+                temp: temp.parse().unwrap_or(f32::NAN),
+                rain: rain + snow,
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// AEMET's "estado del cielo" codes; an "n" suffix marks night.
 fn aemet_sky(code: &str) -> Sky {
     match code.trim_end_matches('n').parse::<u32>().unwrap_or(0) {
@@ -150,8 +227,8 @@ fn aemet_sky(code: &str) -> Sky {
 
 const GEOSPHERE: &str = "https://dataset.api.hub.geosphere.at/v1/timeseries/forecast/nwp-v2-1h-1km?parameters=2t,tcc,tp,sf,cape";
 
-/// One request for all cities: ~60 hourly steps, folded into days.
-fn geosphere(cities: &[City]) -> Result<Vec<Vec<Day>>, String> {
+/// One request for all cities: ~60 hourly steps, and the same folded into days.
+fn geosphere(cities: &[City]) -> Result<Vec<Series>, String> {
     let mut url = GEOSPHERE.to_owned();
     for c in cities {
         url += &format!("&lat_lon={},{}", c.lat, c.lon);
@@ -159,16 +236,33 @@ fn geosphere(cities: &[City]) -> Result<Vec<Vec<Day>>, String> {
     parse_geosphere(&get(&url).map_err(|e| e.to_string())?)
 }
 
-fn parse_geosphere(json: &str) -> Result<Vec<Vec<Day>>, String> {
+/// The sky from cloud cover (%), precipitation and snowfall (mm), with
+/// precipitation counting from `wet` mm.
+fn sky(cloud: f32, rain: f32, snow: f32, storm: bool, wet: f32) -> Sky {
+    match () {
+        _ if rain >= wet && snow >= rain / 2.0 => Sky::Snow,
+        _ if rain >= wet && storm => Sky::Storm,
+        _ if rain >= wet => Sky::Rain,
+        _ if cloud < 20.0 => Sky::Clear,
+        _ if cloud < 70.0 => Sky::PartlyCloudy,
+        _ => Sky::Cloudy,
+    }
+}
+
+/// CAPE above which rain counts as a thunderstorm, J/kg.
+const STORM_CAPE: f32 = 800.0;
+
+fn parse_geosphere(json: &str) -> Result<Vec<Series>, String> {
     let v: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let times = v["timestamps"].as_array().ok_or("no timestamps")?;
-    // ponytail: CET fixed at UTC+1; summer days shift by an hour.
-    let day_of = |t: &Value| -> Option<i64> {
+    // ponytail: CET fixed at UTC+1; summer hours are off by one.
+    let local = |t: &Value| -> Option<(i64, i64)> {
         let t = t.as_str()?;
         let hour: i64 = t.get(11..13)?.parse().ok()?;
-        Some((days_from_iso(t)? * 24 + hour + 1).div_euclid(24))
+        let h = days_from_iso(t)? * 24 + hour + 1;
+        Some((h.div_euclid(24), h.rem_euclid(24)))
     };
-    let days: Vec<Option<i64>> = times.iter().map(day_of).collect();
+    let local: Vec<Option<(i64, i64)>> = times.iter().map(local).collect();
     let features = v["features"].as_array().ok_or("no features")?;
     Ok(features
         .iter()
@@ -179,7 +273,8 @@ fn parse_geosphere(json: &str) -> Result<Vec<Vec<Day>>, String> {
                     .as_array()
                     .map(Vec::as_slice)
                     .unwrap_or_default();
-                d.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32).collect()
+                let d = d.iter().map(|x| x.as_f64().unwrap_or(0.0) as f32);
+                d.chain(std::iter::repeat(0.0)).take(local.len()).collect()
             };
             let (t, tcc, tp, sf, cape) = (
                 series("2t"),
@@ -188,41 +283,39 @@ fn parse_geosphere(json: &str) -> Result<Vec<Vec<Day>>, String> {
                 series("sf"),
                 series("cape"),
             );
-            let mut out: Vec<Day> = Vec::new();
-            let mut i = 0;
-            while i < days.len() {
-                let d = days[i];
-                let n = days[i..].iter().take_while(|&&x| x == d).count();
-                let r = i..(i + n).min(t.len());
-                i += n;
+            let hours: Vec<Hour> = (0..local.len())
+                .filter_map(|k| {
+                    let (day, hour) = local[k]?;
+                    Some(Hour {
+                        day,
+                        hour,
+                        sky: sky(tcc[k], tp[k], sf[k], cape[k] > STORM_CAPE, 0.1),
+                        temp: t[k],
+                        rain: tp[k],
+                    })
+                })
+                .collect();
+            let known: Vec<usize> = (0..local.len()).filter(|&k| local[k].is_some()).collect();
+            let day_of = |k: usize| local[k].map(|l| l.0);
+            let mut days: Vec<Day> = Vec::new();
+            for chunk in known.chunk_by(|&a, &b| day_of(a) == day_of(b)) {
                 // Days with only a few hours left in the run say little.
-                let (Some(day), true) = (d, r.len() >= 6) else {
+                let (Some(day), true) = (day_of(chunk[0]), chunk.len() >= 6) else {
                     continue;
                 };
-                let sum = |s: &[f32]| s.get(r.clone()).map_or(0.0, |s| s.iter().sum::<f32>());
+                let sum = |s: &[f32]| chunk.iter().map(|&k| s[k]).sum::<f32>();
                 let (rain, snow) = (sum(&tp), sum(&sf));
-                let cloud = sum(&tcc) / r.len() as f32;
-                let storm = cape
-                    .get(r.clone())
-                    .is_some_and(|c| c.iter().any(|&c| c > 800.0));
-                let sky = match () {
-                    _ if rain >= 1.0 && snow >= rain / 2.0 => Sky::Snow,
-                    _ if rain >= 1.0 && storm => Sky::Storm,
-                    _ if rain >= 1.0 => Sky::Rain,
-                    _ if cloud < 20.0 => Sky::Clear,
-                    _ if cloud < 70.0 => Sky::PartlyCloudy,
-                    _ => Sky::Cloudy,
-                };
-                let temps = &t[r];
-                out.push(Day {
+                let storm = chunk.iter().any(|&k| cape[k] > STORM_CAPE);
+                let temps = chunk.iter().map(|&k| t[k]);
+                days.push(Day {
                     day,
-                    sky,
-                    min: temps.iter().copied().fold(f32::INFINITY, f32::min),
-                    max: temps.iter().copied().fold(f32::NEG_INFINITY, f32::max),
+                    sky: sky(sum(&tcc) / chunk.len() as f32, rain, snow, storm, 1.0),
+                    min: temps.clone().fold(f32::INFINITY, f32::min),
+                    max: temps.fold(f32::NEG_INFINITY, f32::max),
                     rain: format!("{rain:.1} mm"),
                 });
             }
-            out
+            (days, hours)
         })
         .collect())
 }
@@ -275,6 +368,22 @@ mod tests {
     }
 
     #[test]
+    fn aemet_hourly() {
+        let json = r#"[{"prediccion":{"dia":[{"fecha":"2026-11-27T00:00:00",
+            "temperatura":[{"value":"5","periodo":"07"},{"value":"9","periodo":"08"}],
+            "estadoCielo":[{"value":"16n","periodo":"07"},{"value":"25","periodo":"08"}],
+            "precipitacion":[{"value":"Ip","periodo":"07"},{"value":"1.2","periodo":"08"}],
+            "nieve":[{"value":"0","periodo":"07"},{"value":"0","periodo":"08"}]}]}}]"#;
+        let h = parse_aemet_hourly(json).unwrap();
+        assert_eq!(h.len(), 2);
+        assert_eq!(
+            (h[0].hour, h[0].sky, h[0].temp, h[0].rain),
+            (7, Sky::Cloudy, 5.0, 0.0)
+        );
+        assert_eq!((h[1].sky, h[1].rain), (Sky::Rain, 1.2));
+    }
+
+    #[test]
     fn geosphere() {
         // 22:00 UTC is 23:00 CET, still the first day; the second has 7 h.
         let hours = (16..30).map(|h| format!("\"2026-11-{}T{:02}:00+00:00\"", 27 + h / 24, h % 24));
@@ -288,8 +397,14 @@ mod tests {
               "cape":{{"data":[0,0,0,0,0,0,0,0,0,0,0,0,0,0]}}}}}}}}]}}"#,
             ts.join(",")
         );
-        let days = &parse_geosphere(&json).unwrap()[0];
+        let (days, hours) = &parse_geosphere(&json).unwrap()[0];
         assert_eq!(days.len(), 2);
+        assert_eq!(hours.len(), 14);
+        assert_eq!(
+            (hours[0].hour, hours[7].hour, hours[7].day),
+            (17, 0, days[1].day)
+        );
+        assert_eq!((hours[7].sky, hours[7].rain), (Sky::Snow, 1.0));
         assert_eq!(
             (days[0].sky, days[0].min, days[0].max),
             (Sky::Clear, 1.0, 7.0)
