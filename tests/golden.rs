@@ -205,6 +205,36 @@ fn text_just_wider_than_its_width_stays_on_one_line() {
 }
 
 #[test]
+fn table_header_turns_bold_when_sorting() {
+    #[derive(Clone)]
+    struct Item(u64, &'static str);
+    impl dfui::model::Keyed for Item {
+        fn key(&self) -> u64 {
+            self.0
+        }
+    }
+    let view = || {
+        let items = vec![Item(0, "Pear"), Item(1, "Apple"), Item(2, "Fig")];
+        let name = dfui::widgets::Column::new("Name", |i: &Item| text(i.1))
+            .sort_by(|a, b| a.1.cmp(b.1));
+        column([dfui::widgets::table(items, vec![name]).fill().into()])
+            .fill()
+            .into()
+    };
+    let mut b = bench(view, (160.0, 130.0));
+    let mut frames = vec![b.image(SCALE)];
+    // Held, then released: the press's bold carries into the sorted
+    // column's, without dipping back to regular in between.
+    b.event(Event::PointerDown { x: 30.0, y: 10.0 });
+    frames.extend(film(&mut b, &[150]));
+    b.event(Event::PointerUp { x: 30.0, y: 10.0 });
+    frames.extend(film(&mut b, &[60, 60]));
+    b.settle();
+    frames.push(b.image(SCALE));
+    check("table_sort", &strip(&frames));
+}
+
+#[test]
 fn toggle_off_on() {
     let v = || {
         row([toggle(false).into(), toggle(true).into()])

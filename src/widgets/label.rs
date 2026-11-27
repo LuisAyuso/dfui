@@ -24,6 +24,8 @@ struct LabelState {
     emphasis: Option<Emphasis>,
     /// Toward bold for [`Label::emphasized`].
     bold: Animated<f32>,
+    /// `emphasized` at the last paint.
+    on: bool,
 }
 
 /// How long [`Label::emphasized`] takes to morph.
@@ -148,6 +150,14 @@ impl Widget for Label {
             .map_or((0.0, false, Ink::Content, false), |e| {
                 (e.0.get(), e.1.get(), e.2, e.3)
             });
+        // Emphasized by the tap that pressed it (a row that opens, a header
+        // that sorts): carry on from the press's weight, so it doesn't dip
+        // back to regular between the two.
+        if self.emphasized && !st.on && pressed > st.bold.get(now) {
+            st.bold = Animated::default();
+            st.bold.to(pressed, now, MORPH, ease::out_cubic);
+        }
+        st.on = self.emphasized;
         let target = if self.emphasized { 1.0 } else { 0.0 };
         st.bold.to(target, now, MORPH, ease::out_cubic);
         let (own, moving) = (st.bold.get(now), st.bold.running(now));

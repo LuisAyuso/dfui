@@ -92,7 +92,7 @@ where
 }
 
 /// `model`'s items as rows of `columns`, under a header that sorts by the
-/// sortable ones. Rows are a virtualized `list`; bound its height the same way.
+/// sortable ones, the sorted one's title bold. Rows are a virtualized `list`; bound its height the same way.
 #[doc = example!("table")]
 pub fn table<M>(model: M, columns: Vec<Column<M::Item>>) -> Stateful<TableSort>
 where
@@ -118,7 +118,8 @@ where
             };
             let label = text(format!("{}{arrow}", c.title))
                 .size(14.0)
-                .color(Role::Ink);
+                .color(Role::Ink)
+                .emphasized(!arrow.is_empty());
             if c.cmp.is_none() {
                 return c.sized(label);
             }

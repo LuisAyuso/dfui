@@ -681,7 +681,8 @@ pub struct Dropdown {
     on_change: Option<OnPick>,
 }
 
-/// A dropdown over `labels` showing `labels[selected]`; the menu floats below it.
+/// A dropdown over `labels` showing `labels[selected]`; the menu floats below
+/// it, the current option bold.
 #[doc = example!("dropdown")]
 pub fn dropdown<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Dropdown {
     Dropdown {
@@ -728,7 +729,7 @@ impl From<Dropdown> for Element {
                     } else {
                         Role::Surface
                     };
-                    button(text(l).color(Role::Ink))
+                    button(text(l).color(Role::Ink).emphasized(i == selected))
                         .color(bg)
                         .flat()
                         .radius(6.0)

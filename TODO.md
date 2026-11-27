@@ -369,6 +369,13 @@ and the app worked around the rest:
       first, the rest as dots). A marker layer in `dfui-map` (points with a
       priority, drawn and hit-tested by the map) would still save the
       overlay and tap code it and the bus app's stops repeat.
+- [x] State shown in bold, like tabs and segmented buttons: the selected
+      radio's label, a dropdown's current option, a table's sorted column.
+      A label emphasized by the tap that pressed it carries on from the
+      press's weight instead of dipping back to regular.
+- [ ] Sorting a `table` keeps the first visible row in place, as the list
+      does across rebuilds, so the rows above it scroll out of view
+      (`table_sort` golden); a re-sort should start from the top.
 - [x] A scroll whose content shrank kept its offset past the end and
       showed nothing: meteo's city view after scrolling its town list. The
       offset is clamped to the content now (`scroll_shrinks` golden).

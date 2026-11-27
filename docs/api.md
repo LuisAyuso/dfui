@@ -378,7 +378,7 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `fn on_key(f: impl Fn(&mut EventCx, Key) + 'static) -> OnKey`: Handles keys for the screen it's placed in; see [`OnKey`].
 - `fn tooltip(child: impl Into<Element>, tip: impl Into<String>) -> Container`: Shows `tip` above `child` while the pointer is over it.
 - `struct Dropdown`: Picks one of `labels`: shows the selected one and lists them all on tap.
-- `fn dropdown<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Dropdown`: A dropdown over `labels` showing `labels[selected]`; the menu floats below it.
+- `fn dropdown<S: Into<String>>(labels: impl IntoIterator<Item = S>, selected: usize) -> Dropdown`: A dropdown over `labels` showing `labels[selected]`; the menu floats below it, the current option bold.
 - `Dropdown::on_change(self, f: impl Fn(&mut EventCx, usize) + 'static) -> Self`: Called with the chosen option's index when it isn't already selected.
 
 ### src/widgets/page.rs
@@ -412,7 +412,7 @@ Every public function, method and type, with the first sentence of its docs. Gen
 ### src/widgets/radio.rs
 
 - `struct Radio`: One option of a group: a ring before `child`, filled when `selected`.
-- `fn radio(selected: bool, child: impl Into<Element>) -> Radio`: One choice of a group: a ring, filled when `selected`, and a label.
+- `fn radio(selected: bool, child: impl Into<Element>) -> Radio`: One choice of a group: a ring, filled when `selected`, and a label, which turns bold while selected.
 - `Radio::on_select(self, f: impl Fn(&mut EventCx) + 'static) -> Self`: Runs when tapped while not selected.
 - `Radio::accent(self, c: impl Into<Ink>) -> Self`: Color of the ring and dot when selected; [`Role::Accent`] by default.
 
@@ -453,7 +453,7 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `Column::width(self, w: f32) -> Self`: Fixed width, logical px, instead of a share of what's left.
 - `Column::sort_by(self, cmp: impl Fn(&T, &T) -> Ordering + 'static) -> Self`: Tapping the header sorts by `cmp`, then reversed, then unsorted.
 - `struct TableSort(Option<(usize, bool)>)`: Column and direction a table is sorted by.
-- `fn table<M>(model: M, columns: Vec<Column<M::Item>>) -> Stateful<TableSort>`: `model`'s items as rows of `columns`, under a header that sorts by the sortable ones.
+- `fn table<M>(model: M, columns: Vec<Column<M::Item>>) -> Stateful<TableSort>`: `model`'s items as rows of `columns`, under a header that sorts by the sortable ones, the sorted one's title bold.
 
 ### src/widgets/text_input.rs
 

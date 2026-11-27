@@ -1,9 +1,11 @@
+use std::any::Any;
 use std::time::Duration;
 
 use taffy::{AlignItems, LengthPercentage, Style};
 
 use super::Styled;
 use super::button::{Handler, Tap};
+use super::label::Emphasis;
 use crate::anim::{Animated, Lerp, ease};
 use crate::render::{Color, Rect};
 use crate::theme::{Ink, Role};
@@ -28,9 +30,14 @@ pub struct Radio {
     accent: Ink,
     on_select: Option<Handler>,
     style: Style,
+    /// Turns labels inside bold with the selection.
+    // ponytail: its content color is the theme's ink, so a radio in a
+    // container with its own `content` color ignores it; inherit it if needed.
+    emphasis: Emphasis,
 }
 
-/// One choice of a group: a ring, filled when `selected`, and a label.
+/// One choice of a group: a ring, filled when `selected`, and a label,
+/// which turns bold while selected.
 #[doc = example!("radio")]
 pub fn radio(selected: bool, child: impl Into<Element>) -> Radio {
     Radio {
@@ -38,6 +45,7 @@ pub fn radio(selected: bool, child: impl Into<Element>) -> Radio {
         selected,
         accent: Role::Accent.into(),
         on_select: None,
+        emphasis: Emphasis(Default::default(), Default::default(), Ink::Content, false),
         style: Style {
             padding: taffy::Rect {
                 left: LengthPercentage::length(DOT + GAP),
@@ -94,12 +102,16 @@ impl Widget for Radio {
     fn children(&self) -> &[Element] {
         &self.child
     }
+    fn provide(&self) -> Option<&dyn Any> {
+        Some(&self.emphasis)
+    }
     fn paint(&self, cx: &mut PaintCx) {
         let (now, r) = (cx.now, cx.rect);
         let s = cx.state.get::<RadioState>();
         let target = if self.selected { 1.0 } else { 0.0 };
         s.dot.to(target, now, GROW, ease::out_cubic);
         let t = s.dot.get(now);
+        self.emphasis.0.set(t);
         if s.dot.running(now) {
             cx.request_frame();
         }
