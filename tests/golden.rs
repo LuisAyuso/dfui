@@ -215,8 +215,8 @@ fn table_header_turns_bold_when_sorting() {
     }
     let view = || {
         let items = vec![Item(0, "Pear"), Item(1, "Apple"), Item(2, "Fig")];
-        let name = dfui::widgets::Column::new("Name", |i: &Item| text(i.1))
-            .sort_by(|a, b| a.1.cmp(b.1));
+        let name =
+            dfui::widgets::Column::new("Name", |i: &Item| text(i.1)).sort_by(|a, b| a.1.cmp(b.1));
         column([dfui::widgets::table(items, vec![name]).fill().into()])
             .fill()
             .into()
