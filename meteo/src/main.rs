@@ -29,6 +29,20 @@ struct Country {
     regions: &'static str,
     cities: &'static [City],
     credit: &'static str,
+    words: Words,
+}
+
+/// The interface in the country's language.
+struct Words {
+    capitals: &'static str,
+    cities: &'static str,
+    loading: &'static str,
+    loading_hours: &'static str,
+    no_hours: &'static str,
+    today: &'static str,
+    tomorrow: &'static str,
+    /// From Monday.
+    weekdays: [&'static str; 7],
 }
 
 const COUNTRIES: [Country; 2] = [
@@ -38,6 +52,16 @@ const COUNTRIES: [Country; 2] = [
         regions: include_str!("../assets/es.geojson"),
         cities: cities::SPAIN,
         credit: "Datos: © AEMET · Límites: © EuroGeographics",
+        words: Words {
+            capitals: "Capitales autonómicas",
+            cities: "Ciudades",
+            loading: "Cargando…",
+            loading_hours: "Cargando horas…",
+            no_hours: "Sin previsión por horas para este día",
+            today: "Hoy",
+            tomorrow: "Mañana",
+            weekdays: ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"],
+        },
     },
     Country {
         name: "Österreich",
@@ -45,6 +69,16 @@ const COUNTRIES: [Country; 2] = [
         regions: include_str!("../assets/at.geojson"),
         cities: cities::AUSTRIA,
         credit: "Daten: GeoSphere Austria · Grenzen: © EuroGeographics",
+        words: Words {
+            capitals: "Landeshauptstädte",
+            cities: "Städte",
+            loading: "Wird geladen…",
+            loading_hours: "Stunden werden geladen…",
+            no_hours: "Keine Stundenprognose für diesen Tag",
+            today: "Heute",
+            tomorrow: "Morgen",
+            weekdays: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"],
+        },
     },
 ];
 
@@ -289,8 +323,8 @@ fn screen(place: &Place, icons: &Rc<Icons>, ui: &Ui, h: Handle<Ui>) -> Element {
     });
     let (title, subtitle) = match (ui.city, ui.region) {
         (Some(i), _) => (cities[i].name, cities[i].region),
-        (None, Some(r)) => (r, "Cities"),
-        (None, None) => (country.name, "Regional capitals"),
+        (None, Some(r)) => (r, country.words.cities),
+        (None, None) => (country.name, country.words.capitals),
     };
     let mut head: Vec<Element> = Vec::new();
     if ui.region.is_some() {
@@ -306,7 +340,14 @@ fn screen(place: &Place, icons: &Rc<Icons>, ui: &Ui, h: Handle<Ui>) -> Element {
     );
 
     let list: Vec<Element> = match ui.city {
-        Some(i) => days(&forecasts[i], ui.day, icons, h, cities[i].name),
+        Some(i) => days(
+            &forecasts[i],
+            ui.day,
+            icons,
+            h,
+            cities[i].name,
+            &country.words,
+        ),
         None => (shown.iter())
             .filter(|&&i| ui.region.is_none_or(|r| cities[i].region == r))
             .map(|&i| {
@@ -429,9 +470,10 @@ fn days(
     icons: &Icons,
     h: Handle<Ui>,
     name: &'static str,
+    words: &'static Words,
 ) -> Vec<Element> {
     let days = match f {
-        None => return vec![text("Loading…").color(MUTED).into()],
+        None => return vec![text(words.loading).color(MUTED).into()],
         Some(Err(e)) => return vec![text(e).size(13.0).color(ERROR).into()],
         Some(Ok(days)) => days,
     };
@@ -439,7 +481,7 @@ fn days(
     let mut out = Vec::new();
     for d in days {
         let (day, is_open) = (d.day, open == Some(d.day));
-        let mut cells = vec![text(day_name(d.day)).color(INK).width(80.0).into()];
+        let mut cells = vec![text(day_name(d.day, words)).color(INK).width(80.0).into()];
         cells.extend(day_cells(d, icons));
         let r = row(cells).gap(10.0).align(AlignItems::CENTER).fill_width();
         let b = button(r)
@@ -455,22 +497,22 @@ fn days(
             .into(),
         );
         if is_open {
-            out.push(hours(hourly.as_ref(), day, icons));
+            out.push(hours(hourly.as_ref(), day, icons, words));
         }
     }
     out
 }
 
-fn day_name(day: i64) -> &'static str {
+fn day_name(day: i64, words: &'static Words) -> &'static str {
     let today = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs()
         / 86_400;
     match day - today as i64 {
-        0 => "Today",
-        1 => "Tomorrow",
-        _ => forecast::weekday(day),
+        0 => words.today,
+        1 => words.tomorrow,
+        _ => words.weekdays[forecast::weekday(day)],
     }
 }
 
@@ -491,10 +533,10 @@ fn day_cells(d: &Day, icons: &Icons) -> [Element; 4] {
 }
 
 /// The hours of `day`, or why there are none.
-fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons) -> Element {
+fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons, words: &Words) -> Element {
     let note = |s: &str, c: Color| -> Vec<Element> { vec![text(s).size(13.0).color(c).into()] };
     let rows: Vec<Element> = match hourly {
-        None => note("Loading hours…", MUTED),
+        None => note(words.loading_hours, MUTED),
         Some(Err(e)) => note(e, ERROR),
         Some(Ok(hours)) => {
             let rows: Vec<Element> = (hours.iter().filter(|h| h.day == day))
@@ -525,7 +567,7 @@ fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons) -> Element 
                 })
                 .collect();
             if rows.is_empty() {
-                note("No hourly forecast this far ahead", MUTED)
+                note(words.no_hours, MUTED)
             } else {
                 rows
             }

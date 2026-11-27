@@ -121,7 +121,7 @@ fn aemet_worker() {
             }
         };
         let r = aemet_get(if hourly { "horaria" } else { "diaria" }, city.aemet);
-        let no_key = r.as_ref().is_err_and(|e| e.starts_with("Set AEMET"));
+        let no_key = r.as_ref().is_err_and(|e| e == NO_KEY);
         if hourly {
             let h = r.and_then(|s| parse_aemet_hourly(&s));
             STORE.hourly.lock().unwrap().insert(city.name, h);
@@ -143,11 +143,13 @@ fn get(url: &str) -> Result<String, ureq::Error> {
         .unwrap_or_else(|e| e.into_bytes().iter().map(|&b| b as char).collect()))
 }
 
+/// Shown on the Spanish tab without a key, so in Spanish.
+const NO_KEY: &str = "Falta AEMET_API_KEY (opendata.aemet.es)";
+
 /// AEMET's `prediccion/especifica/municipio/{kind}` for a municipality.
 /// It answers with a link to the data; both requests count to its limit.
 fn aemet_get(kind: &str, code: &str) -> Result<String, String> {
-    let key =
-        std::env::var("AEMET_API_KEY").map_err(|_| "Set AEMET_API_KEY (opendata.aemet.es)")?;
+    let key = std::env::var("AEMET_API_KEY").map_err(|_| NO_KEY)?;
     let url = format!(
         "https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/{kind}/{code}?api_key={key}"
     );
@@ -353,8 +355,9 @@ fn days_from_iso(s: &str) -> Option<i64> {
     Some(era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468)
 }
 
-pub fn weekday(day: i64) -> &'static str {
-    ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"][day.rem_euclid(7) as usize]
+/// Day of the week, Monday 0; 1970-01-01 was a Thursday.
+pub fn weekday(day: i64) -> usize {
+    (day + 3).rem_euclid(7) as usize
 }
 
 #[cfg(test)]
@@ -364,11 +367,8 @@ mod tests {
     #[test]
     fn dates() {
         assert_eq!(days_from_iso("1970-01-01"), Some(0));
-        assert_eq!(
-            weekday(days_from_iso("2026-11-27T00:00:00").unwrap()),
-            "Fri"
-        );
-        assert_eq!(weekday(days_from_iso("2024-02-29").unwrap()), "Thu");
+        assert_eq!(weekday(days_from_iso("2026-11-27T00:00:00").unwrap()), 4);
+        assert_eq!(weekday(days_from_iso("2024-02-29").unwrap()), 3);
     }
 
     #[test]
