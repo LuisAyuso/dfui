@@ -1,8 +1,8 @@
 //! Daily and hourly forecasts: AEMET OpenData for Spain, GeoSphere Austria for Austria.
 //! Fetched on worker threads into [`STORE`], which wakes the UI.
 
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Condvar, LazyLock, Mutex};
 use std::time::Duration;
 
 use dfui::Notifier;
@@ -68,8 +68,13 @@ fn put(city: &'static str, f: Forecast) {
     STORE.notifier.notify();
 }
 
+/// Loads Austria in one request and starts the AEMET queue with the
+/// capitals' days; other Spanish cities wait for [`want`].
 pub fn start(spain: &'static [City], austria: &'static [City]) {
-    std::thread::spawn(move || aemet(spain));
+    for c in spain.iter().filter(|c| c.capital).rev() {
+        want(c, false);
+    }
+    std::thread::spawn(aemet_worker);
     std::thread::spawn(move || {
         let r = geosphere(austria);
         for (i, c) in austria.iter().enumerate() {
@@ -86,21 +91,49 @@ pub fn start(spain: &'static [City], austria: &'static [City]) {
     });
 }
 
-/// Fetches AEMET's hourly forecast for `city` once, on a thread: it is asked
-/// for when a city is opened, as fetching all of them would double the load
-/// on AEMET's rate limit.
-pub fn want_hourly(city: &'static City) {
-    static ASKED: Mutex<Vec<&str>> = Mutex::new(Vec::new());
+/// AEMET requests still to make: a city and whether it's the hourly one.
+static QUEUE: Mutex<VecDeque<(&City, bool)>> = Mutex::new(VecDeque::new());
+static QUEUED: Condvar = Condvar::new();
+
+/// Queues `city`'s daily or hourly AEMET forecast ahead of what's waiting,
+/// once: what the user just opened goes first.
+pub fn want(city: &'static City, hourly: bool) {
+    static ASKED: Mutex<Vec<(&str, bool)>> = Mutex::new(Vec::new());
     let mut asked = ASKED.lock().unwrap();
-    if city.aemet.is_empty() || asked.contains(&city.name) {
+    if city.aemet.is_empty() || asked.contains(&(city.name, hourly)) {
         return;
     }
-    asked.push(city.name);
-    std::thread::spawn(move || {
-        let r = aemet_get("horaria", city.aemet).and_then(|s| parse_aemet_hourly(&s));
-        STORE.hourly.lock().unwrap().insert(city.name, r);
-        STORE.notifier.notify();
-    });
+    asked.push((city.name, hourly));
+    QUEUE.lock().unwrap().push_front((city, hourly));
+    QUEUED.notify_one();
+}
+
+/// Makes the queued requests one at a time, paced for AEMET's rate limit.
+fn aemet_worker() {
+    loop {
+        let (city, hourly) = {
+            let mut q = QUEUE.lock().unwrap();
+            loop {
+                match q.pop_front() {
+                    Some(job) => break job,
+                    None => q = QUEUED.wait(q).unwrap(),
+                }
+            }
+        };
+        let r = aemet_get(if hourly { "horaria" } else { "diaria" }, city.aemet);
+        let no_key = r.as_ref().is_err_and(|e| e.starts_with("Set AEMET"));
+        if hourly {
+            let h = r.and_then(|s| parse_aemet_hourly(&s));
+            STORE.hourly.lock().unwrap().insert(city.name, h);
+            STORE.notifier.notify();
+        } else {
+            put(city.name, r.and_then(|s| parse_aemet(&s)));
+        }
+        if !no_key {
+            // ponytail: fixed pacing under AEMET's per-minute limit; read its rate headers if it still throttles.
+            std::thread::sleep(Duration::from_millis(1500));
+        }
+    }
 }
 
 fn get(url: &str) -> Result<String, ureq::Error> {
@@ -130,18 +163,6 @@ fn aemet_get(kind: &str, code: &str) -> Result<String, String> {
                 wait *= 2;
             }
             r => return r.map_err(|e| e.to_string()),
-        }
-    }
-}
-
-fn aemet(cities: &'static [City]) {
-    for c in cities {
-        let f = aemet_get("diaria", c.aemet);
-        let no_key = f.as_ref().is_err_and(|e| e.starts_with("Set AEMET"));
-        put(c.name, f.and_then(|s| parse_aemet(&s)));
-        if !no_key {
-            // ponytail: fixed pacing under AEMET's per-minute limit; read its rate headers if it still throttles.
-            std::thread::sleep(Duration::from_millis(1500));
         }
     }
 }

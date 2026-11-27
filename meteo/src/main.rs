@@ -1,36 +1,26 @@
 //! Weather for Spain (AEMET) and Austria (GeoSphere Austria) on a map of
-//! their regions, with icons from Lucide.
+//! their regions, with icons from Lucide. Phone-shaped: the map on the top
+//! third, the forecast table below.
 
+mod cities;
 mod forecast;
 
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use dfui::path::Point;
 use dfui::taffy::AlignItems;
-use dfui::widgets::{Styled, button, column, icon, row, scroll, segmented, stateful, text, watch};
-use dfui::{App, Color, Element, Font, Rect, Shape};
+use dfui::widgets::{
+    Styled, button, column, icon, icon_button, row, scroll, segmented, stateful, text, watch,
+};
+use dfui::{App, Color, Element, EventCx, Font, Handle, PaintCx, Rect, Shape};
 use dfui_map::{MapBuilder, MapData, map};
 use serde_json::Value;
 
+pub use cities::City;
 use forecast::{Day, STORE, Sky};
-
-pub struct City {
-    pub name: &'static str,
-    pub lat: f64,
-    pub lon: f64,
-    /// INE municipality code, AEMET's id; empty outside Spain.
-    pub aemet: &'static str,
-}
-
-const fn city(name: &'static str, lat: f64, lon: f64, aemet: &'static str) -> City {
-    City {
-        name,
-        lat,
-        lon,
-        aemet,
-    }
-}
 
 struct Country {
     name: &'static str,
@@ -46,46 +36,14 @@ const COUNTRIES: [Country; 2] = [
         name: "España",
         origin: (40.0, -3.7),
         regions: include_str!("../assets/es.geojson"),
-        cities: &[
-            city("Madrid", 40.4168, -3.7038, "28079"),
-            city("Barcelona", 41.3874, 2.1686, "08019"),
-            city("Valencia", 39.4699, -0.3763, "46250"),
-            city("Sevilla", 37.3891, -5.9845, "41091"),
-            city("Zaragoza", 41.6488, -0.8891, "50297"),
-            city("Málaga", 36.7213, -4.4214, "29067"),
-            city("Murcia", 37.9922, -1.1307, "30030"),
-            city("Palma", 39.5696, 2.6502, "07040"),
-            city("Las Palmas", 28.1235, -15.4363, "35016"),
-            city("Santa Cruz de Tenerife", 28.4636, -16.2518, "38038"),
-            city("Bilbao", 43.2630, -2.9350, "48020"),
-            city("Valladolid", 41.6523, -4.7245, "47186"),
-            city("A Coruña", 43.3623, -8.4115, "15030"),
-            city("Oviedo", 43.3614, -5.8494, "33044"),
-            city("Santander", 43.4623, -3.8100, "39075"),
-            city("Pamplona", 42.8125, -1.6458, "31201"),
-            city("Granada", 37.1773, -3.5986, "18087"),
-            city("Alicante", 38.3452, -0.4810, "03014"),
-            city("Badajoz", 38.8794, -6.9707, "06015"),
-            city("Salamanca", 40.9701, -5.6635, "37274"),
-        ],
+        cities: cities::SPAIN,
         credit: "Datos: © AEMET · Límites: © EuroGeographics",
     },
     Country {
         name: "Österreich",
         origin: (47.6, 13.3),
         regions: include_str!("../assets/at.geojson"),
-        cities: &[
-            city("Wien", 48.2082, 16.3738, ""),
-            city("Graz", 47.0707, 15.4395, ""),
-            city("Linz", 48.3069, 14.2858, ""),
-            city("Salzburg", 47.8095, 13.0550, ""),
-            city("Innsbruck", 47.2692, 11.4041, ""),
-            city("Klagenfurt", 46.6247, 14.3053, ""),
-            city("St. Pölten", 48.2047, 15.6256, ""),
-            city("Bregenz", 47.5031, 9.7471, ""),
-            city("Eisenstadt", 47.8457, 16.5233, ""),
-            city("Lienz", 46.8297, 12.7697, ""),
-        ],
+        cities: cities::AUSTRIA,
         credit: "Daten: GeoSphere Austria · Grenzen: © EuroGeographics",
     },
 ];
@@ -101,8 +59,10 @@ const ERROR: Color = Color::hex(0xc62828);
 const TINT: Color = Color::hex(0xeef2f7);
 /// Region borders, km wide: dfui-map strokes in map units.
 const BORDER_KM: f32 = 1.2;
-/// A tap selects the closest city within this many km.
-const REACH_KM: f32 = 60.0;
+/// A tap on the map picks the closest city within this many px.
+const REACH_PX: f32 = 30.0;
+/// Room left around a fitted region, as a share of its size.
+const FIT_MARGIN: f32 = 0.12;
 
 /// The Canary Islands moved next to the peninsula, as Spanish maps inset them.
 fn inset(lat: f64, lon: f64) -> (f64, f64) {
@@ -125,6 +85,21 @@ struct Place {
     country: &'static Country,
     data: Rc<MapData>,
     cities: Vec<Point>,
+    /// What the map fits: the country, and each region by name.
+    bounds: Rect,
+    regions: HashMap<&'static str, Rect>,
+}
+
+/// The box around `pts`, grown by [`FIT_MARGIN`].
+fn around<'a>(pts: impl Iterator<Item = &'a Point>) -> Rect {
+    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for p in pts {
+        (lo[0], lo[1]) = (lo[0].min(p[0]), lo[1].min(p[1]));
+        (hi[0], hi[1]) = (hi[0].max(p[0]), hi[1].max(p[1]));
+    }
+    let (w, h) = (hi[0] - lo[0], hi[1] - lo[1]);
+    let m = w.max(h) * FIT_MARGIN;
+    Rect::new(lo[0] - m, lo[1] - m, w + 2.0 * m, h + 2.0 * m)
 }
 
 fn place(country: &'static Country) -> Place {
@@ -132,6 +107,8 @@ fn place(country: &'static Country) -> Place {
     let land = b.layer(LAND, 0.0);
     let border = b.layer(BORDER, 0.0);
     let geo: Value = serde_json::from_str(country.regions).expect("regions geojson");
+    let mut regions = HashMap::new();
+    let mut all = Vec::new();
     for f in geo["features"].as_array().into_iter().flatten() {
         let g = &f["geometry"];
         let polygons: Vec<&Value> = match g["type"].as_str() {
@@ -152,24 +129,31 @@ fn place(country: &'static Country) -> Place {
                 }
             }
         }
+        // The cities name their region, so the lookup borrows their names.
+        let name = f["properties"]["name"].as_str().unwrap_or_default();
+        if let Some(c) = country.cities.iter().find(|c| c.region == name) {
+            regions.insert(c.region, around(outers.iter().flatten()));
+        }
+        all.extend(outers.iter().flatten().copied());
         b.area(land, &outers, &holes);
     }
-    let cities = country
-        .cities
-        .iter()
+    let cities = (country.cities.iter())
         .map(|c| km(&b, c.lat, c.lon))
         .collect();
     Place {
         country,
         data: Rc::new(b.build()),
         cities,
+        bounds: around(all.iter()),
+        regions,
     }
 }
 
-/// Lucide icons, converted with svg2path; indexed by [`Sky`].
+/// Lucide icons, converted with svg2path; `sky` indexed by [`Sky`].
 struct Icons {
     sky: [Shape; 7],
     droplets: Shape,
+    back: Shape,
 }
 
 fn icons() -> Icons {
@@ -190,12 +174,15 @@ fn icons() -> Icons {
             load!("cloud-lightning"),
         ],
         droplets: load!("droplets"),
+        back: load!("chevron-left"),
     }
 }
 
 #[derive(Default)]
 struct Ui {
     country: usize,
+    /// The region the map is zoomed to, showing all its cities.
+    region: Option<&'static str>,
     city: Option<usize>,
     /// The day whose hours are open.
     day: Option<i64>,
@@ -222,117 +209,193 @@ impl App for Meteo {
     }
 }
 
-fn screen(place: &Place, icons: &Rc<Icons>, ui: &Ui, h: dfui::Handle<Ui>) -> Element {
+/// Opens city `i`: zooms to its region and loads the region's cities.
+fn open(cx: &mut EventCx, h: Handle<Ui>, cities: &'static [City], i: usize) {
+    let c = &cities[i];
+    for other in cities.iter().filter(|o| o.region == c.region).rev() {
+        forecast::want(other, false);
+    }
+    forecast::want(c, true);
+    cx.update(h, move |u: &mut Ui| {
+        (u.region, u.city) = (Some(c.region), Some(i))
+    });
+}
+
+/// Up one level: from a city to its region's table, from there to the country.
+fn back(u: &mut Ui) {
+    if u.city.is_some() {
+        (u.city, u.day) = (None, None);
+    } else {
+        u.region = None;
+    }
+}
+
+/// A city's sky and high today: "…" while loading, "–" without data.
+fn today(f: Option<&forecast::Forecast>) -> (Option<Sky>, String) {
+    match f.map(|f| f.as_ref().ok().and_then(|d| d.first())) {
+        None => (None, "…".into()),
+        Some(None) => (None, "–".into()),
+        Some(Some(d)) => (Some(d.sky), format!("{}°", deg(d.max))),
+    }
+}
+
+fn screen(place: &Place, icons: &Rc<Icons>, ui: &Ui, h: Handle<Ui>) -> Element {
     let country = place.country;
+    let cities = country.cities;
     let forecasts: Vec<Option<forecast::Forecast>> = {
         let data = STORE.data.lock().unwrap();
-        country
-            .cities
-            .iter()
-            .map(|c| data.get(c.name).cloned())
-            .collect()
+        cities.iter().map(|c| data.get(c.name).cloned()).collect()
     };
-    // Today's sky and high per city: "…" while loading, "–" without data.
-    let today: Vec<(Option<Sky>, String)> = (forecasts.iter())
-        .map(
-            |f| match f.as_ref().map(|f| f.as_ref().ok().and_then(|d| d.first())) {
-                None => (None, "…".into()),
-                Some(None) => (None, "–".into()),
-                Some(Some(d)) => (Some(d.sky), format!("{}°", deg(d.max))),
-            },
-        )
+    // Capitals always, and every city of the open region.
+    let shown: Vec<usize> = (0..cities.len())
+        .filter(|&i| cities[i].capital || Some(cities[i].region) == ui.region)
         .collect();
+    let fit = (ui.region.and_then(|r| place.regions.get(r)))
+        .copied()
+        .unwrap_or(place.bounds);
 
-    let (points, chips, selected) = (place.cities.clone(), icons.clone(), ui.city);
-    let taps = place.cities.clone();
-    let cities = country.cities;
+    let px_per_km = Rc::new(Cell::new(1.0));
+    let (scale, points, taps) = (px_per_km.clone(), place.cities.clone(), shown.clone());
+    let marks: Vec<Mark> = (shown.iter())
+        .map(|&i| Mark {
+            at: place.cities[i],
+            today: today(forecasts[i].as_ref()),
+            name: (ui.region == Some(cities[i].region)).then_some(cities[i].name),
+            selected: ui.city == Some(i),
+        })
+        .collect();
+    let chips = icons.clone();
     let m = map(&place.data)
+        .fit(fit)
         .on_tap(move |cx, p| {
-            let d = |c: &Point| (c[0] - p[0]).hypot(c[1] - p[1]);
-            let near = (0..taps.len()).min_by(|&a, &b| d(&taps[a]).total_cmp(&d(&taps[b])));
-            if let Some(i) = near.filter(|&i| d(&taps[i]) < REACH_KM) {
-                forecast::want_hourly(&cities[i]);
-                cx.update(h, move |u: &mut Ui| u.city = Some(i));
+            let d = |i: usize| (points[i][0] - p[0]).hypot(points[i][1] - p[1]);
+            let near = taps.iter().copied().min_by(|&a, &b| d(a).total_cmp(&d(b)));
+            if let Some(i) = near.filter(|&i| d(i) * scale.get() < REACH_PX) {
+                open(cx, h, cities, i);
             }
         })
         .overlay(move |cx, to_px| {
-            for (i, (&p, (sky, label))) in points.iter().zip(&today).enumerate() {
-                let [x, y] = to_px(p);
-                let w = 30.0 + cx.measure(label, Font::BOLD, 13.0, None).width;
-                let r = Rect::new(x - w / 2.0, y - 13.0, w, 26.0);
-                let border = if selected == Some(i) { 2.0 } else { 0.5 };
-                cx.fill_bordered(
-                    r,
-                    13.0,
-                    Color::WHITE,
-                    border,
-                    if border > 1.0 { ACCENT } else { BORDER },
-                );
-                if let Some(sky) = sky {
-                    cx.shape(
-                        &chips.sky[*sky as usize],
-                        Rect::new(r.x + 6.0, r.y + 4.0, 18.0, 18.0),
-                        INK,
-                    );
-                }
-                cx.text(label, Font::BOLD, 13.0, INK, None, (r.x + 26.0, r.y + 5.0));
-            }
+            px_per_km.set(to_px([1.0, 0.0])[0] - to_px([0.0, 0.0])[0]);
+            draw_marks(cx, &marks, &chips, to_px);
         });
 
     let tabs = segmented(COUNTRIES.iter().map(|c| c.name), ui.country).on_change(move |cx, i| {
         cx.update(h, move |u: &mut Ui| {
-            (u.country, u.city, u.day) = (i, None, None)
+            *u = Ui {
+                country: i,
+                ..Ui::default()
+            }
         })
     });
-    let mut panel: Vec<Element> = vec![tabs.into()];
-    let mut list: Vec<Element> = Vec::new();
-    match ui.city {
-        None => panel.push(text("Tap a city on the map").color(MUTED).into()),
-        Some(i) => {
-            let name = country.cities[i].name;
-            panel.push(text(name).font(Font::BOLD).size(20.0).into());
-            let hourly = STORE.hourly.lock().unwrap().get(name).cloned();
-            match &forecasts[i] {
-                None => list.push(text("Loading…").color(MUTED).into()),
-                Some(Err(e)) => list.push(text(e).size(13.0).color(ERROR).into()),
-                Some(Ok(days)) => {
-                    for d in days {
-                        let (day, open) = (d.day, ui.day == Some(d.day));
-                        list.push(
-                            button(day_row(d, icons))
-                                .flat()
-                                .color(if open { TINT } else { Color::WHITE })
-                                .on_click(move |cx| {
-                                    cx.update(h, move |u: &mut Ui| {
-                                        u.day = if open { None } else { Some(day) }
-                                    })
-                                })
-                                .into(),
-                        );
-                        if open {
-                            list.push(hours(hourly.as_ref(), day, icons));
-                        }
-                    }
-                }
-            }
-        }
+    let (title, subtitle) = match (ui.city, ui.region) {
+        (Some(i), _) => (cities[i].name, cities[i].region),
+        (None, Some(r)) => (r, "Cities"),
+        (None, None) => (country.name, "Regional capitals"),
+    };
+    let mut head: Vec<Element> = Vec::new();
+    if ui.region.is_some() {
+        let b = icon_button(&icons.back).color(INK);
+        head.push(b.on_click(move |cx| cx.update(h, back)).into());
     }
-    panel.push(scroll(column(list).gap(4.0)).grow(1.0).into());
-    panel.push(text(country.credit).size(11.0).color(MUTED).into());
+    head.push(
+        column([
+            text(title).font(Font::BOLD).size(20.0).color(INK).into(),
+            text(subtitle).size(13.0).color(MUTED).into(),
+        ])
+        .into(),
+    );
 
-    row([
+    let list: Vec<Element> = match ui.city {
+        Some(i) => days(&forecasts[i], ui.day, icons, h, cities[i].name),
+        None => (shown.iter())
+            .filter(|&&i| ui.region.is_none_or(|r| cities[i].region == r))
+            .map(|&i| {
+                let row = city_row(cities[i].name, &forecasts[i], icons);
+                let b = button(row).flat().color(Color::WHITE).fill_width();
+                b.on_click(move |cx| open(cx, h, cities, i)).into()
+            })
+            .collect(),
+    };
+
+    let panel = column([
+        tabs.into(),
+        row(head).gap(4.0).align(AlignItems::CENTER).into(),
+        scroll(column(list).gap(4.0)).grow(1.0).into(),
+        text(country.credit).size(11.0).color(MUTED).into(),
+    ])
+    .gap(10.0)
+    .padding(12.0)
+    .bg(Color::WHITE);
+    column([
         // Keyed so each country keeps its own pan and zoom.
-        Element::from(m.width(0.0).grow(1.0)).key(ui.country as u64),
-        column(panel)
-            .gap(12.0)
-            .padding(16.0)
-            .width(360.0)
-            .shrink(0.0)
-            .bg(Color::WHITE)
-            .into(),
+        Element::from(m.height(0.0).grow(1.0)).key(ui.country as u64),
+        panel.height(0.0).grow(2.0).into(),
     ])
     .fill()
     .into()
+}
+
+/// A city on the map: where, today's weather, and its name once its region
+/// is open.
+struct Mark {
+    at: Point,
+    today: (Option<Sky>, String),
+    name: Option<&'static str>,
+    selected: bool,
+}
+
+/// Chips for the marks; one that would overlap a chip already drawn is
+/// left as a dot, the selected one going first.
+fn draw_marks(cx: &mut PaintCx, marks: &[Mark], icons: &Icons, to_px: &dyn Fn(Point) -> Point) {
+    let mut order: Vec<&Mark> = marks.iter().collect();
+    order.sort_by_key(|m| !m.selected);
+    let mut taken: Vec<Rect> = Vec::new();
+    for m in order {
+        let [x, y] = to_px(m.at);
+        let (sky, label) = &m.today;
+        let w = 30.0 + cx.measure(label, Font::BOLD, 13.0, None).width;
+        let chip = Rect::new(x - w / 2.0, y - 13.0, w, 26.0);
+        let name_h = if m.name.is_some() { 14.0 } else { 0.0 };
+        let space = Rect::new(chip.x, chip.y, chip.w, chip.h + name_h);
+        if taken.iter().any(|t| overlaps(t, &space)) {
+            cx.fill(Rect::new(x - 3.0, y - 3.0, 6.0, 6.0), 3.0, INK);
+            continue;
+        }
+        taken.push(space);
+        let (border, color) = if m.selected {
+            (2.0, ACCENT)
+        } else {
+            (0.5, BORDER)
+        };
+        cx.fill_bordered(chip, 13.0, Color::WHITE, border, color);
+        if let Some(sky) = sky {
+            let r = Rect::new(chip.x + 6.0, chip.y + 4.0, 18.0, 18.0);
+            cx.shape(&icons.sky[*sky as usize], r, INK);
+        }
+        cx.text(
+            label,
+            Font::BOLD,
+            13.0,
+            INK,
+            None,
+            (chip.x + 26.0, chip.y + 5.0),
+        );
+        if let Some(name) = m.name {
+            let nw = cx.measure(name, Font::DEFAULT, 11.0, None).width;
+            cx.text(
+                name,
+                Font::DEFAULT,
+                11.0,
+                INK,
+                None,
+                (x - nw / 2.0, chip.y + chip.h),
+            );
+        }
+    }
+}
+
+fn overlaps(a: &Rect, b: &Rect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
 /// Whole degrees, without "-0".
@@ -340,18 +403,105 @@ fn deg(t: f32) -> f32 {
     t.round() + 0.0
 }
 
+/// A row of the cities table: name, today's sky, high and low, rain.
+fn city_row(name: &str, f: &Option<forecast::Forecast>, icons: &Icons) -> Element {
+    let mut cells: Vec<Element> = vec![text(name).color(INK).grow(1.0).into()];
+    match f {
+        None => cells.push(text("…").color(MUTED).into()),
+        Some(Err(_)) => cells.push(text("–").color(MUTED).into()),
+        Some(Ok(days)) => {
+            if let Some(d) = days.first() {
+                cells.extend(day_cells(d, icons));
+            }
+        }
+    }
+    row(cells)
+        .gap(10.0)
+        .align(AlignItems::CENTER)
+        .fill_width()
+        .into()
+}
+
+/// A city's days, each opening its hours.
+fn days(
+    f: &Option<forecast::Forecast>,
+    open: Option<i64>,
+    icons: &Icons,
+    h: Handle<Ui>,
+    name: &'static str,
+) -> Vec<Element> {
+    let days = match f {
+        None => return vec![text("Loading…").color(MUTED).into()],
+        Some(Err(e)) => return vec![text(e).size(13.0).color(ERROR).into()],
+        Some(Ok(days)) => days,
+    };
+    let hourly = STORE.hourly.lock().unwrap().get(name).cloned();
+    let mut out = Vec::new();
+    for d in days {
+        let (day, is_open) = (d.day, open == Some(d.day));
+        let mut cells = vec![text(day_name(d.day)).color(INK).width(80.0).into()];
+        cells.extend(day_cells(d, icons));
+        let r = row(cells).gap(10.0).align(AlignItems::CENTER).fill_width();
+        let b = button(r)
+            .flat()
+            .fill_width()
+            .color(if is_open { TINT } else { Color::WHITE });
+        out.push(
+            b.on_click(move |cx| {
+                cx.update(h, move |u: &mut Ui| {
+                    u.day = if is_open { None } else { Some(day) }
+                })
+            })
+            .into(),
+        );
+        if is_open {
+            out.push(hours(hourly.as_ref(), day, icons));
+        }
+    }
+    out
+}
+
+fn day_name(day: i64) -> &'static str {
+    let today = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        / 86_400;
+    match day - today as i64 {
+        0 => "Today",
+        1 => "Tomorrow",
+        _ => forecast::weekday(day),
+    }
+}
+
+/// Sky, high and low, and rain of a day.
+fn day_cells(d: &Day, icons: &Icons) -> [Element; 4] {
+    [
+        icon(&icons.sky[d.sky as usize])
+            .size(22.0)
+            .color(INK)
+            .into(),
+        text(format!("{}° / {}°", deg(d.max), deg(d.min)))
+            .color(INK)
+            .width(80.0)
+            .into(),
+        icon(&icons.droplets).size(14.0).color(ACCENT).into(),
+        text(&d.rain).size(13.0).color(MUTED).width(56.0).into(),
+    ]
+}
+
 /// The hours of `day`, or why there are none.
 fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons) -> Element {
+    let note = |s: &str, c: Color| -> Vec<Element> { vec![text(s).size(13.0).color(c).into()] };
     let rows: Vec<Element> = match hourly {
-        None => vec![text("Loading hours…").size(13.0).color(MUTED).into()],
-        Some(Err(e)) => vec![text(e).size(13.0).color(ERROR).into()],
+        None => note("Loading hours…", MUTED),
+        Some(Err(e)) => note(e, ERROR),
         Some(Ok(hours)) => {
             let rows: Vec<Element> = (hours.iter().filter(|h| h.day == day))
                 .map(|h| {
-                    let rain = if h.rain >= 0.1 {
-                        format!("{:.1} mm", h.rain)
-                    } else {
-                        String::new()
+                    let rain = match h.rain >= 0.1 {
+                        true => format!("{:.1} mm", h.rain),
+                        false => String::new(),
                     };
                     row([
                         text(format!("{:02}:00", h.hour))
@@ -375,12 +525,7 @@ fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons) -> Element 
                 })
                 .collect();
             if rows.is_empty() {
-                vec![
-                    text("No hourly forecast this far ahead")
-                        .size(13.0)
-                        .color(MUTED)
-                        .into(),
-                ]
+                note("No hourly forecast this far ahead", MUTED)
             } else {
                 rows
             }
@@ -394,35 +539,6 @@ fn hours(hourly: Option<&forecast::Hourly>, day: i64, icons: &Icons) -> Element 
         .into()
 }
 
-fn day_row(d: &Day, icons: &Icons) -> Element {
-    let today = (SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        / 86_400) as i64;
-    let name = match d.day - today {
-        0 => "Today",
-        1 => "Tomorrow",
-        _ => forecast::weekday(d.day),
-    };
-    row([
-        text(name).color(INK).width(80.0).into(),
-        icon(&icons.sky[d.sky as usize])
-            .size(22.0)
-            .color(INK)
-            .into(),
-        text(format!("{}° / {}°", deg(d.max), deg(d.min)))
-            .color(INK)
-            .grow(1.0)
-            .into(),
-        icon(&icons.droplets).size(14.0).color(ACCENT).into(),
-        text(&d.rain).size(13.0).color(MUTED).shrink(0.0).into(),
-    ])
-    .gap(10.0)
-    .align(AlignItems::CENTER)
-    .into()
-}
-
 fn main() {
     forecast::start(COUNTRIES[0].cities, COUNTRIES[1].cities);
     let places = Rc::new([place(&COUNTRIES[0]), place(&COUNTRIES[1])]);
@@ -430,4 +546,26 @@ fn main() {
         places,
         icons: Rc::new(icons()),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_region_has_one_capital_and_a_border() {
+        for c in &COUNTRIES {
+            let geo: Value = serde_json::from_str(c.regions).unwrap();
+            let names: Vec<&str> = (geo["features"].as_array().unwrap().iter())
+                .map(|f| f["properties"]["name"].as_str().unwrap())
+                .collect();
+            for n in &names {
+                let capitals = c.cities.iter().filter(|x| x.region == *n && x.capital);
+                assert_eq!(capitals.count(), 1, "{n}");
+            }
+            for city in c.cities {
+                assert!(names.contains(&city.region), "{}", city.name);
+            }
+        }
+    }
 }
