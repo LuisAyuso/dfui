@@ -1,7 +1,7 @@
 //! An OpenStreetMap area as a dfui map: `cargo run -p dfui-map --release
 //! --example osm -- [lat lon km] [--bench]`. The download from the Overpass
 //! API is cached in the temp directory. The wasm and Android builds embed the
-//! JSON at `DFUI_MAP_OSM` instead (see `map/README.md`).
+//! JSON at `DFUI_MAP_OSM` instead (see `libs/map/README.md`).
 
 use std::rc::Rc;
 

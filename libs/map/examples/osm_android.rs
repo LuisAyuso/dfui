@@ -1,5 +1,5 @@
 //! The `osm` example as an Android app, with the OSM JSON embedded from
-//! `DFUI_MAP_OSM` (see `map/README.md`).
+//! `DFUI_MAP_OSM` (see `libs/map/README.md`).
 
 #[cfg(target_os = "android")]
 #[allow(dead_code)]

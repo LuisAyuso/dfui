@@ -12,8 +12,11 @@ on dfui (busapp, meteo) live in their own repos and point here too.
 
 - `src/` — the framework crate (`dfui`)
 - `demo/` — demo app, desktop binary and Android `cdylib`
-- `map/` — experimental map widget (`dfui-map`), optional, on dfui's public API
-- `bevy/` — experimental Bevy overlay (`dfui-bevy`) on `dfui::Embedded`
+- `libs/` — optional crates on dfui's public API, released with it:
+  - `libs/map/` — vector map widget (`dfui-map`)
+  - `libs/media/` — hardware-decoded video (`dfui-media`)
+  - `libs/plot/` — ggplot-style plots (`dfui-plot`)
+  - `libs/bevy/` — dfui as a Bevy game's HUD (`dfui-bevy`), on `dfui::Embedded`
 - `site/` — docs site published to GitHub Pages: guide pages and a live example per widget
 - `tools/api-index/` — writes `docs/api.md` from the sources
 - `tools/svg2path/` — converts SVG icons to shapes an app can bundle (see Icons in `README.md`)

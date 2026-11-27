@@ -33,7 +33,7 @@ jobs:
       # MediaCodec instead of VA-API; the Android example embeds a clip named at build time.
       - run: cargo clippy -p dfui-media --no-deps --target aarch64-linux-android --all-targets --locked -- -D warnings
         env:
-          DFUI_MEDIA_CLIP: ${{ github.workspace }}/media/tests/clip.mp4
+          DFUI_MEDIA_CLIP: ${{ github.workspace }}/libs/media/tests/clip.mp4
 
   docs:
     runs-on: ubuntu-latest

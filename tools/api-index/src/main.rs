@@ -6,7 +6,7 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
-const CRATES: [(&str, &str); 2] = [("dfui", "src"), ("dfui-map", "map/src")];
+const CRATES: [(&str, &str); 2] = [("dfui", "src"), ("dfui-map", "libs/map/src")];
 const OUT: &str = "docs/api.md";
 /// Types with `pub` methods for the crate's own use that the crate root
 /// doesn't export.
