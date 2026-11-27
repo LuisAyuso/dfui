@@ -41,7 +41,11 @@ pub struct Label {
 }
 
 /// A run of text, wrapped at spaces to the available width unless held to a
-/// few lines by [`Label::max_lines`] (one for a table cell).
+/// few lines by [`Label::max_lines`] (one for a table cell). In a `row` that
+/// runs short of space, labels shrink and wrap like any flex item, down to
+/// their longest word: to keep a short one like "5 min" whole beside a long
+/// name, give it `.shrink(0.0)` and the name `.max_lines(1)`, which cuts it
+/// with "…" and lets it give way.
 #[doc = example!("text")]
 pub fn text(s: impl Into<String>) -> Label {
     Label {

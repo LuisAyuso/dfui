@@ -329,7 +329,7 @@ Every public function, method and type, with the first sentence of its docs. Gen
 - `Styled::padding_left(self, p: f32) -> Self`: Padding on the left only, logical px; see `padding_top`.
 - `Styled::gap(self, g: f32) -> Self`: Space between children, along both axes, logical px.
 - `Styled::grow(self, g: f32) -> Self`: Share of the parent's spare main-axis space to take; 0 by default.
-- `Styled::shrink(self, s: f32) -> Self`: How much to give up when the parent is too small; 1 by default, 0 keeps the size.
+- `Styled::shrink(self, s: f32) -> Self`: How much to give up when the parent is too small; 1 by default, 0 keeps the size, e.g. a short label beside a long one in a `row`.
 - `Styled::width(self, w: f32) -> Self`: Fixed width, logical px.
 - `Styled::height(self, h: f32) -> Self`: Fixed height, logical px.
 - `Styled::min_width(self, w: f32) -> Self`: Lower bound on the width, logical px; `min_width(0.0)` lets a flex child shrink below its content.

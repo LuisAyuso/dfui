@@ -166,6 +166,29 @@ fn list_items() {
 }
 
 #[test]
+fn text_in_a_short_row() {
+    // Wrapped by default; `shrink(0.0)` alone pushes "5 min" out, since the
+    // name won't shrink below its longest word; with the name's
+    // `max_lines(1)` the name gives way.
+    let view = || {
+        let line = |name: dfui::widgets::Label, time: dfui::widgets::Label| {
+            row([name.grow(1.0).into(), time.into()]).gap(8.0).into()
+        };
+        let name = || text("Hauptbahnhof Innsbruck");
+        column([
+            line(name(), text("5 min")),
+            line(name(), text("5 min").shrink(0.0)),
+            line(name().max_lines(1), text("5 min").shrink(0.0)),
+        ])
+        .gap(8.0)
+        .padding(8.0)
+        .into()
+    };
+    let mut b = bench(view, (170.0, 150.0));
+    check("text_in_a_short_row", &b.image(SCALE));
+}
+
+#[test]
 fn toggle_off_on() {
     let v = || {
         row([toggle(false).into(), toggle(true).into()])

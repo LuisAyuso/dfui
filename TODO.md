@@ -286,9 +286,11 @@ Layout and widgets:
       `Role::Accent` and the child is centered. `Button::list_item` is the
       list row (surface color, ink text, child stretched and left, a pressed
       label kept in place); `flat`'s docs point to it.
-- [ ] Text in a `row` shrinks and wraps by default: a "5 min" label beside a
-      long name broke onto two lines until `.shrink(0.0)`. Consider labels
-      not shrinking below their width by default, or document it.
+- [x] Text in a `row` shrinks and wraps by default: a "5 min" label beside a
+      long name broke onto two lines until `.shrink(0.0)`. Kept, as in CSS
+      flex (long text should wrap); `text` and `shrink` document the fix,
+      `.shrink(0.0)` on the short label with `.max_lines(1)` on the long one,
+      and the `text_in_a_short_row` golden shows why it takes both.
 - [ ] A fixed `.width()` on a `container` doesn't hold when the content is
       wider (min-content wins), so badges of "3" and "STB" differ in width.
       Flex behavior, but surprising; document next to `width`.

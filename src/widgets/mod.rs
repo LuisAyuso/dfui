@@ -127,7 +127,8 @@ pub trait Styled: Sized {
         self.style_mut().flex_grow = g;
         self
     }
-    /// How much to give up when the parent is too small; 1 by default, 0 keeps the size.
+    /// How much to give up when the parent is too small; 1 by default, 0 keeps
+    /// the size, e.g. a short label beside a long one in a `row`.
     fn shrink(mut self, s: f32) -> Self {
         self.style_mut().flex_shrink = s;
         self
