@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::io::Read;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
@@ -56,33 +57,65 @@ pub struct Store {
     /// By city name; a city missing is still loading.
     pub data: Mutex<HashMap<&'static str, Forecast>>,
     pub hourly: Mutex<HashMap<&'static str, Hourly>>,
+    /// AEMET is refusing requests for now; they're retried each minute.
+    pub throttled: AtomicBool,
 }
 
 pub static STORE: LazyLock<Store> = LazyLock::new(|| Store {
     notifier: Notifier::new(),
     data: Mutex::default(),
     hourly: Mutex::default(),
+    throttled: AtomicBool::new(false),
 });
 
-fn put(city: &'static str, f: Forecast) {
-    STORE.data.lock().unwrap().insert(city, f);
+/// Stores `v` for `city` unless it's an error and the city already has data.
+fn keep<T>(
+    map: &Mutex<HashMap<&'static str, Result<T, String>>>,
+    city: &'static str,
+    v: Result<T, String>,
+) {
+    let mut map = map.lock().unwrap();
+    if v.is_ok() || !map.get(city).is_some_and(Result::is_ok) {
+        map.insert(city, v);
+    }
+    drop(map);
     STORE.notifier.notify();
 }
 
-/// Loads each country's cities in one go: all of Spain's municipalities
-/// from AEMET's daily and hourly batches, Austria from one GeoSphere request.
+fn put(city: &'static str, f: Forecast) {
+    keep(&STORE.data, city, f);
+}
+
+fn put_hours(city: &'static str, h: Hourly) {
+    keep(&STORE.hourly, city, h);
+}
+
+/// Loads each country's cities: Madrid on its own, then all of
+/// Spain's municipalities from AEMET's daily and hourly batches (megabytes,
+/// slow to come); Austria from one GeoSphere request.
 pub fn start(spain: &'static [City], austria: &'static [City]) {
     std::thread::spawn(move || {
+        let first = spain
+            .iter()
+            .find(|c| c.name == "Madrid")
+            .unwrap_or(&spain[0]);
+        let one = |kind| {
+            let json = aemet_get(&format!("{kind}/{}", first.aemet))?;
+            batch_shape(&String::from_utf8_lossy(&json))
+        };
+        put(first.name, one("diaria").and_then(|s| parse_aemet(&s)));
+        put_hours(
+            first.name,
+            one("horaria").and_then(|s| parse_aemet_hourly(&s)),
+        );
         let days = aemet_batch("diaria", "localidad_", spain);
         for (c, f) in spain.iter().zip(days) {
             put(c.name, f.and_then(|s| parse_aemet(&s)));
         }
         let hours = aemet_batch("horaria", "localidad_h_", spain);
         for (c, h) in spain.iter().zip(hours) {
-            let h = h.and_then(|s| parse_aemet_hourly(&s));
-            STORE.hourly.lock().unwrap().insert(c.name, h);
+            put_hours(c.name, h.and_then(|s| parse_aemet_hourly(&s)));
         }
-        STORE.notifier.notify();
     });
     std::thread::spawn(move || {
         let r = geosphere(austria);
@@ -94,7 +127,7 @@ pub fn start(spain: &'static [City], austria: &'static [City]) {
                 }
                 Err(e) => (Err(e.clone()), Err(e.clone())),
             };
-            STORE.hourly.lock().unwrap().insert(c.name, hours);
+            put_hours(c.name, hours);
             put(c.name, days);
         }
     });
@@ -119,7 +152,7 @@ const NO_KEY: &str = "Falta AEMET_API_KEY (opendata.aemet.es)";
 /// AEMET's `prediccion/especifica/municipio/{kind}/todos`, a .tar.gz with a
 /// `{prefix}{INE code}.json` per municipality, as each city's JSON.
 fn aemet_batch(kind: &str, prefix: &str, cities: &[City]) -> Vec<Result<String, String>> {
-    let files = aemet_get(kind).and_then(|gz| {
+    let files = aemet_get(&format!("{kind}/todos")).and_then(|gz| {
         let names: Vec<String> = cities
             .iter()
             .map(|c| format!("{prefix}{}.json", c.aemet))
@@ -165,32 +198,76 @@ fn untar(mut tar: impl Read, wanted: &[String]) -> std::io::Result<HashMap<Strin
     Ok(out)
 }
 
-/// One of AEMET's `todos` batches. It answers with a link to the data;
-/// both requests count to its limit.
-fn aemet_get(kind: &str) -> Result<Vec<u8>, String> {
+/// AEMET's `prediccion/especifica/municipio/{path}`. It answers with a link
+/// to the data; both requests count to its limit.
+fn aemet_get(path: &str) -> Result<Vec<u8>, String> {
     let key = std::env::var("AEMET_API_KEY")
         .ok()
         .or(option_env!("AEMET_KEY_FILE").map(str::to_owned))
         .ok_or(NO_KEY)?;
     let url = format!(
-        "https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/{kind}/todos?api_key={key}"
+        "https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/{path}?api_key={key}"
     );
+    let mut dropped = 0;
     loop {
         let r = get(&url).and_then(|meta| {
             let meta: Value = serde_json::from_str(&meta).unwrap_or_default();
             get_bytes(meta["datos"].as_str().unwrap_or_default())
         });
+        let throttled = matches!(r, Err(ureq::Error::StatusCode(429)));
+        if STORE.throttled.swap(throttled, Ordering::Relaxed) != throttled {
+            STORE.notifier.notify();
+        }
+        use ureq::Error::{ConnectionFailed, HostNotFound, Io, Timeout};
         match r {
             // AEMET's limit is per minute and it says to try again the next one.
-            Err(ureq::Error::StatusCode(429)) => std::thread::sleep(Duration::from_secs(61)),
+            Err(_) if throttled => std::thread::sleep(Duration::from_secs(61)),
+            // The batches are megabytes; a phone's connection may drop mid-way.
+            Err(Io(_) | Timeout(_) | ConnectionFailed | HostNotFound) if dropped < 4 => {
+                dropped += 1;
+                std::thread::sleep(Duration::from_secs(2 << dropped));
+            }
+            Err(e @ (Io(_) | Timeout(_) | ConnectionFailed | HostNotFound)) => {
+                return Err(format!("Sin conexión con AEMET ({e})"));
+            }
             r => return r.map_err(|e| e.to_string()),
         }
     }
 }
 
-/// A number AEMET's batches give as a string ("Ip" is a trace of rain).
+/// A number, which AEMET's batches give as a string ("Ip" is a trace of rain).
 fn num(v: &Value) -> Option<f32> {
-    v.as_str()?.parse().ok()
+    v.as_f64()
+        .map(|x| x as f32)
+        .or_else(|| v.as_str()?.parse().ok())
+}
+
+/// A single municipality's forecast in the batches' shape: under `root`,
+/// keys in snake case, `valor` for `value`.
+fn batch_shape(json: &str) -> Result<String, String> {
+    fn rename(v: Value) -> Value {
+        match v {
+            Value::Array(a) => Value::Array(a.into_iter().map(rename).collect()),
+            Value::Object(o) => (o.into_iter())
+                .map(|(k, v)| {
+                    let k = match k.as_str() {
+                        "value" => "valor".to_owned(),
+                        _ => k.chars().fold(String::new(), |mut s, c| {
+                            if c.is_uppercase() {
+                                s.push('_');
+                            }
+                            s.extend(c.to_lowercase());
+                            s
+                        }),
+                    };
+                    (k, rename(v))
+                })
+                .collect(),
+            v => v,
+        }
+    }
+    let v: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "root": rename(v[0].clone()) }).to_string())
 }
 
 /// Series `k` of `d`; AEMET's batches, converted from XML, give a one-entry
@@ -438,6 +515,19 @@ mod tests {
             (7, Sky::Cloudy, 5.0, 0.0)
         );
         assert_eq!((h[1].sky, h[1].rain), (Sky::Rain, 1.2));
+    }
+
+    #[test]
+    fn single_city_shape() {
+        let json = r#"[{"prediccion":{"dia":[{"fecha":"2026-11-27T00:00:00",
+            "temperatura":{"maxima":14,"minima":3},
+            "estadoCielo":[{"value":"25","periodo":"00-24"}],
+            "probPrecipitacion":[{"value":85,"periodo":"00-24"}]}]}}]"#;
+        let days = parse_aemet(&batch_shape(json).unwrap()).unwrap();
+        assert_eq!(
+            (days[0].sky, days[0].min, days[0].rain.as_str()),
+            (Sky::Rain, 3.0, "85 %")
+        );
     }
 
     #[test]

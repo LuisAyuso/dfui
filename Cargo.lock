@@ -4006,9 +4006,11 @@ dependencies = [
 name = "meteo"
 version = "0.1.0"
 dependencies = [
+ "android_logger",
  "dfui",
  "dfui-map",
  "flate2",
+ "log",
  "serde_json",
  "ureq",
 ]

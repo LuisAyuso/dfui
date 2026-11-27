@@ -6,9 +6,10 @@ forecast table the rest.
 
 ```sh
 cargo run -p meteo --release
+cargo apk run -p meteo --lib --release   # Android, see docs/android.md
 ```
 
-The country shows its regional capitals; tap one (on the map or in the
+It opens on Tirol. The country shows its regional capitals; tap one (on the map or in the
 table) and the map zooms to its region and shows the region's other cities.
 Tap a city for its days, a day for its hours, and the back arrow to go up. Spain needs a free AEMET OpenData key
 (<https://opendata.aemet.es/centrodedescargas/altaUsuario>), built in from
@@ -19,8 +20,9 @@ without it the Spanish cities show the error and Austria still works.
 
 - Spain: AEMET OpenData's `todos` batches, every municipality's daily
   (~7 days, ~2 MB) and hourly (~2 days, ~6 MB) forecast as a .tar.gz; the
-  cities are picked out by INE code. Four requests in all, well under
-  AEMET's per-minute limit; on a 429 it waits a minute and retries.
+  cities are picked out by INE code. Madrid is fetched on its own first, as
+  the batches take a while: eight requests in all. On a 429 it shows a wait
+  bar and retries each minute; a dropped download is retried a few times.
 - Austria: GeoSphere Austria Dataset API, `nwp-v2-1h-1km`, no key; ~60 hourly
   steps, shown as hours and folded into days. GeoSphere's weather symbol codes aren't published,
   so the sky comes from cloud cover, precipitation, snowfall and CAPE.
