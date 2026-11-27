@@ -4003,6 +4003,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "meteo"
+version = "0.1.0"
+dependencies = [
+ "dfui",
+ "dfui-map",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
