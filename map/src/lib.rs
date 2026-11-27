@@ -1027,6 +1027,8 @@ struct View {
     panning: bool,
     /// The last [`Map::focus`] applied.
     focused: Option<(Point, f32)>,
+    /// The last [`Map::fit`] applied.
+    fitted: Option<Rect>,
 }
 
 impl View {
@@ -1043,6 +1045,13 @@ impl View {
                 (self.center, self.scale) = (center, self.scale.max(scale));
             }
             self.focused = map.focus;
+        }
+        if map.fit.is_some() && map.fit != self.fitted {
+            if let Some(b) = map.fit.filter(|b| b.w > 0.0 && b.h > 0.0) {
+                self.center = [b.x + b.w / 2.0, b.y + b.h / 2.0];
+                self.scale = (r.w / b.w).min(r.h / b.h);
+            }
+            self.fitted = map.fit;
         }
     }
 
@@ -1070,6 +1079,7 @@ pub fn map(data: &Rc<MapData>) -> Map {
         },
         start: None,
         focus: None,
+        fit: None,
         on_tap: None,
         overlay: None,
     }
@@ -1084,6 +1094,7 @@ pub struct Map {
     style: Style,
     start: Option<(Point, f32)>,
     focus: Option<(Point, f32)>,
+    fit: Option<Rect>,
     on_tap: Option<Rc<TapFn>>,
     overlay: Option<Rc<OverlayFn>>,
 }
@@ -1100,6 +1111,14 @@ impl Map {
     /// differs from the focus of the last build, e.g. to show a search result.
     pub fn focus(mut self, focus: Option<(Point, f32)>) -> Self {
         self.focus = focus;
+        self
+    }
+
+    /// Fits `bounds` (in [`MapBuilder::point`] units) to the widget, zooming
+    /// in or out, whenever they differ from the last build's, e.g. to show
+    /// one region and then the whole map again.
+    pub fn fit(mut self, bounds: Rect) -> Self {
+        self.fit = Some(bounds);
         self
     }
 
@@ -1624,5 +1643,16 @@ mod tests {
         v.center = [0.0, 0.0];
         v.fit(&focused, r);
         assert_eq!(v.center, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn fit_zooms_out_as_well_as_in() {
+        let data = empty();
+        let r = Rect::new(0.0, 0.0, 100.0, 50.0);
+        let mut v = View::default();
+        v.fit(&map(&data).fit(Rect::new(0.0, 0.0, 10.0, 10.0)), r);
+        assert_eq!((v.center, v.scale), ([5.0, 5.0], 5.0));
+        v.fit(&map(&data).fit(Rect::new(0.0, 0.0, 400.0, 100.0)), r);
+        assert_eq!((v.center, v.scale), ([200.0, 50.0], 0.25));
     }
 }
